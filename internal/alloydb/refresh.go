@@ -1,0 +1,318 @@
+// Copyright 2020 Google LLC
+
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+
+//     https://www.apache.org/licenses/LICENSE-2.0
+
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package alloydb
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"regexp"
+	"time"
+
+	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/internal/adminapi"
+	"cloud.google.com/go/cloudsqlconn/internal/trace"
+	"golang.org/x/time/rate"
+)
+
+var (
+	// Instance connection name is the format <PROJECT>:<REGION>:<CLUSTER>:<INSTANCE>
+	// Additionally, we have to support legacy "domain-scoped" projects (e.g. "google.com:PROJECT")
+	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+):([^:]+)")
+)
+
+// ConnName represents the "instance connection name", in the format "project:region:name". Use the
+// "parseConnName" method to initialize this struct.
+type ConnName struct {
+	Project string
+	Region  string
+	Cluster string
+	Name    string
+}
+
+func (c *ConnName) String() string {
+	return fmt.Sprintf("%s:%s:%s:%s", c.Project, c.Region, c.Cluster, c.Name)
+}
+
+// parseConnName initializes a new ConnName struct.
+func parseConnName(cn string) (ConnName, error) {
+	b := []byte(cn)
+	m := connNameRegex.FindSubmatch(b)
+	if m == nil {
+		err := errtype.NewConfigError(
+			"invalid instance connection name, expected PROJECT:REGION:CLUSTER:INSTANCE",
+			cn,
+		)
+		return ConnName{}, err
+	}
+
+	c := ConnName{
+		Project: string(m[1]),
+		Region:  string(m[3]),
+		Cluster: string(m[4]),
+		Name:    string(m[5]),
+	}
+	return c, nil
+}
+
+// fetchMetadata uses the Cloud SQL Admin APIs get method to retreive the information about a Cloud SQL instance
+// that is used to create secure connections.
+func fetchMetadata(ctx context.Context, cl *adminapi.Client, inst ConnName) (ipAddr string, err error) {
+	var end trace.EndSpanFunc
+	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
+	defer func() { end(err) }()
+	resp, err := cl.InstanceGet(ctx, inst.Project, inst.Region, inst.Cluster, inst.Name)
+	if err != nil {
+		return "", errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
+	}
+	return resp.IPAddress, nil
+}
+
+var errInvalidPEM = errors.New("certificate is not a valid PEM")
+
+func parseCert(cert string) (*x509.Certificate, error) {
+	b, _ := pem.Decode([]byte(cert))
+	if b == nil {
+		return nil, errInvalidPEM
+	}
+	return x509.ParseCertificate(b.Bytes)
+}
+
+// fetchEphemeralCert uses the Cloud SQL Admin API's createEphemeral method to
+// create a signed TLS certificate that authorized to connect via the Cloud SQL
+// instance's serverside proxy. The cert if valid for approximately one hour.
+func fetchEphemeralCert(
+	ctx context.Context,
+	cl *adminapi.Client,
+	inst ConnName,
+	key *rsa.PrivateKey,
+) (cc certChain, err error) {
+	var end trace.EndSpanFunc
+	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchEphemeralCert")
+	defer func() { end(err) }()
+
+	subj := pkix.Name{
+		CommonName:         "alloydb-proxy",
+		Country:            []string{"US"},
+		Province:           []string{"CA"},
+		Locality:           []string{"Sunnyvale"},
+		Organization:       []string{"Google LLC"},
+		OrganizationalUnit: []string{"Cloud"},
+	}
+	tmpl := x509.CertificateRequest{
+		Subject:            subj,
+		SignatureAlgorithm: x509.SHA256WithRSA,
+	}
+	csrBytes, err := x509.CreateCertificateRequest(rand.Reader, &tmpl, key)
+	if err != nil {
+		return certChain{}, err
+	}
+	buf := &bytes.Buffer{}
+	pem.Encode(buf, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
+	resp, err := cl.GenerateClientCert(ctx, inst.Project, inst.Region, inst.Cluster, buf.Bytes())
+	if err != nil {
+		return certChain{}, errtype.NewRefreshError(
+			"create ephemeral cert failed",
+			inst.String(),
+			err,
+		)
+	}
+	if len(resp.PemCertificateChain) != 2 {
+		return certChain{}, errtype.NewRefreshError(
+			"missing instance and root certificates",
+			inst.String(),
+			err,
+		)
+	}
+	rc, err := parseCert(resp.PemCertificateChain[1]) // root cert
+	if err != nil {
+		return certChain{}, errtype.NewRefreshError(
+			"failed to parse root cert",
+			inst.String(),
+			err,
+		)
+	}
+	ic, err := parseCert(resp.PemCertificateChain[0]) // instance cert
+	if err != nil {
+		return certChain{}, errtype.NewRefreshError(
+			"failed to parse instance cert",
+			inst.String(),
+			err,
+		)
+	}
+	c, err := parseCert(resp.PemCertificate) // client cert
+	if err != nil {
+		return certChain{}, errtype.NewRefreshError(
+			"failed to parse instance cert",
+			inst.String(),
+			err,
+		)
+	}
+
+	return certChain{
+		root:     rc,
+		instance: ic,
+		client:   c,
+	}, nil
+}
+
+// createTLSConfig returns a *tls.Config for connecting securely to the Cloud SQL instance.
+func createTLSConfig(inst ConnName, cc certChain, k *rsa.PrivateKey) *tls.Config {
+	certs := x509.NewCertPool()
+	certs.AddCert(cc.instance)
+	certs.AddCert(cc.root)
+
+	cfg := &tls.Config{
+		ServerName: "client.alloydb",
+		Certificates: []tls.Certificate{tls.Certificate{
+			Certificate: [][]byte{cc.client.Raw},
+			PrivateKey:  k,
+			Leaf:        cc.client,
+		}},
+		RootCAs:    certs,
+		MinVersion: tls.VersionTLS13,
+	}
+	return cfg
+}
+
+// newRefresher creates a Refresher.
+func newRefresher(
+	client *adminapi.Client,
+	timeout time.Duration,
+	interval time.Duration,
+	burst int,
+	dialerID string,
+) *refresher {
+	return &refresher{
+		client:        client,
+		timeout:       timeout,
+		clientLimiter: rate.NewLimiter(rate.Every(interval), burst),
+		dialerID:      dialerID,
+	}
+}
+
+// refresher manages the SQL Admin API access to instance metadata and to
+// ephemeral certificates.
+type refresher struct {
+	// client provides access to the AlloyDB Admin API
+	client *adminapi.Client
+
+	// timeout is the maximum amount of time a refresh operation should be allowed to take.
+	timeout time.Duration
+
+	// dialerID is the unique ID of the associated dialer.
+	dialerID string
+
+	// clientLimiter limits the number of refreshes.
+	clientLimiter *rate.Limiter
+}
+
+type refreshResult struct {
+	instanceIPAddr string
+	conf           *tls.Config
+	expiry         time.Time
+}
+
+type certChain struct {
+	root     *x509.Certificate
+	instance *x509.Certificate
+	client   *x509.Certificate
+}
+
+func (r *refresher) performRefresh(ctx context.Context, cn ConnName, k *rsa.PrivateKey) (res refreshResult, err error) {
+	var refreshEnd trace.EndSpanFunc
+	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.RefreshConnection",
+		trace.AddInstanceName(cn.String()),
+	)
+	defer func() {
+		go trace.RecordRefreshResult(context.Background(), cn.String(), r.dialerID, err)
+		refreshEnd(err)
+	}()
+
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+	if ctx.Err() == context.Canceled {
+		return refreshResult{}, ctx.Err()
+	}
+
+	// avoid refreshing too often to try not to tax the SQL Admin API quotas
+	err = r.clientLimiter.Wait(ctx)
+	if err != nil {
+		return refreshResult{}, errtype.NewDialError(
+			"refresh was throttled until context expired",
+			cn.String(),
+			nil,
+		)
+	}
+
+	type ipRes struct {
+		ipAddr string
+		err    error
+	}
+	ipCh := make(chan ipRes, 1)
+	go func() {
+		defer close(ipCh)
+		addr, err := fetchMetadata(ctx, r.client, cn)
+		ipCh <- ipRes{ipAddr: addr, err: err}
+	}()
+
+	type certRes struct {
+		cc  certChain
+		err error
+	}
+	certCh := make(chan certRes, 1)
+	go func() {
+		defer close(certCh)
+		cc, err := fetchEphemeralCert(ctx, r.client, cn, k)
+		certCh <- certRes{cc: cc, err: err}
+	}()
+
+	var ipAddr string
+	select {
+	case r := <-ipCh:
+		if r.err != nil {
+			return refreshResult{}, fmt.Errorf("failed to get instance IP address: %w", r.err)
+		}
+		ipAddr = r.ipAddr
+	case <-ctx.Done():
+		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
+	}
+
+	var cc certChain
+	select {
+	case r := <-certCh:
+		if r.err != nil {
+			return refreshResult{}, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
+		}
+		cc = r.cc
+	case <-ctx.Done():
+		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
+	}
+
+	c := createTLSConfig(cn, cc, k)
+	var expiry time.Time
+	// This should never not be the case, but we check to avoid a potential nil-pointer
+	if len(c.Certificates) > 0 {
+		expiry = c.Certificates[0].Leaf.NotAfter
+	}
+	return refreshResult{instanceIPAddr: ipAddr, conf: c, expiry: expiry}, nil
+}

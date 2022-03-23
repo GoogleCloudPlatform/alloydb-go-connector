@@ -1,0 +1,125 @@
+package adminapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+
+	"google.golang.org/api/googleapi"
+	"google.golang.org/api/option"
+	htransport "google.golang.org/api/transport/http"
+)
+
+type InstanceGetResponse struct {
+	ServerResponse googleapi.ServerResponse
+	Name           string `json:"name"`
+	State          string `json:"state"`
+	IPAddress      string `json:"ipAddress"`
+}
+
+type GenerateClientCertificateRequest struct {
+	PemCSR string `json:"pemCsr"`
+}
+
+type GenerateClientCertificateResponse struct {
+	ServerResponse      googleapi.ServerResponse
+	PemCertificate      string   `json:"pemCertificate"`
+	PemCertificateChain []string `json:"pemCertificateChain"`
+}
+
+type Client struct {
+	client   *http.Client
+	endpoint string
+}
+
+func NewClient(ctx context.Context, opts ...option.ClientOption) (*Client, error) {
+	var os []option.ClientOption
+	os = append(opts, option.WithScopes(
+		"https://www.googleapis.com/auth/cloud-platform",
+	))
+	client, endpoint, err := htransport.NewClient(ctx, os...)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{client: client, endpoint: endpoint}, nil
+}
+
+func (a *Client) InstanceGet(ctx context.Context, project, region, cluster, instance string) (InstanceGetResponse, error) {
+	u := fmt.Sprintf(
+		"%s/v1alpha1/projects/%s/locations/%s/clusters/%s/instances/%s",
+		a.endpoint, project, region, cluster, instance,
+	)
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return InstanceGetResponse{}, err
+	}
+	res, err := a.client.Do(req.WithContext(ctx))
+	if err != nil {
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+		default:
+		}
+		return InstanceGetResponse{}, err
+	}
+	if res != nil && res.StatusCode == http.StatusNotModified {
+		if res.Body != nil {
+			res.Body.Close()
+		}
+		return InstanceGetResponse{}, &googleapi.Error{
+			Code:   res.StatusCode,
+			Header: res.Header,
+		}
+	}
+	if err != nil {
+		return InstanceGetResponse{}, err
+	}
+	defer res.Body.Close()
+	ret := InstanceGetResponse{
+		ServerResponse: googleapi.ServerResponse{
+			Header:         res.Header,
+			HTTPStatusCode: res.StatusCode,
+		},
+	}
+	if err := json.NewDecoder(res.Body).Decode(&ret); err != nil {
+		return InstanceGetResponse{}, err
+	}
+	return ret, nil
+}
+
+func (a *Client) GenerateClientCert(ctx context.Context, project, region, cluster string, csr []byte) (GenerateClientCertificateResponse, error) {
+	u := fmt.Sprintf(
+		"%s/v1alpha1/projects/%s/locations/%s/clusters/%s:generateClientCertificate",
+		a.endpoint, project, region, cluster,
+	)
+	body, err := json.Marshal(GenerateClientCertificateRequest{PemCSR: string(csr)})
+	if err != nil {
+		return GenerateClientCertificateResponse{}, err
+	}
+	req, err := http.NewRequest("POST", u, bytes.NewReader(body))
+	if err != nil {
+		return GenerateClientCertificateResponse{}, err
+	}
+	res, err := a.client.Do(req.WithContext(ctx))
+	if err != nil {
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+		default:
+		}
+		return GenerateClientCertificateResponse{}, err
+	}
+	defer res.Body.Close()
+	ret := GenerateClientCertificateResponse{
+		ServerResponse: googleapi.ServerResponse{
+			Header:         res.Header,
+			HTTPStatusCode: res.StatusCode,
+		},
+	}
+	if err := json.NewDecoder(res.Body).Decode(&ret); err != nil {
+		return GenerateClientCertificateResponse{}, err
+	}
+	return ret, nil
+}
