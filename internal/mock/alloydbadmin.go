@@ -1,4 +1,4 @@
-package mockapi
+package mock
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/internal/adminapi"
+	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
 )
 
 type Option func(*FakeInstance)
@@ -202,7 +202,7 @@ func CreateEphemeralSuccess(i FakeInstance, ct int) *Request {
 				http.Error(resp, fmt.Errorf("unable to read body: %w", err).Error(), http.StatusBadRequest)
 				return
 			}
-			var rreq adminapi.GenerateClientCertificateRequest
+			var rreq alloydb.GenerateClientCertificateRequest
 			err = json.Unmarshal(b, &rreq)
 			if err != nil {
 				http.Error(resp, fmt.Errorf("invalid or unexpected json: %w", err).Error(), http.StatusBadRequest)
@@ -245,7 +245,7 @@ func CreateEphemeralSuccess(i FakeInstance, ct int) *Request {
 			caPEM := &bytes.Buffer{}
 			pem.Encode(caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: i.rootCACert.Raw})
 
-			rresp := adminapi.GenerateClientCertificateResponse{
+			rresp := alloydb.GenerateClientCertificateResponse{
 				PemCertificate:      certPEM.String(),
 				PemCertificateChain: []string{instancePEM.String(), caPEM.String()},
 			}

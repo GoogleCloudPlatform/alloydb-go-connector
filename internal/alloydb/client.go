@@ -1,4 +1,4 @@
-package adminapi
+package alloydb
 
 import (
 	"bytes"

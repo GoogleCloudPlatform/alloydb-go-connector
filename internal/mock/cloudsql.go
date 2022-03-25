@@ -82,7 +82,7 @@ func WithPrivateIP(addr string) FakeCSQLInstanceOption {
 }
 
 // WithCertExpiry sets the server certificate's expiration to t.
-func WithCertExpiry(t time.Time) FakeCSQLInstanceOption {
+func DELETEWithCertExpiry(t time.Time) FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
 		f.Cert.NotAfter = t
 	}
