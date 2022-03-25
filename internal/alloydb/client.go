@@ -60,16 +60,16 @@ func NewClient(ctx context.Context, opts ...option.ClientOption) (*Client, error
 	return &Client{client: client, endpoint: endpoint}, nil
 }
 
-func (a *Client) InstanceGet(ctx context.Context, project, region, cluster, instance string) (InstanceGetResponse, error) {
+func (c *Client) InstanceGet(ctx context.Context, project, region, cluster, instance string) (InstanceGetResponse, error) {
 	u := fmt.Sprintf(
 		"%s/v1alpha1/projects/%s/locations/%s/clusters/%s/instances/%s",
-		a.endpoint, project, region, cluster, instance,
+		c.endpoint, project, region, cluster, instance,
 	)
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		return InstanceGetResponse{}, err
 	}
-	res, err := a.client.Do(req.WithContext(ctx))
+	res, err := c.client.Do(req.WithContext(ctx))
 	if err != nil {
 		select {
 		case <-ctx.Done():
@@ -103,10 +103,10 @@ func (a *Client) InstanceGet(ctx context.Context, project, region, cluster, inst
 	return ret, nil
 }
 
-func (a *Client) GenerateClientCert(ctx context.Context, project, region, cluster string, csr []byte) (GenerateClientCertificateResponse, error) {
+func (c *Client) GenerateClientCert(ctx context.Context, project, region, cluster string, csr []byte) (GenerateClientCertificateResponse, error) {
 	u := fmt.Sprintf(
 		"%s/v1alpha1/projects/%s/locations/%s/clusters/%s:generateClientCertificate",
-		a.endpoint, project, region, cluster,
+		c.endpoint, project, region, cluster,
 	)
 	body, err := json.Marshal(GenerateClientCertificateRequest{PemCSR: string(csr)})
 	if err != nil {
@@ -116,7 +116,7 @@ func (a *Client) GenerateClientCert(ctx context.Context, project, region, cluste
 	if err != nil {
 		return GenerateClientCertificateResponse{}, err
 	}
-	res, err := a.client.Do(req.WithContext(ctx))
+	res, err := c.client.Do(req.WithContext(ctx))
 	if err != nil {
 		select {
 		case <-ctx.Done():
