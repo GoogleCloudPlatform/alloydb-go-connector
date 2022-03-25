@@ -39,21 +39,21 @@ var (
 	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+):([^:]+)")
 )
 
-// ConnName represents the "instance connection name", in the format "project:region:name". Use the
+// connName represents the "instance connection name", in the format "project:region:name". Use the
 // "parseConnName" method to initialize this struct.
-type ConnName struct {
-	Project string
-	Region  string
-	Cluster string
-	Name    string
+type connName struct {
+	project string
+	region  string
+	cluster string
+	name    string
 }
 
-func (c *ConnName) String() string {
-	return fmt.Sprintf("%s:%s:%s:%s", c.Project, c.Region, c.Cluster, c.Name)
+func (c *connName) String() string {
+	return fmt.Sprintf("%s:%s:%s:%s", c.project, c.region, c.cluster, c.name)
 }
 
 // parseConnName initializes a new ConnName struct.
-func parseConnName(cn string) (ConnName, error) {
+func parseConnName(cn string) (connName, error) {
 	b := []byte(cn)
 	m := connNameRegex.FindSubmatch(b)
 	if m == nil {
@@ -61,14 +61,14 @@ func parseConnName(cn string) (ConnName, error) {
 			"invalid instance connection name, expected PROJECT:REGION:CLUSTER:INSTANCE",
 			cn,
 		)
-		return ConnName{}, err
+		return connName{}, err
 	}
 
-	c := ConnName{
-		Project: string(m[1]),
-		Region:  string(m[3]),
-		Cluster: string(m[4]),
-		Name:    string(m[5]),
+	c := connName{
+		project: string(m[1]),
+		region:  string(m[3]),
+		cluster: string(m[4]),
+		name:    string(m[5]),
 	}
 	return c, nil
 }
@@ -126,7 +126,7 @@ func (r *refreshOperation) IsValid() bool {
 // the Cloud SQL Admin API. It automatically refreshes the required information approximately 5 minutes
 // before the previous certificate expires (every 55 minutes).
 type Instance struct {
-	ConnName
+	connName
 	key *rsa.PrivateKey
 	r   refresher
 
@@ -162,7 +162,7 @@ func NewInstance(
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &Instance{
-		ConnName: cn,
+		connName: cn,
 		key:      key,
 		// TODO: we'll update this when we do instance
 		// r: newRefresher(
@@ -254,7 +254,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 	res.timer = time.AfterFunc(d, func() {
 		// TODO: fix this
 		// res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key)
-		r, err := i.r.performRefresh(i.ctx, i.ConnName, i.key)
+		r, err := i.r.performRefresh(i.ctx, i.connName, i.key)
 		_ = r
 		_ = err
 		close(res.ready)
@@ -290,5 +290,5 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 
 // String returns the instance's connection name.
 func (i *Instance) String() string {
-	return i.ConnName.String()
+	return i.connName.String()
 }

@@ -35,11 +35,11 @@ import (
 
 // fetchMetadata uses the Cloud SQL Admin APIs get method to retreive the information about a Cloud SQL instance
 // that is used to create secure connections.
-func fetchMetadata(ctx context.Context, cl *alloydb.Client, inst ConnName) (ipAddr string, err error) {
+func fetchMetadata(ctx context.Context, cl *alloydb.Client, inst connName) (ipAddr string, err error) {
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
 	defer func() { end(err) }()
-	resp, err := cl.InstanceGet(ctx, inst.Project, inst.Region, inst.Cluster, inst.Name)
+	resp, err := cl.InstanceGet(ctx, inst.project, inst.region, inst.cluster, inst.name)
 	if err != nil {
 		return "", errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
@@ -62,7 +62,7 @@ func parseCert(cert string) (*x509.Certificate, error) {
 func fetchEphemeralCert(
 	ctx context.Context,
 	cl *alloydb.Client,
-	inst ConnName,
+	inst connName,
 	key *rsa.PrivateKey,
 ) (cc certChain, err error) {
 	var end trace.EndSpanFunc
@@ -87,7 +87,7 @@ func fetchEphemeralCert(
 	}
 	buf := &bytes.Buffer{}
 	pem.Encode(buf, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
-	resp, err := cl.GenerateClientCert(ctx, inst.Project, inst.Region, inst.Cluster, buf.Bytes())
+	resp, err := cl.GenerateClientCert(ctx, inst.project, inst.region, inst.cluster, buf.Bytes())
 	if err != nil {
 		return certChain{}, errtype.NewRefreshError(
 			"create ephemeral cert failed",
@@ -135,7 +135,7 @@ func fetchEphemeralCert(
 }
 
 // createTLSConfig returns a *tls.Config for connecting securely to the Cloud SQL instance.
-func createTLSConfig(inst ConnName, cc certChain, k *rsa.PrivateKey) *tls.Config {
+func createTLSConfig(inst connName, cc certChain, k *rsa.PrivateKey) *tls.Config {
 	certs := x509.NewCertPool()
 	certs.AddCert(cc.instance)
 	certs.AddCert(cc.root)
@@ -197,7 +197,7 @@ type certChain struct {
 	client   *x509.Certificate
 }
 
-func (r *refresher) performRefresh(ctx context.Context, cn ConnName, k *rsa.PrivateKey) (res refreshResult, err error) {
+func (r *refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (res refreshResult, err error) {
 	var refreshEnd trace.EndSpanFunc
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.RefreshConnection",
 		trace.AddInstanceName(cn.String()),

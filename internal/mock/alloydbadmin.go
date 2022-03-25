@@ -19,21 +19,21 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
 )
 
-type Option func(*FakeInstance)
+type Option func(*FakeAlloyDBInstance)
 
 func WithIPAddr(addr string) Option {
-	return func(f *FakeInstance) {
+	return func(f *FakeAlloyDBInstance) {
 		f.ipAddr = addr
 	}
 }
 
 func WithCertExpiry(expiry time.Time) Option {
-	return func(f *FakeInstance) {
+	return func(f *FakeAlloyDBInstance) {
 		f.certExpiry = expiry
 	}
 }
 
-type FakeInstance struct {
+type FakeAlloyDBInstance struct {
 	project string
 	region  string
 	cluster string
@@ -62,7 +62,7 @@ var (
 	instanceCAKey = mustGenerateKey()
 )
 
-func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeInstance {
+func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBInstance {
 	rootTemplate := &x509.Certificate{
 		SerialNumber: &big.Int{},
 		Subject: pkix.Name{
@@ -106,7 +106,7 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeInstance
 		panic(err)
 	}
 
-	f := FakeInstance{
+	f := FakeAlloyDBInstance{
 		project:      proj,
 		region:       reg,
 		cluster:      clust,
@@ -123,7 +123,7 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeInstance
 	return f
 }
 
-func (f FakeInstance) clientCert() *x509.Certificate {
+func (f FakeAlloyDBInstance) clientCert() *x509.Certificate {
 	return &x509.Certificate{
 		SerialNumber: &big.Int{},
 		Subject: pkix.Name{
@@ -167,7 +167,7 @@ func (r *Request) matches(hR *http.Request) bool {
 
 // InstanceGetSuccess returns a Request that responds to the `instance.get`
 // AlloyDB Admin API endpoint.
-func InstanceGetSuccess(i FakeInstance, ct int) *Request {
+func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
 	instanceName := fmt.Sprintf(
 		"projects/%s/locations/%s/clusters/%s/instances/%s",
 		i.project, i.region, i.cluster, i.name,
@@ -187,7 +187,7 @@ func InstanceGetSuccess(i FakeInstance, ct int) *Request {
 
 // CreateEphemeralSuccess returns a Request that responds to the
 // `generateEphemeralCert` AlloyDB Admin API endpoint.
-func CreateEphemeralSuccess(i FakeInstance, ct int) *Request {
+func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 	return &Request{
 		reqMethod: http.MethodPost,
 		reqPath: fmt.Sprintf(

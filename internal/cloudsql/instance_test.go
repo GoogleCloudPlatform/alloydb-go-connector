@@ -42,26 +42,26 @@ func TestParseConnName(t *testing.T) {
 	tcs := []struct {
 		desc string
 		in   string
-		want ConnName
+		want connName
 	}{
 		{
 			desc: "vanilla instance connection name",
 			in:   "proj:reg:clust:name",
-			want: ConnName{
-				Project: "proj",
-				Region:  "reg",
-				Cluster: "clust",
-				Name:    "name",
+			want: connName{
+				project: "proj",
+				region:  "reg",
+				cluster: "clust",
+				name:    "name",
 			},
 		},
 		{
 			desc: "with legacy domain-scoped project",
 			in:   "google.com:proj:reg:clust:name",
-			want: ConnName{
-				Project: "google.com:proj",
-				Region:  "reg",
-				Cluster: "clust",
-				Name:    "name",
+			want: connName{
+				project: "google.com:proj",
+				region:  "reg",
+				cluster: "clust",
+				name:    "name",
 			},
 		},
 	}
