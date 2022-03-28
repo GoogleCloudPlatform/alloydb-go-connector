@@ -16,9 +16,11 @@ package cloudsql
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	errtype "cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"google.golang.org/api/option"
@@ -41,7 +43,6 @@ func TestRefresh(t *testing.T) {
 		mock.InstanceGetSuccess(inst, 1),
 		mock.CreateEphemeralSuccess(inst, 1),
 	)
-	_ = mc
 	defer func() {
 		if err := cleanup(); err != nil {
 			t.Fatalf("%v", err)
@@ -70,5 +71,57 @@ func TestRefresh(t *testing.T) {
 	}
 	if got := res.conf.ServerName; "client.alloydb" != got {
 		t.Fatalf("server name mismatch, want = %v, got = %v", "client.alloydb", got)
+	}
+}
+
+func TestRefreshFailsFast(t *testing.T) {
+	wantConnName := "my-project:my-region:my-cluster:my-instance"
+	cn, err := parseConnName(wantConnName)
+	if err != nil {
+		t.Fatalf("parseConnName(%s)failed : %v", cn, err)
+	}
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+	)
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	cl, err := alloydb.NewClient(
+		context.Background(),
+		option.WithHTTPClient(mc),
+		option.WithEndpoint(url),
+	)
+	if err != nil {
+		t.Fatalf("admin API client error: %v", err)
+	}
+	r := newRefresher(cl, time.Hour, 30*time.Second, 1, "some-id")
+
+	_, err = r.performRefresh(context.Background(), cn, RSAKey)
+	if err != nil {
+		t.Fatalf("expected no error, got = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// context is canceled
+	_, err = r.performRefresh(ctx, cn, RSAKey)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled error, got = %v", err)
+	}
+
+	// force the rate limiter to throttle with a timed out context
+	ctx, _ = context.WithTimeout(context.Background(), time.Millisecond)
+	_, err = r.performRefresh(ctx, cn, RSAKey)
+
+	var wantErr *errtype.DialError
+	if !errors.As(err, &wantErr) {
+		t.Fatalf("when refresh is throttled, want = %T, got = %v", wantErr, err)
 	}
 }

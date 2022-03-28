@@ -16,8 +16,10 @@ package mock
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -28,6 +30,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"testing"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
@@ -59,8 +62,11 @@ type FakeAlloyDBInstance struct {
 	rootCACert *x509.Certificate
 	rootKey    *rsa.PrivateKey
 
-	instanceCert *x509.Certificate
-	instanceKey  *rsa.PrivateKey
+	intermedCert *x509.Certificate
+	intermedKey  *rsa.PrivateKey
+
+	serverCert *x509.Certificate
+	serverKey  *rsa.PrivateKey
 }
 
 func mustGenerateKey() *rsa.PrivateKey {
@@ -73,7 +79,8 @@ func mustGenerateKey() *rsa.PrivateKey {
 
 var (
 	rootCAKey     = mustGenerateKey()
-	instanceCAKey = mustGenerateKey()
+	intermedCAKey = mustGenerateKey()
+	serverKey     = mustGenerateKey()
 )
 
 func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBInstance {
@@ -99,7 +106,9 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 	if err != nil {
 		panic(err)
 	}
-	instanceTemplate := &x509.Certificate{
+	// create an intermediate CA, signed by the root
+	// This CA signs all client certs.
+	intermedTemplate := &x509.Certificate{
 		SerialNumber: &big.Int{},
 		Subject: pkix.Name{
 			CommonName: "client.alloydb",
@@ -110,12 +119,31 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 	}
-	signedInstance, err := x509.CreateCertificate(
-		rand.Reader, instanceTemplate, rootCert, &instanceCAKey.PublicKey, rootCAKey)
+	signedIntermed, err := x509.CreateCertificate(
+		rand.Reader, intermedTemplate, rootCert, &intermedCAKey.PublicKey, rootCAKey)
 	if err != nil {
 		panic(err)
 	}
-	instanceCert, err := x509.ParseCertificate(signedInstance)
+	intermedCert, err := x509.ParseCertificate(signedIntermed)
+	if err != nil {
+		panic(err)
+	}
+	// create a server certificate, signed by the root
+	// This is what the server side proxy uses.
+	serverTemplate := &x509.Certificate{
+		SerialNumber: &big.Int{},
+		Subject: pkix.Name{
+			CommonName: "server.alloydb",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().AddDate(0, 0, 1),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+	}
+	signedServer, err := x509.CreateCertificate(
+		rand.Reader, serverTemplate, rootCert, &serverKey.PublicKey, rootCAKey)
+	serverCert, err := x509.ParseCertificate(signedServer)
 	if err != nil {
 		panic(err)
 	}
@@ -125,10 +153,14 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 		region:       reg,
 		cluster:      clust,
 		name:         name,
+		ipAddr:       "10.0.0.1",
+		certExpiry:   time.Now().Add(24 * time.Hour),
 		rootCACert:   rootCert,
 		rootKey:      rootCAKey,
-		instanceCert: instanceCert,
-		instanceKey:  instanceCAKey,
+		intermedCert: intermedCert,
+		intermedKey:  intermedCAKey,
+		serverCert:   serverCert,
+		serverKey:    serverKey,
 	}
 
 	for _, o := range opts {
@@ -239,7 +271,7 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 				PublicKeyAlgorithm: csr.PublicKeyAlgorithm,
 				PublicKey:          csr.PublicKey,
 				SerialNumber:       &big.Int{},
-				Issuer:             i.instanceCert.Subject,
+				Issuer:             i.intermedCert.Subject,
 				Subject:            csr.Subject,
 				NotBefore:          time.Now(),
 				NotAfter:           i.certExpiry,
@@ -248,13 +280,13 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 			}
 
 			cert, err := x509.CreateCertificate(
-				rand.Reader, template, i.instanceCert, template.PublicKey, i.instanceKey)
+				rand.Reader, template, i.intermedCert, template.PublicKey, i.intermedKey)
 
 			certPEM := &bytes.Buffer{}
 			pem.Encode(certPEM, &pem.Block{Type: "CERTIFICATE", Bytes: cert})
 
 			instancePEM := &bytes.Buffer{}
-			pem.Encode(instancePEM, &pem.Block{Type: "CERTIFICATE", Bytes: i.instanceCert.Raw})
+			pem.Encode(instancePEM, &pem.Block{Type: "CERTIFICATE", Bytes: i.intermedCert.Raw})
 
 			caPEM := &bytes.Buffer{}
 			pem.Encode(caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: i.rootCACert.Raw})
@@ -306,4 +338,56 @@ func HTTPClient(requests ...*Request) (*http.Client, string, func() error) {
 
 	return s.Client(), s.URL, cleanup
 
+}
+
+// StartServerProxy starts a fake server proxy and listens on the provided port
+// on all interfaces, configured with TLS as specified by the
+// FakeAlloyDBInstance. Callers should invoke the returned function to clean up
+// all resources.
+func StartServerProxy(t *testing.T, i FakeAlloyDBInstance) func() {
+	certPem := &bytes.Buffer{}
+	pem.Encode(certPem, &pem.Block{Type: "CERTIFICATE", Bytes: i.serverCert.Raw})
+
+	keyPem := &bytes.Buffer{}
+	pem.Encode(keyPem, &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(i.serverKey),
+	})
+
+	serverCert, err := tls.X509KeyPair(certPem.Bytes(), keyPem.Bytes())
+	if err != nil {
+		t.Fatalf("failed to create X.509 Key Pair: %v", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(i.rootCACert)
+	ln, err := tls.Listen("tcp", ":5433", &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ServerName:   "FIXME", // FIXME: this will become the instance UID
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    pool,
+	})
+	if err != nil {
+		t.Fatalf("failed to start listener: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				conn, err := ln.Accept()
+				if err != nil {
+					t.Logf("fake server proxy will close listener after error: %v", err)
+					return
+				}
+				conn.Write([]byte(i.name))
+				conn.Close()
+			}
+		}
+	}()
+	return func() {
+		ln.Close()
+		cancel()
+	}
 }

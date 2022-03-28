@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 
 	"google.golang.org/api/googleapi"
@@ -44,7 +45,8 @@ type GenerateClientCertificateResponse struct {
 }
 
 type Client struct {
-	client   *http.Client
+	client *http.Client
+	// endpoint is the base URL for the AlloyDB admin API.
 	endpoint string
 }
 
@@ -65,26 +67,28 @@ func (c *Client) InstanceGet(ctx context.Context, project, region, cluster, inst
 		"%s/v1alpha1/projects/%s/locations/%s/clusters/%s/instances/%s",
 		c.endpoint, project, region, cluster, instance,
 	)
-	req, err := http.NewRequest("GET", u, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return InstanceGetResponse{}, err
 	}
-	res, err := c.client.Do(req.WithContext(ctx))
+	res, err := c.client.Do(req)
 	if err != nil {
-		select {
-		case <-ctx.Done():
-			err = ctx.Err()
-		default:
-		}
 		return InstanceGetResponse{}, err
 	}
 	if res != nil && res.StatusCode == http.StatusNotModified {
+		var body []byte
 		if res.Body != nil {
-			res.Body.Close()
+			defer res.Body.Close()
+			body, err = ioutil.ReadAll(res.Body)
+			if err != nil {
+				return InstanceGetResponse{}, err
+			}
 		}
+
 		return InstanceGetResponse{}, &googleapi.Error{
 			Code:   res.StatusCode,
 			Header: res.Header,
+			Body:   string(body),
 		}
 	}
 	if err != nil {
@@ -112,17 +116,12 @@ func (c *Client) GenerateClientCert(ctx context.Context, project, region, cluste
 	if err != nil {
 		return GenerateClientCertificateResponse{}, err
 	}
-	req, err := http.NewRequest("POST", u, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", u, bytes.NewReader(body))
 	if err != nil {
 		return GenerateClientCertificateResponse{}, err
 	}
 	res, err := c.client.Do(req.WithContext(ctx))
 	if err != nil {
-		select {
-		case <-ctx.Done():
-			err = ctx.Err()
-		default:
-		}
 		return GenerateClientCertificateResponse{}, err
 	}
 	defer res.Body.Close()

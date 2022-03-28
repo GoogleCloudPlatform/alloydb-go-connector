@@ -95,6 +95,8 @@ func fetchEphemeralCert(
 			err,
 		)
 	}
+	// There should always be two certs in the chain. If this fails, the API has
+	// broken its contract with the client.
 	if len(resp.PemCertificateChain) != 2 {
 		return certChain{}, errtype.NewRefreshError(
 			"missing instance and root certificates",
@@ -110,10 +112,10 @@ func fetchEphemeralCert(
 			err,
 		)
 	}
-	ic, err := parseCert(resp.PemCertificateChain[0]) // instance cert
+	ic, err := parseCert(resp.PemCertificateChain[0]) // intermediate cert
 	if err != nil {
 		return certChain{}, errtype.NewRefreshError(
-			"failed to parse instance cert",
+			"failed to parse intermediate cert",
 			inst.String(),
 			err,
 		)
@@ -121,36 +123,67 @@ func fetchEphemeralCert(
 	c, err := parseCert(resp.PemCertificate) // client cert
 	if err != nil {
 		return certChain{}, errtype.NewRefreshError(
-			"failed to parse instance cert",
+			"failed to parse client cert",
 			inst.String(),
 			err,
 		)
 	}
 
 	return certChain{
-		root:     rc,
-		instance: ic,
-		client:   c,
+		root:         rc,
+		intermediate: ic,
+		client:       c,
 	}, nil
 }
 
 // createTLSConfig returns a *tls.Config for connecting securely to the Cloud SQL instance.
 func createTLSConfig(inst connName, cc certChain, k *rsa.PrivateKey) *tls.Config {
 	certs := x509.NewCertPool()
-	certs.AddCert(cc.instance)
 	certs.AddCert(cc.root)
 
-	cfg := &tls.Config{
-		ServerName: "client.alloydb",
+	return &tls.Config{
+		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return errtype.NewDialError("no certificate to verify", inst.String(), nil)
+			}
+			chain, err := x509.ParseCertificate(rawCerts[1])
+			if err != nil {
+				return errtype.NewDialError("failed to parse X.509 certificate", inst.String(), err)
+			}
+
+			opts := x509.VerifyOptions{Roots: certs}
+			if _, err = chain.Verify(opts); err != nil {
+				return errtype.NewDialError("failed to verify certificate", inst.String(), err)
+			}
+
+			// TODO: restore the server name check when it becomes the instance
+			// UID
+			// server, err := x509.ParseCertificate(rawCerts[0])
+			// if err != nil {
+			//  return errtype.NewDialError("failed to parse X.509 certificate", inst.String(), err)
+			// }
+			// serverCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Raw})
+			// os.WriteFile("server.pem", serverCert, 0666)
+			// serverName := "FIXME:INSTANCE_UID"
+			// if server.Subject.CommonName != serverName {
+			//  return errtype.NewDialError(
+			//      fmt.Sprintf("certificate had CN %q, expected %q",
+			//          chain.Subject.CommonName, serverName),
+			//      inst.String(),
+			//      nil,
+			//  )
+			// }
+			return nil
+		},
 		Certificates: []tls.Certificate{tls.Certificate{
-			Certificate: [][]byte{cc.client.Raw},
+			Certificate: [][]byte{cc.client.Raw, cc.intermediate.Raw},
 			PrivateKey:  k,
 			Leaf:        cc.client,
 		}},
 		RootCAs:    certs,
 		MinVersion: tls.VersionTLS13,
 	}
-	return cfg
 }
 
 // newRefresher creates a Refresher.
@@ -192,9 +225,9 @@ type refreshResult struct {
 }
 
 type certChain struct {
-	root     *x509.Certificate
-	instance *x509.Certificate
-	client   *x509.Certificate
+	root         *x509.Certificate
+	intermediate *x509.Certificate
+	client       *x509.Certificate
 }
 
 func (r *refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (res refreshResult, err error) {
@@ -223,15 +256,15 @@ func (r *refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priv
 		)
 	}
 
-	type ipRes struct {
+	type mdRes struct {
 		ipAddr string
 		err    error
 	}
-	ipCh := make(chan ipRes, 1)
+	mdCh := make(chan mdRes, 1)
 	go func() {
-		defer close(ipCh)
+		defer close(mdCh)
 		addr, err := fetchMetadata(ctx, r.client, cn)
-		ipCh <- ipRes{ipAddr: addr, err: err}
+		mdCh <- mdRes{ipAddr: addr, err: err}
 	}()
 
 	type certRes struct {
@@ -247,7 +280,7 @@ func (r *refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priv
 
 	var ipAddr string
 	select {
-	case r := <-ipCh:
+	case r := <-mdCh:
 		if r.err != nil {
 			return refreshResult{}, fmt.Errorf("failed to get instance IP address: %w", r.err)
 		}

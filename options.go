@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
-	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	apiopt "google.golang.org/api/option"
@@ -180,13 +179,13 @@ func WithTCPKeepAlive(d time.Duration) DialOption {
 // WithPublicIP returns a DialOption that specifies a public IP will be used to connect.
 func WithPublicIP() DialOption {
 	return func(cfg *dialCfg) {
-		cfg.ipType = cloudsql.PublicIP
+		cfg.ipType = "PUBLIC"
 	}
 }
 
 // WithPrivateIP returns a DialOption that specifies a private IP (VPC) will be used to connect.
 func WithPrivateIP() DialOption {
 	return func(cfg *dialCfg) {
-		cfg.ipType = cloudsql.PrivateIP
+		cfg.ipType = "PRIVATE"
 	}
 }

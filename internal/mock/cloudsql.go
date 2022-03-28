@@ -261,7 +261,7 @@ func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, er
 // StartServerProxy starts a fake server proxy and listens on the provided port
 // on all interfaces, configured with TLS as specified by the FakeCSQLInstance.
 // Callers should invoke the returned function to clean up all resources.
-func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
+func DELETEStartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 	certBytes, err := x509.CreateCertificate(
 		rand.Reader, i.Cert, i.Cert, &i.Key.PublicKey, i.Key)
 	if err != nil {
