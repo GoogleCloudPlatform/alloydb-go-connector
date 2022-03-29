@@ -24,13 +24,13 @@ import (
 	"time"
 
 	errtype "cloud.google.com/go/cloudsqlconn/errtype"
-	"golang.org/x/oauth2"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
+	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
 )
 
 const (
-	// refreshBuffer is the amount of time before a result expires to start a new refresh attempt.
-	refreshBuffer = 5 * time.Minute
+	// refreshBuffer is the amount of time before a result expires to start a
+	// new refresh attempt.
+	refreshBuffer = 12 * time.Hour
 )
 
 var (
@@ -81,9 +81,7 @@ type metadata struct {
 // refreshOperation is a pending result of a refresh operation of data used to connect securely. It should
 // only be initialized by the Instance struct as part of a refresh cycle.
 type refreshOperation struct {
-	md     metadata
-	tlsCfg *tls.Config
-	expiry time.Time
+	result refreshResult
 	err    error
 
 	// timer that triggers refresh, can be used to cancel.
@@ -115,7 +113,7 @@ func (r *refreshOperation) IsValid() bool {
 	default:
 		return false
 	case <-r.ready:
-		if r.err != nil || time.Now().After(r.expiry) {
+		if r.err != nil || time.Now().After(r.result.expiry) {
 			return false
 		}
 		return true
@@ -150,10 +148,9 @@ type Instance struct {
 // NewInstance initializes a new Instance given an instance connection name
 func NewInstance(
 	instance string,
-	client *sqladmin.Service,
+	client *alloydb.Client,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
-	ts oauth2.TokenSource,
 	dialerID string,
 ) (*Instance, error) {
 	cn, err := parseConnName(instance)
@@ -164,15 +161,13 @@ func NewInstance(
 	i := &Instance{
 		connName: cn,
 		key:      key,
-		// TODO: we'll update this when we do instance
-		// r: newRefresher(
-		// 	refreshTimeout,
-		// 	30*time.Second,
-		// 	2,
-		// 	client,
-		// 	ts,
-		// 	dialerID,
-		// ),
+		r: newRefresher(
+			client,
+			refreshTimeout,
+			30*time.Second,
+			2,
+			dialerID,
+		),
 		ctx:    ctx,
 		cancel: cancel,
 	}
@@ -194,31 +189,12 @@ func (i *Instance) Close() {
 // ConnectInfo returns an IP address specified by ipType (i.e., public or
 // private) and a TLS config that can be used to connect to a Cloud SQL
 // instance.
-func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls.Config, error) {
+func (i *Instance) ConnectInfo(ctx context.Context) (string, *tls.Config, error) {
 	res, err := i.result(ctx)
 	if err != nil {
 		return "", nil, err
 	}
-	addr, ok := res.md.ipAddrs[ipType]
-	if !ok {
-		err := errtype.NewConfigError(
-			fmt.Sprintf("instance does not have IP of type %q", ipType),
-			i.String(),
-		)
-		return "", nil, err
-	}
-	return addr, res.tlsCfg, nil
-}
-
-// InstanceEngineVersion returns the engine type and version for the instance. The value
-// coresponds to one of the following types for the instance:
-// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
-func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
-	res, err := i.result(ctx)
-	if err != nil {
-		return "", err
-	}
-	return res.md.version, nil
+	return res.result.instanceIPAddr, res.result.conf, nil
 }
 
 // ForceRefresh triggers an immediate refresh operation to be scheduled and used for future connection attempts.
@@ -246,17 +222,13 @@ func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 }
 
 // scheduleRefresh schedules a refresh operation to be triggered after a given
-// duration. The returned refreshOperation
-// can be used to either Cancel or Wait for the operations result.
+// duration. The returned refreshOperation can be used to either Cancel or Wait
+// for the operations result.
 func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 	res := &refreshOperation{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		// TODO: fix this
-		// res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key)
-		r, err := i.r.performRefresh(i.ctx, i.connName, i.key)
-		_ = r
-		_ = err
+		res.result, res.err = i.r.performRefresh(i.ctx, i.connName, i.key)
 		close(res.ready)
 
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh
@@ -282,7 +254,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			return
 		default:
 		}
-		nextRefresh := i.cur.expiry.Add(-refreshBuffer)
+		nextRefresh := i.cur.result.expiry.Add(-refreshBuffer)
 		i.next = i.scheduleRefresh(time.Until(nextRefresh))
 	})
 	return res
