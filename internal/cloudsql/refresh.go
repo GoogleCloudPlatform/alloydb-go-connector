@@ -144,7 +144,7 @@ func createTLSConfig(inst connName, cc certChain, k *rsa.PrivateKey) *tls.Config
 	return &tls.Config{
 		InsecureSkipVerify: true,
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			if len(rawCerts) == 0 {
+			if len(rawCerts) != 2 {
 				return errtype.NewDialError("no certificate to verify", inst.String(), nil)
 			}
 			chain, err := x509.ParseCertificate(rawCerts[1])

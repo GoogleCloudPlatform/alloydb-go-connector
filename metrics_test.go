@@ -19,8 +19,10 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"go.opencensus.io/stats/view"
+	"google.golang.org/api/option"
 )
 
 type spyMetricsExporter struct {
@@ -99,15 +101,14 @@ func TestDialerWithMetrics(t *testing.T) {
 	defer view.UnregisterExporter(spy)
 	view.SetReportingPeriod(time.Millisecond)
 
-	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
-	svc, cleanup, err := mock.NewSQLAdminService(
-		context.Background(),
+	ctx := context.Background()
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+	)
+	mc, url, cleanup := mock.HTTPClient(
 		mock.InstanceGetSuccess(inst, 1),
 		mock.CreateEphemeralSuccess(inst, 1),
 	)
-	if err != nil {
-		t.Fatalf("failed to init SQLAdminService: %v", err)
-	}
 	stop := mock.StartServerProxy(t, inst)
 	defer func() {
 		stop()
@@ -115,24 +116,25 @@ func TestDialerWithMetrics(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
+	c, err := alloydb.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
 
-	d, err := NewDialer(context.Background(),
-		WithDefaultDialOptions(WithPublicIP()),
-		WithTokenSource(mock.EmptyTokenSource{}),
-	)
+	d, err := NewDialer(ctx)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
-	d.sqladmin = svc
+	d.client = c
 
 	// dial a good instance
-	conn, err := d.Dial(context.Background(), "my-project:my-region:my-instance")
+	conn, err := d.Dial(ctx, "my-project:my-region:my-cluster:my-instance")
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
 	}
 	defer conn.Close()
 	// dial a bogus instance
-	_, err = d.Dial(context.Background(), "my-project:my-region:notaninstance")
+	_, err = d.Dial(ctx, "my-project:my-region:notaninstance")
 	if err == nil {
 		t.Fatal("expected Dial to fail, but got no error")
 	}
@@ -140,11 +142,11 @@ func TestDialerWithMetrics(t *testing.T) {
 	time.Sleep(10 * time.Millisecond) // allow exporter a chance to run
 
 	// success metrics
-	wantLastValueMetric(t, "/cloudsqlconn/open_connections", spy.Data())
-	wantDistributionMetric(t, "/cloudsqlconn/dial_latency", spy.Data())
-	wantCountMetric(t, "/cloudsqlconn/refresh_success_count", spy.Data())
+	wantLastValueMetric(t, "/alloydbconn/open_connections", spy.Data())
+	wantDistributionMetric(t, "/alloydbconn/dial_latency", spy.Data())
+	wantCountMetric(t, "/alloydbconn/refresh_success_count", spy.Data())
 
 	// failure metrics from dialing bogus instance
-	wantCountMetric(t, "/cloudsqlconn/dial_failure_count", spy.Data())
-	wantCountMetric(t, "/cloudsqlconn/refresh_failure_count", spy.Data())
+	wantCountMetric(t, "/alloydbconn/dial_failure_count", spy.Data())
+	wantCountMetric(t, "/alloydbconn/refresh_failure_count", spy.Data())
 }

@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -93,62 +92,6 @@ func TestPgxConnect(t *testing.T) {
 	t.Log(now)
 }
 
-func TestConnectWithIAMUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping Postgres integration tests")
-	}
-	requirePostgresVars(t)
-
-	ctx := context.Background()
-
-	// password is intentionally blank
-	dsn := fmt.Sprintf("user=%s password=\"\" dbname=%s sslmode=disable", postgresUserIAM, postgresDB)
-	config, err := pgx.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("failed to parse pgx config: %v", err)
-	}
-	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithIAMAuthN())
-	if err != nil {
-		t.Fatalf("failed to initiate Dialer: %v", err)
-	}
-	defer d.Close()
-	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
-		return d.Dial(ctx, postgresConnName)
-	}
-
-	conn, connErr := pgx.ConnectConfig(ctx, config)
-	if connErr != nil {
-		t.Fatalf("failed to connect: %s", connErr)
-	}
-	defer conn.Close(ctx)
-
-	var now time.Time
-	err = conn.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
-	if err != nil {
-		t.Fatalf("QueryRow failed: %s", err)
-	}
-	t.Log(now)
-}
-
-func TestEngineVersion(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping Postgres integration tests")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	d, err := cloudsqlconn.NewDialer(context.Background())
-	if err != nil {
-		t.Fatalf("failed to init Dialer: %v", err)
-	}
-	gotEV, err := d.EngineVersion(ctx, postgresConnName)
-	if err != nil {
-		t.Fatalf("failed to retrieve engine version: %v", err)
-	}
-	if !strings.Contains(gotEV, "POSTGRES") {
-		t.Errorf("InstanceEngineVersion(%s) failed: want 'POSTGRES', got %v", gotEV, err)
-	}
-}
-
 func TestPostgresHook(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
@@ -171,16 +114,4 @@ func TestPostgresHook(t *testing.T) {
 	}
 	defer db.Close()
 	testConn(db)
-
-	pgxv4.RegisterDriver("cloudsql-postgres-iam", cloudsqlconn.WithIAMAuthN())
-	db2, err := sql.Open(
-		"cloudsql-postgres-iam",
-		fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
-			postgresConnName, postgresUserIAM, postgresDB),
-	)
-	if err != nil {
-		t.Fatalf("sql.Open want err = nil, got = %v", err)
-	}
-	defer db2.Close()
-	testConn(db2)
 }

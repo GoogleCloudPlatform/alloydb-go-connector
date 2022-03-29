@@ -34,7 +34,7 @@ type Option func(d *dialerConfig)
 
 type dialerConfig struct {
 	rsaKey         *rsa.PrivateKey
-	sqladminOpts   []apiopt.ClientOption
+	adminOpts      []apiopt.ClientOption
 	dialOpts       []DialOption
 	dialFunc       func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout time.Duration
@@ -78,7 +78,7 @@ func WithCredentialsJSON(b []byte) Option {
 			return
 		}
 		d.tokenSource = c.TokenSource
-		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentials(c))
+		d.adminOpts = append(d.adminOpts, apiopt.WithCredentials(c))
 	}
 }
 
@@ -95,7 +95,7 @@ func WithDefaultDialOptions(opts ...DialOption) Option {
 func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
 		d.tokenSource = s
-		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
+		d.adminOpts = append(d.adminOpts, apiopt.WithTokenSource(s))
 	}
 }
 
@@ -118,7 +118,7 @@ func WithRefreshTimeout(t time.Duration) Option {
 // advanced use-cases.
 func WithHTTPClient(client *http.Client) Option {
 	return func(d *dialerConfig) {
-		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithHTTPClient(client))
+		d.adminOpts = append(d.adminOpts, apiopt.WithHTTPClient(client))
 	}
 }
 
@@ -126,7 +126,7 @@ func WithHTTPClient(client *http.Client) Option {
 // the provided URL.
 func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
-		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithEndpoint(url))
+		d.adminOpts = append(d.adminOpts, apiopt.WithEndpoint(url))
 	}
 }
 
@@ -136,19 +136,6 @@ func WithAdminAPIEndpoint(url string) Option {
 func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn, error)) Option {
 	return func(d *dialerConfig) {
 		d.dialFunc = dial
-	}
-}
-
-// WithIAMAuthN enables automatic IAM Authentication. If no token source has
-// been configured (such as with WithTokenSource, WithCredentialsFile, etc), the
-// dialer will use the default token source as defined by
-// https://pkg.go.dev/golang.org/x/oauth2/google#FindDefaultCredentialsWithParams.
-//
-// For documentation on automatic IAM Authentication, see
-// https://cloud.google.com/sql/docs/postgres/authentication.
-func WithIAMAuthN() Option {
-	return func(d *dialerConfig) {
-		d.useIAMAuthN = true
 	}
 }
 
@@ -173,19 +160,5 @@ func DialOptions(opts ...DialOption) DialOption {
 func WithTCPKeepAlive(d time.Duration) DialOption {
 	return func(cfg *dialCfg) {
 		cfg.tcpKeepAlive = d
-	}
-}
-
-// WithPublicIP returns a DialOption that specifies a public IP will be used to connect.
-func WithPublicIP() DialOption {
-	return func(cfg *dialCfg) {
-		cfg.ipType = "PUBLIC"
-	}
-}
-
-// WithPrivateIP returns a DialOption that specifies a private IP (VPC) will be used to connect.
-func WithPrivateIP() DialOption {
-	return func(cfg *dialCfg) {
-		cfg.ipType = "PRIVATE"
 	}
 }
