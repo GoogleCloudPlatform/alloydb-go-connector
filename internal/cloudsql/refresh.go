@@ -193,8 +193,8 @@ func newRefresher(
 	interval time.Duration,
 	burst int,
 	dialerID string,
-) *refresher {
-	return &refresher{
+) refresher {
+	return refresher{
 		client:        client,
 		timeout:       timeout,
 		clientLimiter: rate.NewLimiter(rate.Every(interval), burst),
@@ -230,7 +230,7 @@ type certChain struct {
 	client       *x509.Certificate
 }
 
-func (r *refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (res refreshResult, err error) {
+func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (res refreshResult, err error) {
 	var refreshEnd trace.EndSpanFunc
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.RefreshConnection",
 		trace.AddInstanceName(cn.String()),

@@ -52,7 +52,7 @@ func (c *connName) String() string {
 	return fmt.Sprintf("%s:%s:%s:%s", c.project, c.region, c.cluster, c.name)
 }
 
-// parseConnName initializes a new ConnName struct.
+// parseConnName initializes a new connName struct.
 func parseConnName(cn string) (connName, error) {
 	b := []byte(cn)
 	m := connNameRegex.FindSubmatch(b)
