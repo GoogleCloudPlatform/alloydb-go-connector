@@ -46,7 +46,8 @@ type GenerateClientCertificateResponse struct {
 
 type Client struct {
 	client *http.Client
-	// endpoint is the base URL for the AlloyDB admin API (e.g. https://alloydb.googleapis.com/v1)
+	// endpoint is the base URL for the AlloyDB admin API (e.g.
+	// https://alloydb.googleapis.com/v1)
 	endpoint string
 }
 
