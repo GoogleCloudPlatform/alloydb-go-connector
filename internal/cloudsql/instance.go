@@ -34,9 +34,9 @@ const (
 )
 
 var (
-	// Instance connection name is the format <PROJECT>:<REGION>:<INSTANCE>
+	// Instance connection name is the format <PROJECT>:<REGION>:<CLUSTER>:<INSTANCE>
 	// Additionally, we have to support legacy "domain-scoped" projects (e.g. "google.com:PROJECT")
-	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+)")
+	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+):([^:]+)")
 )
 
 // connName represents the "instance connection name", in the format "project:region:name". Use the
@@ -44,11 +44,12 @@ var (
 type connName struct {
 	project string
 	region  string
+	cluster string
 	name    string
 }
 
 func (c *connName) String() string {
-	return fmt.Sprintf("%s:%s:%s", c.project, c.region, c.name)
+	return fmt.Sprintf("%s:%s:%s:%s", c.project, c.region, c.cluster, c.name)
 }
 
 // parseConnName initializes a new connName struct.
@@ -57,7 +58,7 @@ func parseConnName(cn string) (connName, error) {
 	m := connNameRegex.FindSubmatch(b)
 	if m == nil {
 		err := errtype.NewConfigError(
-			"invalid instance connection name, expected PROJECT:REGION:INSTANCE",
+			"invalid instance connection name, expected PROJECT:REGION:CLUSTER:INSTANCE",
 			cn,
 		)
 		return connName{}, err
@@ -66,14 +67,20 @@ func parseConnName(cn string) (connName, error) {
 	c := connName{
 		project: string(m[1]),
 		region:  string(m[3]),
-		name:    string(m[4]),
+		cluster: string(m[4]),
+		name:    string(m[5]),
 	}
 	return c, nil
 }
 
-// refreshResult is a pending result of a refresh operation of data used to connect securely. It should
+type metadata struct {
+	ipAddrs map[string]string
+	version string
+}
+
+// refreshOperation is a pending result of a refresh operation of data used to connect securely. It should
 // only be initialized by the Instance struct as part of a refresh cycle.
-type refreshResult struct {
+type refreshOperation struct {
 	md     metadata
 	tlsCfg *tls.Config
 	expiry time.Time
@@ -87,12 +94,12 @@ type refreshResult struct {
 
 // Cancel prevents the instanceInfo from starting, if it hasn't already started. Returns true if timer
 // was stopped successfully, or false if it has already started.
-func (r *refreshResult) Cancel() bool {
+func (r *refreshOperation) Cancel() bool {
 	return r.timer.Stop()
 }
 
-// Wait blocks until the refreshResult attempt is completed.
-func (r *refreshResult) Wait(ctx context.Context) error {
+// Wait blocks until the refreshOperation attempt is completed.
+func (r *refreshOperation) Wait(ctx context.Context) error {
 	select {
 	case <-r.ready:
 		return r.err
@@ -102,7 +109,7 @@ func (r *refreshResult) Wait(ctx context.Context) error {
 }
 
 // IsValid returns true if this result is complete, successful, and is still valid.
-func (r *refreshResult) IsValid() bool {
+func (r *refreshOperation) IsValid() bool {
 	// verify the result has finished running
 	select {
 	default:
@@ -124,12 +131,12 @@ type Instance struct {
 	r   refresher
 
 	resultGuard sync.RWMutex
-	// cur represents the current refreshResult that will be used to create connections. If a valid complete
-	// refreshResult isn't available it's possible for cur to be equal to next.
-	cur *refreshResult
-	// next represents a future or ongoing refreshResult. Once complete, it will replace cur and schedule a
+	// cur represents the current refreshOperation that will be used to create connections. If a valid complete
+	// refreshOperation isn't available it's possible for cur to be equal to next.
+	cur *refreshOperation
+	// next represents a future or ongoing refreshOperation. Once complete, it will replace cur and schedule a
 	// replacement to occur.
-	next *refreshResult
+	next *refreshOperation
 
 	// OpenConns is the number of open connections to the instance.
 	OpenConns uint64
@@ -157,14 +164,15 @@ func NewInstance(
 	i := &Instance{
 		connName: cn,
 		key:      key,
-		r: newRefresher(
-			refreshTimeout,
-			30*time.Second,
-			2,
-			client,
-			ts,
-			dialerID,
-		),
+		// TODO: we'll update this when we do instance
+		// r: newRefresher(
+		// 	refreshTimeout,
+		// 	30*time.Second,
+		// 	2,
+		// 	client,
+		// 	ts,
+		// 	dialerID,
+		// ),
 		ctx:    ctx,
 		cancel: cancel,
 	}
@@ -226,7 +234,7 @@ func (i *Instance) ForceRefresh() {
 }
 
 // result returns the most recent refresh result (waiting for it to complete if necessary)
-func (i *Instance) result(ctx context.Context) (*refreshResult, error) {
+func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 	i.resultGuard.RLock()
 	res := i.cur
 	i.resultGuard.RUnlock()
@@ -237,13 +245,18 @@ func (i *Instance) result(ctx context.Context) (*refreshResult, error) {
 	return res, nil
 }
 
-// scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshResult
+// scheduleRefresh schedules a refresh operation to be triggered after a given
+// duration. The returned refreshOperation
 // can be used to either Cancel or Wait for the operations result.
-func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
-	res := &refreshResult{}
+func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
+	res := &refreshOperation{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key)
+		// TODO: fix this
+		// res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key)
+		r, err := i.r.performRefresh(i.ctx, i.connName, i.key)
+		_ = r
+		_ = err
 		close(res.ready)
 
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh

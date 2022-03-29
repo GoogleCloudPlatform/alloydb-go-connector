@@ -15,103 +15,45 @@
 package cloudsql
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
-	"golang.org/x/oauth2"
 	"golang.org/x/time/rate"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
-
-const (
-	PublicIP  = "PUBLIC"
-	PrivateIP = "PRIVATE"
-)
-
-// metadata contains information about a Cloud SQL instance needed to create connections.
-type metadata struct {
-	ipAddrs      map[string]string
-	serverCaCert *x509.Certificate
-	version      string
-}
 
 // fetchMetadata uses the Cloud SQL Admin APIs get method to retreive the information about a Cloud SQL instance
 // that is used to create secure connections.
-func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName) (m metadata, err error) {
+func fetchMetadata(ctx context.Context, cl *alloydb.Client, inst connName) (ipAddr string, err error) {
 	var end trace.EndSpanFunc
-	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.FetchMetadata")
+	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
 	defer func() { end(err) }()
-	db, err := client.Instances.Get(inst.project, inst.name).Context(ctx).Do()
+	resp, err := cl.InstanceGet(ctx, inst.project, inst.region, inst.cluster, inst.name)
 	if err != nil {
-		return metadata{}, errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
+		return "", errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
-	// validate the instance is supported for authenticated connections
-	if db.Region != inst.region {
-		msg := fmt.Sprintf("provided region was mismatched - got %s, want %s", inst.region, db.Region)
-		return metadata{}, errtype.NewRefreshError(msg, inst.String(), nil)
-	}
-	if db.BackendType != "SECOND_GEN" {
-		return metadata{}, errtype.NewConfigError(
-			"unsupported instance - only Second Generation instances are supported",
-			inst.String(),
-		)
-	}
-
-	// parse any ip addresses that might be used to connect
-	ipAddrs := make(map[string]string)
-	for _, ip := range db.IpAddresses {
-		switch ip.Type {
-		case "PRIMARY":
-			ipAddrs[PublicIP] = ip.IpAddress
-		case "PRIVATE":
-			ipAddrs[PrivateIP] = ip.IpAddress
-		}
-	}
-	if len(ipAddrs) == 0 {
-		return metadata{}, errtype.NewConfigError(
-			"cannot connect to instance - it has no supported IP addresses",
-			inst.String(),
-		)
-	}
-
-	// parse the server-side CA certificate
-	b, _ := pem.Decode([]byte(db.ServerCaCert.Cert))
-	if b == nil {
-		return metadata{}, errtype.NewRefreshError("failed to decode valid PEM cert", inst.String(), nil)
-	}
-	cert, err := x509.ParseCertificate(b.Bytes)
-	if err != nil {
-		return metadata{}, errtype.NewRefreshError(
-			fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
-			inst.String(),
-			nil,
-		)
-	}
-
-	m = metadata{
-		ipAddrs:      ipAddrs,
-		serverCaCert: cert,
-		version:      db.DatabaseVersion,
-	}
-
-	return m, nil
+	return resp.IPAddress, nil
 }
 
-func refreshToken(ts oauth2.TokenSource, tok *oauth2.Token) (*oauth2.Token, error) {
-	expiredToken := &oauth2.Token{
-		AccessToken:  tok.AccessToken,
-		TokenType:    tok.TokenType,
-		RefreshToken: tok.RefreshToken,
-		Expiry:       time.Time{}.Add(1), // Expired
+var errInvalidPEM = errors.New("certificate is not a valid PEM")
+
+func parseCert(cert string) (*x509.Certificate, error) {
+	b, _ := pem.Decode([]byte(cert))
+	if b == nil {
+		return nil, errInvalidPEM
 	}
-	return oauth2.ReuseTokenSource(expiredToken, ts).Token()
+	return x509.ParseCertificate(b.Bytes)
 }
 
 // fetchEphemeralCert uses the Cloud SQL Admin API's createEphemeral method to
@@ -119,179 +61,178 @@ func refreshToken(ts oauth2.TokenSource, tok *oauth2.Token) (*oauth2.Token, erro
 // instance's serverside proxy. The cert if valid for approximately one hour.
 func fetchEphemeralCert(
 	ctx context.Context,
-	client *sqladmin.Service,
+	cl *alloydb.Client,
 	inst connName,
 	key *rsa.PrivateKey,
-	ts oauth2.TokenSource,
-) (c tls.Certificate, err error) {
+) (cc certChain, err error) {
 	var end trace.EndSpanFunc
-	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.FetchEphemeralCert")
+	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchEphemeralCert")
 	defer func() { end(err) }()
-	clientPubKey, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
 
-	req := sqladmin.GenerateEphemeralCertRequest{
-		PublicKey: string(pem.EncodeToMemory(&pem.Block{Bytes: clientPubKey, Type: "RSA PUBLIC KEY"})),
+	subj := pkix.Name{
+		CommonName:         "alloydb-proxy",
+		Country:            []string{"US"},
+		Province:           []string{"CA"},
+		Locality:           []string{"Sunnyvale"},
+		Organization:       []string{"Google LLC"},
+		OrganizationalUnit: []string{"Cloud"},
 	}
-	var tok *oauth2.Token
-	if ts != nil {
-		var tokErr error
-		tok, tokErr = ts.Token()
-		if tokErr != nil {
-			return tls.Certificate{}, errtype.NewRefreshError(
-				"failed to retrieve Oauth2 token",
-				inst.String(),
-				tokErr,
-			)
-		}
-		// Always refresh the token to ensure its expiration is far enough in
-		// the future.
-		tok, tokErr = refreshToken(ts, tok)
-		if tokErr != nil {
-			return tls.Certificate{}, errtype.NewRefreshError(
-				"failed to refresh Oauth2 token",
-				inst.String(),
-				tokErr,
-			)
-		}
-		req.AccessToken = tok.AccessToken
+	tmpl := x509.CertificateRequest{
+		Subject:            subj,
+		SignatureAlgorithm: x509.SHA256WithRSA,
 	}
-	resp, err := client.Connect.GenerateEphemeralCert(inst.project, inst.name, &req).Context(ctx).Do()
+	csrBytes, err := x509.CreateCertificateRequest(rand.Reader, &tmpl, key)
 	if err != nil {
-		return tls.Certificate{}, errtype.NewRefreshError(
+		return certChain{}, err
+	}
+	buf := &bytes.Buffer{}
+	pem.Encode(buf, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
+	resp, err := cl.GenerateClientCert(ctx, inst.project, inst.region, inst.cluster, buf.Bytes())
+	if err != nil {
+		return certChain{}, errtype.NewRefreshError(
 			"create ephemeral cert failed",
 			inst.String(),
 			err,
 		)
 	}
-
-	// parse the client cert
-	b, _ := pem.Decode([]byte(resp.EphemeralCert.Cert))
-	if b == nil {
-		return tls.Certificate{}, errtype.NewRefreshError(
-			"failed to decode valid PEM cert",
+	// There should always be two certs in the chain. If this fails, the API has
+	// broken its contract with the client.
+	if len(resp.PemCertificateChain) != 2 {
+		return certChain{}, errtype.NewRefreshError(
+			"missing instance and root certificates",
 			inst.String(),
-			nil,
+			err,
 		)
 	}
-	clientCert, err := x509.ParseCertificate(b.Bytes)
+	rc, err := parseCert(resp.PemCertificateChain[1]) // root cert
 	if err != nil {
-		return tls.Certificate{}, errtype.NewRefreshError(
-			fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
+		return certChain{}, errtype.NewRefreshError(
+			"failed to parse root cert",
 			inst.String(),
-			nil,
+			err,
 		)
 	}
-	if ts != nil {
-		// Adjust the certificate's expiration to be the earlier of the token's
-		// expiration or the certificate's expiration.
-		if tok.Expiry.Before(clientCert.NotAfter) {
-			clientCert.NotAfter = tok.Expiry
-		}
+	ic, err := parseCert(resp.PemCertificateChain[0]) // intermediate cert
+	if err != nil {
+		return certChain{}, errtype.NewRefreshError(
+			"failed to parse intermediate cert",
+			inst.String(),
+			err,
+		)
+	}
+	c, err := parseCert(resp.PemCertificate) // client cert
+	if err != nil {
+		return certChain{}, errtype.NewRefreshError(
+			"failed to parse client cert",
+			inst.String(),
+			err,
+		)
 	}
 
-	c = tls.Certificate{
-		Certificate: [][]byte{clientCert.Raw},
-		PrivateKey:  key,
-		Leaf:        clientCert,
-	}
-	return c, nil
+	return certChain{
+		root:         rc,
+		intermediate: ic,
+		client:       c,
+	}, nil
 }
 
 // createTLSConfig returns a *tls.Config for connecting securely to the Cloud SQL instance.
-func createTLSConfig(inst connName, m metadata, cert tls.Certificate) *tls.Config {
+func createTLSConfig(inst connName, cc certChain, k *rsa.PrivateKey) *tls.Config {
 	certs := x509.NewCertPool()
-	certs.AddCert(m.serverCaCert)
+	certs.AddCert(cc.root)
 
-	cfg := &tls.Config{
-		ServerName:   inst.String(),
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      certs,
-		// We need to set InsecureSkipVerify to true due to
-		// https://github.com/GoogleCloudPlatform/cloudsql-proxy/issues/194
-		// https://tip.golang.org/doc/go1.11#crypto/x509
-		//
-		// Since we have a secure channel to the Cloud SQL API which we use to retrieve the
-		// certificates, we instead need to implement our own VerifyPeerCertificate function
-		// that will verify that the certificate is OK.
-		InsecureSkipVerify:    true,
-		VerifyPeerCertificate: genVerifyPeerCertificateFunc(inst, certs),
-		MinVersion:            tls.VersionTLS13,
-	}
-	return cfg
-}
+	return &tls.Config{
+		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return errtype.NewDialError("no certificate to verify", inst.String(), nil)
+			}
+			chain, err := x509.ParseCertificate(rawCerts[1])
+			if err != nil {
+				return errtype.NewDialError("failed to parse X.509 certificate", inst.String(), err)
+			}
 
-// genVerifyPeerCertificateFunc creates a VerifyPeerCertificate func that verifies that the peer
-// certificate is in the cert pool. We need to define our own because CloudSQL
-// instances use the instance name (e.g., my-project:my-instance) instead of a
-// valid domain name for the certificate's Common Name.
-func genVerifyPeerCertificateFunc(cn connName, pool *x509.CertPool) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-		if len(rawCerts) == 0 {
-			return errtype.NewDialError("no certificate to verify", cn.String(), nil)
-		}
+			opts := x509.VerifyOptions{Roots: certs}
+			if _, err = chain.Verify(opts); err != nil {
+				return errtype.NewDialError("failed to verify certificate", inst.String(), err)
+			}
 
-		cert, err := x509.ParseCertificate(rawCerts[0])
-		if err != nil {
-			return errtype.NewDialError("failed to parse X.509 certificate", cn.String(), err)
-		}
-
-		opts := x509.VerifyOptions{Roots: pool}
-		if _, err = cert.Verify(opts); err != nil {
-			return errtype.NewDialError("failed to verify certificate", cn.String(), err)
-		}
-
-		certInstanceName := fmt.Sprintf("%s:%s", cn.project, cn.name)
-		if cert.Subject.CommonName != certInstanceName {
-			return errtype.NewDialError(
-				fmt.Sprintf("certificate had CN %q, expected %q",
-					cert.Subject.CommonName, certInstanceName),
-				cn.String(),
-				nil,
-			)
-		}
-		return nil
+			// TODO: restore the server name check when it becomes the instance
+			// UID
+			// server, err := x509.ParseCertificate(rawCerts[0])
+			// if err != nil {
+			//  return errtype.NewDialError("failed to parse X.509 certificate", inst.String(), err)
+			// }
+			// serverCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Raw})
+			// os.WriteFile("server.pem", serverCert, 0666)
+			// serverName := "FIXME:INSTANCE_UID"
+			// if server.Subject.CommonName != serverName {
+			//  return errtype.NewDialError(
+			//      fmt.Sprintf("certificate had CN %q, expected %q",
+			//          chain.Subject.CommonName, serverName),
+			//      inst.String(),
+			//      nil,
+			//  )
+			// }
+			return nil
+		},
+		Certificates: []tls.Certificate{tls.Certificate{
+			Certificate: [][]byte{cc.client.Raw, cc.intermediate.Raw},
+			PrivateKey:  k,
+			Leaf:        cc.client,
+		}},
+		RootCAs:    certs,
+		MinVersion: tls.VersionTLS13,
 	}
 }
 
 // newRefresher creates a Refresher.
 func newRefresher(
+	client *alloydb.Client,
 	timeout time.Duration,
 	interval time.Duration,
 	burst int,
-	svc *sqladmin.Service,
-	ts oauth2.TokenSource,
 	dialerID string,
 ) refresher {
 	return refresher{
+		client:        client,
 		timeout:       timeout,
-		dialerID:      dialerID,
 		clientLimiter: rate.NewLimiter(rate.Every(interval), burst),
-		client:        svc,
-		tokenSource:   ts,
+		dialerID:      dialerID,
 	}
 }
 
 // refresher manages the SQL Admin API access to instance metadata and to
 // ephemeral certificates.
 type refresher struct {
+	// client provides access to the AlloyDB Admin API
+	client *alloydb.Client
+
 	// timeout is the maximum amount of time a refresh operation should be allowed to take.
 	timeout time.Duration
 
 	// dialerID is the unique ID of the associated dialer.
 	dialerID string
 
+	// clientLimiter limits the number of refreshes.
 	clientLimiter *rate.Limiter
-	client        *sqladmin.Service
-	tokenSource   oauth2.TokenSource
 }
 
-// performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
-func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (md metadata, c *tls.Config, expiry time.Time, err error) {
+type refreshResult struct {
+	instanceIPAddr string
+	conf           *tls.Config
+	expiry         time.Time
+}
+
+type certChain struct {
+	root         *x509.Certificate
+	intermediate *x509.Certificate
+	client       *x509.Certificate
+}
+
+func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (res refreshResult, err error) {
 	var refreshEnd trace.EndSpanFunc
-	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.RefreshConnection",
+	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.RefreshConnection",
 		trace.AddInstanceName(cn.String()),
 	)
 	defer func() {
@@ -302,68 +243,68 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 	if ctx.Err() == context.Canceled {
-		return metadata{}, nil, time.Time{}, ctx.Err()
+		return refreshResult{}, ctx.Err()
 	}
 
 	// avoid refreshing too often to try not to tax the SQL Admin API quotas
 	err = r.clientLimiter.Wait(ctx)
 	if err != nil {
-		return metadata{}, nil, time.Time{}, errtype.NewDialError(
+		return refreshResult{}, errtype.NewDialError(
 			"refresh was throttled until context expired",
 			cn.String(),
 			nil,
 		)
 	}
 
-	// start async fetching the instance's metadata
 	type mdRes struct {
-		md  metadata
-		err error
+		ipAddr string
+		err    error
 	}
-	mdC := make(chan mdRes, 1)
+	mdCh := make(chan mdRes, 1)
 	go func() {
-		defer close(mdC)
-		md, err := fetchMetadata(ctx, r.client, cn)
-		mdC <- mdRes{md, err}
+		defer close(mdCh)
+		addr, err := fetchMetadata(ctx, r.client, cn)
+		mdCh <- mdRes{ipAddr: addr, err: err}
 	}()
 
-	// start async fetching the certs
-	type ecRes struct {
-		ec  tls.Certificate
+	type certRes struct {
+		cc  certChain
 		err error
 	}
-	ecC := make(chan ecRes, 1)
+	certCh := make(chan certRes, 1)
 	go func() {
-		defer close(ecC)
-		ec, err := fetchEphemeralCert(ctx, r.client, cn, k, r.tokenSource)
-		ecC <- ecRes{ec, err}
+		defer close(certCh)
+		cc, err := fetchEphemeralCert(ctx, r.client, cn, k)
+		certCh <- certRes{cc: cc, err: err}
 	}()
 
-	// wait for the results of each operations
+	var ipAddr string
 	select {
-	case r := <-mdC:
+	case r := <-mdCh:
 		if r.err != nil {
-			return md, nil, time.Time{}, fmt.Errorf("failed to get instance: %w", r.err)
+			return refreshResult{}, fmt.Errorf("failed to get instance IP address: %w", r.err)
 		}
-		md = r.md
+		ipAddr = r.ipAddr
 	case <-ctx.Done():
-		return md, nil, time.Time{}, fmt.Errorf("refresh failed: %w", ctx.Err())
-	}
-	var ec tls.Certificate
-	select {
-	case r := <-ecC:
-		if r.err != nil {
-			return md, nil, time.Time{}, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
-		}
-		ec = r.ec
-	case <-ctx.Done():
-		return md, nil, time.Time{}, fmt.Errorf("refresh failed: %w", ctx.Err())
+		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
-	c = createTLSConfig(cn, md, ec)
+	var cc certChain
+	select {
+	case r := <-certCh:
+		if r.err != nil {
+			return refreshResult{}, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
+		}
+		cc = r.cc
+	case <-ctx.Done():
+		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
+	}
+
+	c := createTLSConfig(cn, cc, k)
+	var expiry time.Time
 	// This should never not be the case, but we check to avoid a potential nil-pointer
 	if len(c.Certificates) > 0 {
 		expiry = c.Certificates[0].Leaf.NotAfter
 	}
-	return md, c, expiry, nil
+	return refreshResult{instanceIPAddr: ipAddr, conf: c, expiry: expiry}, nil
 }

@@ -39,32 +39,76 @@ func genRSAKey() *rsa.PrivateKey {
 var RSAKey = genRSAKey()
 
 func TestParseConnName(t *testing.T) {
-	tests := []struct {
-		name string
+	tcs := []struct {
+		desc string
+		in   string
 		want connName
 	}{
 		{
-			"project:region:instance",
-			connName{"project", "region", "instance"},
+			desc: "vanilla instance connection name",
+			in:   "proj:reg:clust:name",
+			want: connName{
+				project: "proj",
+				region:  "reg",
+				cluster: "clust",
+				name:    "name",
+			},
 		},
 		{
-			"google.com:project:region:instance",
-			connName{"google.com:project", "region", "instance"},
-		},
-		{
-			"project:instance", // missing region
-			connName{},
+			desc: "with legacy domain-scoped project",
+			in:   "google.com:proj:reg:clust:name",
+			want: connName{
+				project: "google.com:proj",
+				region:  "reg",
+				cluster: "clust",
+				name:    "name",
+			},
 		},
 	}
 
-	for _, tc := range tests {
-		c, err := parseConnName(tc.name)
-		if err != nil && tc.want != (connName{}) {
-			t.Errorf("unexpected error: %e", err)
-		}
-		if c != tc.want {
-			t.Errorf("ParseConnName(%s) failed: want %v, got %v", tc.name, tc.want, err)
-		}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			got, err := parseConnName(tc.in)
+			if err != nil {
+				t.Fatalf("want no error, got = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("want = %v, got = %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseConnNameErrors(t *testing.T) {
+	tcs := []struct {
+		desc string
+		in   string
+	}{
+		{
+			desc: "malformatted",
+			in:   "not-correct",
+		},
+		{
+			desc: "missing project",
+			in:   "reg:clust:name",
+		},
+		{
+			desc: "missing cluster",
+			in:   "proj:reg:name",
+		},
+		{
+			desc: "empty",
+			in:   "::::",
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			_, err := parseConnName(tc.in)
+			if err == nil {
+				t.Fatal("want error, got nil")
+			}
+		})
 	}
 }
 
@@ -78,8 +122,8 @@ func TestInstanceEngineVersion(t *testing.T) {
 		inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion(wantEV))
 		client, cleanup, err := mock.NewSQLAdminService(
 			ctx,
-			mock.InstanceGetSuccess(inst, 1),
-			mock.CreateEphemeralSuccess(inst, 1),
+			mock.DELETEInstanceGetSuccess(inst, 1),
+			mock.DELETECreateEphemeralSuccess(inst, 1),
 		)
 		if err != nil {
 			t.Fatalf("%s", err)
@@ -111,8 +155,8 @@ func TestConnectInfo(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithPublicIP(wantAddr))
 	client, cleanup, err := mock.NewSQLAdminService(
 		ctx,
-		mock.InstanceGetSuccess(inst, 1),
-		mock.CreateEphemeralSuccess(inst, 1),
+		mock.DELETEInstanceGetSuccess(inst, 1),
+		mock.DELETECreateEphemeralSuccess(inst, 1),
 	)
 	if err != nil {
 		t.Fatalf("%s", err)
@@ -128,7 +172,7 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("failed to create mock instance: %v", err)
 	}
 
-	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, PublicIP)
+	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, "PUBLIC")
 	if err != nil {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
@@ -164,14 +208,14 @@ func TestConnectInfoErrors(t *testing.T) {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 
-	_, _, err = im.ConnectInfo(ctx, PublicIP)
+	_, _, err = im.ConnectInfo(ctx, "PUBLIC")
 	var wantErr *errtype.DialError
 	if !errors.As(err, &wantErr) {
 		t.Fatalf("when connect info fails, want = %T, got = %v", wantErr, err)
 	}
 
 	// when client asks for wrong IP address type
-	gotAddr, _, err := im.ConnectInfo(ctx, PrivateIP)
+	gotAddr, _, err := im.ConnectInfo(ctx, "PUBLIC")
 	if err == nil {
 		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", gotAddr)
 	}
@@ -193,7 +237,7 @@ func TestClose(t *testing.T) {
 	}
 	im.Close()
 
-	_, _, err = im.ConnectInfo(ctx, PublicIP)
+	_, _, err = im.ConnectInfo(ctx, "PUBLIC")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}

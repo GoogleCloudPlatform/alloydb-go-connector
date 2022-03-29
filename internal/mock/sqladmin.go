@@ -70,7 +70,7 @@ func httpClient(requests ...*Request) (*http.Client, string, func() error) {
 // Request represents a HTTP request for a test Server to mock responses for.
 //
 // Use NewRequest to initialize new Requests.
-type Request struct {
+type DELETERequest struct {
 	sync.Mutex
 
 	reqMethod string
@@ -81,7 +81,7 @@ type Request struct {
 }
 
 // matches returns true if a given http.Request should be handled by this Request.
-func (r *Request) matches(hR *http.Request) bool {
+func (r *DELETERequest) matches(hR *http.Request) bool {
 	r.Lock()
 	defer r.Unlock()
 	if r.reqMethod != "" && r.reqMethod != hR.Method {
@@ -101,7 +101,7 @@ func (r *Request) matches(hR *http.Request) bool {
 // endpoint. It responds with a "StatusOK" and a DatabaseInstance object.
 //
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
-func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
+func DELETEInstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 	var ips []*sqladmin.IpMapping
 	for ipType, addr := range i.ipAddrs {
 		if ipType == "PUBLIC" {
@@ -149,7 +149,7 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 // "StatusOK" and a SslCerts object.
 //
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/connect/generateEphemeralCert
-func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
+func DELETECreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 	r := &Request{
 		reqMethod: http.MethodPost,
 		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s:generateEphemeralCert", i.project, i.name),
