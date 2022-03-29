@@ -69,9 +69,6 @@ func TestRefresh(t *testing.T) {
 	if got := res.expiry; wantExpiry != got {
 		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, got)
 	}
-	if got := res.conf.ServerName; "client.alloydb" != got {
-		t.Fatalf("server name mismatch, want = %v, got = %v", "client.alloydb", got)
-	}
 }
 
 func TestRefreshFailsFast(t *testing.T) {

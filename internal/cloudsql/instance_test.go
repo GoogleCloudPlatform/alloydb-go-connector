@@ -23,7 +23,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
+	"google.golang.org/api/option"
 )
 
 // genRSAKey generates an RSA key used for test.
@@ -112,67 +114,39 @@ func TestParseConnNameErrors(t *testing.T) {
 	}
 }
 
-func TestInstanceEngineVersion(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	tests := []string{
-		"MYSQL_5_7", "POSTGRES_14", "SQLSERVER_2019_STANDARD", "MYSQL_8_0_18",
-	}
-	for _, wantEV := range tests {
-		inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion(wantEV))
-		client, cleanup, err := mock.NewSQLAdminService(
-			ctx,
-			mock.DELETEInstanceGetSuccess(inst, 1),
-			mock.DELETECreateEphemeralSuccess(inst, 1),
-		)
-		if err != nil {
-			t.Fatalf("%s", err)
-		}
-		defer func() {
-			if err := cleanup(); err != nil {
-				t.Fatalf("%v", err)
-			}
-		}()
-		i, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 30*time.Second, nil, "")
-		if err != nil {
-			t.Fatalf("failed to init instance: %v", err)
-		}
-
-		gotEV, err := i.InstanceEngineVersion(ctx)
-		if err != nil {
-			t.Fatalf("failed to retrieve engine version: %v", err)
-		}
-		if wantEV != gotEV {
-			t.Errorf("InstanceEngineVersion(%s) failed: want %v, got %v", wantEV, gotEV, err)
-		}
-
-	}
-}
-
 func TestConnectInfo(t *testing.T) {
 	ctx := context.Background()
+
 	wantAddr := "0.0.0.0"
-	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithPublicIP(wantAddr))
-	client, cleanup, err := mock.NewSQLAdminService(
-		ctx,
-		mock.DELETEInstanceGetSuccess(inst, 1),
-		mock.DELETECreateEphemeralSuccess(inst, 1),
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+		mock.WithIPAddr(wantAddr),
 	)
-	if err != nil {
-		t.Fatalf("%s", err)
-	}
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	stop := mock.StartServerProxy(t, inst)
 	defer func() {
+		stop()
 		if err := cleanup(); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()
+	c, err := alloydb.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
 
-	i, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 30*time.Second, nil, "")
+	i, err := NewInstance(
+		"my-project:my-region:my-cluster:my-instance",
+		c, RSAKey, 30*time.Second, "dialer-id",
+	)
 	if err != nil {
 		t.Fatalf("failed to create mock instance: %v", err)
 	}
 
-	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, "PUBLIC")
+	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx)
 	if err != nil {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
@@ -184,60 +158,58 @@ func TestConnectInfo(t *testing.T) {
 		)
 	}
 
-	wantServerName := "my-project:my-region:my-instance"
-	if gotTLSCfg.ServerName != wantServerName {
-		t.Fatalf(
-			"ConnectInfo return unexpected server name in TLS Config, want = %v, got = %v",
-			wantServerName, gotTLSCfg.ServerName,
-		)
-	}
+	_ = gotTLSCfg
+	// TODO: this should be the instance UID
+	// wantServerName := "TODO instance UID"
+	// if gotTLSCfg.ServerName != wantServerName {
+	// 	t.Fatalf(
+	// 		"ConnectInfo return unexpected server name in TLS Config, want = %v, got = %v",
+	// 		wantServerName, gotTLSCfg.ServerName,
+	// 	)
+	// }
 }
 
 func TestConnectInfoErrors(t *testing.T) {
 	ctx := context.Background()
-
-	client, cleanup, err := mock.NewSQLAdminService(ctx)
+	c, err := alloydb.NewClient(ctx)
 	if err != nil {
-		t.Fatalf("%s", err)
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
-	defer cleanup()
 
 	// Use a timeout that should fail instantly
-	im, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 0, nil, "")
+	im, err := NewInstance(
+		"my-project:my-region:my-cluster:my-instance",
+		c, RSAKey, 0, "dialer-id",
+	)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 
-	_, _, err = im.ConnectInfo(ctx, "PUBLIC")
+	_, _, err = im.ConnectInfo(ctx)
 	var wantErr *errtype.DialError
 	if !errors.As(err, &wantErr) {
 		t.Fatalf("when connect info fails, want = %T, got = %v", wantErr, err)
-	}
-
-	// when client asks for wrong IP address type
-	gotAddr, _, err := im.ConnectInfo(ctx, "PUBLIC")
-	if err == nil {
-		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", gotAddr)
 	}
 }
 
 func TestClose(t *testing.T) {
 	ctx := context.Background()
-
-	client, cleanup, err := mock.NewSQLAdminService(ctx)
+	c, err := alloydb.NewClient(ctx)
 	if err != nil {
-		t.Fatalf("%s", err)
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
-	defer cleanup()
 
 	// Set up an instance and then close it immediately
-	im, err := NewInstance("my-proj:my-region:my-inst", client, RSAKey, 30, nil, "")
+	im, err := NewInstance(
+		"my-proj:my-region:my-cluster:my-inst",
+		c, RSAKey, 30, "dialer-ider",
+	)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 	im.Close()
 
-	_, _, err = im.ConnectInfo(ctx, "PUBLIC")
+	_, _, err = im.ConnectInfo(ctx)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
