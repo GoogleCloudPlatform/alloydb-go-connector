@@ -28,8 +28,9 @@ import (
 )
 
 const (
-	// refreshBuffer is the amount of time before a result expires to start a new refresh attempt.
-	refreshBuffer = 5 * time.Minute
+	// refreshBuffer is the amount of time before a result expires to start a
+	// new refresh attempt.
+	refreshBuffer = 12 * time.Hour
 )
 
 var (
