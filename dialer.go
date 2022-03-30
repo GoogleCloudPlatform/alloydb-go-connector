@@ -112,7 +112,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 
 	client, err := alloydb.NewClient(ctx, cfg.adminOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)
+		return nil, fmt.Errorf("failed to create AlloyDB Admin API client: %v", err)
 	}
 
 	dialCfg := dialCfg{
