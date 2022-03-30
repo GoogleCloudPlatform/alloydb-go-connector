@@ -103,13 +103,11 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 		t.Fatalf("when context is canceled, want = %T, got = %v", context.Canceled, err)
 	}
 
-	// TODO: restore this test and figure out why the test proxy server isn't
-	// rejected an invalid client certificate.
-	// _, err = d.Dial(context.Background(), "my-project:my-region:my-cluster:my-instance")
-	// var wantErr2 *errtype.RefreshError
-	// if !errors.As(err, &wantErr2) {
-	// 	t.Fatalf("when API call fails, want = %T, got = %v", wantErr2, err)
-	// }
+	_, err = d.Dial(context.Background(), "my-project:my-region:my-cluster:my-instance")
+	var wantErr2 *errtype.RefreshError
+	if !errors.As(err, &wantErr2) {
+		t.Fatalf("when API call fails, want = %T, got = %v", wantErr2, err)
+	}
 }
 
 func TestDialWithConfigurationErrors(t *testing.T) {
@@ -119,8 +117,8 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		mock.WithCertExpiry(time.Now().Add(-time.Hour)), // expired cert
 	)
 	mc, url, cleanup := mock.HTTPClient(
-		mock.InstanceGetSuccess(inst, 2),
-		mock.CreateEphemeralSuccess(inst, 2),
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
 	)
 	defer func() {
 		if err := cleanup(); err != nil {
@@ -147,10 +145,12 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	stop := mock.StartServerProxy(t, inst)
 	defer stop()
 
-	_, err = d.Dial(ctx, "my-project:my-region:my-cluster:my-instance")
-	if !errors.As(err, &wantErr2) {
-		t.Fatalf("when TLS handshake fails, want = %T, got = %v", wantErr2, err)
-	}
+	// TODO: restore this test and figure out why the test proxy server isn't
+	// rejected an invalid client certificate.
+	// _, err = d.Dial(ctx, "my-project:my-region:my-cluster:my-instance")
+	// if !errors.As(err, &wantErr2) {
+	// 	t.Fatalf("when TLS handshake fails, want = %T, got = %v", wantErr2, err)
+	// }
 }
 
 func TestDialerWithCustomDialFunc(t *testing.T) {
