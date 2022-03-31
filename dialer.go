@@ -48,7 +48,7 @@ var (
 	// versionString indicates the version of this library.
 	//go:embed version.txt
 	versionString string
-	userAgent     = "cloud-sql-go-connector/" + strings.TrimSpace(versionString)
+	userAgent     = "alloydb-go-connector/" + strings.TrimSpace(versionString)
 
 	// defaultKey is the default RSA public/private keypair used by the clients.
 	defaultKey    *rsa.PrivateKey
