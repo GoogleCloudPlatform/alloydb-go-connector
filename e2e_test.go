@@ -39,8 +39,6 @@ var (
 	alloydbPass = os.Getenv("ALLOYDB_PASS")
 	// Name of the database to connect to.
 	alloydbDB = os.Getenv("ALLOYDB_DB")
-	// Name of database IAM user.
-	alloydbUserIAM = os.Getenv("ALLOYDB_USER_IAM")
 )
 
 func requireAlloyDBVars(t *testing.T) {
@@ -53,8 +51,6 @@ func requireAlloyDBVars(t *testing.T) {
 		t.Fatal("'ALLOYDB_PASS' env var not set")
 	case alloydbDB:
 		t.Fatal("'ALLOYDB_DB' env var not set")
-	case alloydbUserIAM:
-		t.Fatal("'ALLOYDB_USER_IAM' env var not set")
 	}
 }
 
