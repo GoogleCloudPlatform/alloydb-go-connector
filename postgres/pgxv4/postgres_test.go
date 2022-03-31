@@ -19,7 +19,6 @@ import (
 	"log"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
 )
 
@@ -27,7 +26,7 @@ import (
 func ExamplePostgresConnection() {
 	// Note that sslmode=disable is required it does not mean that the connection
 	// is unencrypted. All connections via the proxy are completely encrypted.
-	pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())
+	pgxv4.RegisterDriver("cloudsql-postgres")
 	db, err := sql.Open(
 		"cloudsql-postgres",
 		"host=project:region:instance user=postgres dbname=postgres password=password sslmode=disable",

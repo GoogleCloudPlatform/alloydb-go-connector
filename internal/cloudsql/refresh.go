@@ -144,8 +144,12 @@ func createTLSConfig(inst connName, cc certChain, k *rsa.PrivateKey) *tls.Config
 	return &tls.Config{
 		InsecureSkipVerify: true,
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			if len(rawCerts) == 0 {
-				return errtype.NewDialError("no certificate to verify", inst.String(), nil)
+			if len(rawCerts) != 2 {
+				msg := fmt.Sprintf(
+					"unexpected number of certificates to verify, want = 2, got = %v",
+					len(rawCerts),
+				)
+				return errtype.NewDialError(msg, inst.String(), nil)
 			}
 			chain, err := x509.ParseCertificate(rawCerts[1])
 			if err != nil {
@@ -163,8 +167,6 @@ func createTLSConfig(inst connName, cc certChain, k *rsa.PrivateKey) *tls.Config
 			// if err != nil {
 			//  return errtype.NewDialError("failed to parse X.509 certificate", inst.String(), err)
 			// }
-			// serverCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Raw})
-			// os.WriteFile("server.pem", serverCert, 0666)
 			// serverName := "FIXME:INSTANCE_UID"
 			// if server.Subject.CommonName != serverName {
 			//  return errtype.NewDialError(

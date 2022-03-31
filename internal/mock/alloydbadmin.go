@@ -153,7 +153,7 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 		region:       reg,
 		cluster:      clust,
 		name:         name,
-		ipAddr:       "10.0.0.1",
+		ipAddr:       "127.0.0.1",
 		certExpiry:   time.Now().Add(24 * time.Hour),
 		rootCACert:   rootCert,
 		rootKey:      rootCAKey,
@@ -345,26 +345,19 @@ func HTTPClient(requests ...*Request) (*http.Client, string, func() error) {
 // FakeAlloyDBInstance. Callers should invoke the returned function to clean up
 // all resources.
 func StartServerProxy(t *testing.T, i FakeAlloyDBInstance) func() {
-	certPem := &bytes.Buffer{}
-	pem.Encode(certPem, &pem.Block{Type: "CERTIFICATE", Bytes: i.serverCert.Raw})
-
-	keyPem := &bytes.Buffer{}
-	pem.Encode(keyPem, &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(i.serverKey),
-	})
-
-	serverCert, err := tls.X509KeyPair(certPem.Bytes(), keyPem.Bytes())
-	if err != nil {
-		t.Fatalf("failed to create X.509 Key Pair: %v", err)
-	}
 	pool := x509.NewCertPool()
 	pool.AddCert(i.rootCACert)
 	ln, err := tls.Listen("tcp", ":5433", &tls.Config{
-		Certificates: []tls.Certificate{serverCert},
-		ServerName:   "FIXME", // FIXME: this will become the instance UID
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    pool,
+		Certificates: []tls.Certificate{
+			tls.Certificate{
+				Certificate: [][]byte{i.serverCert.Raw, i.rootCACert.Raw},
+				PrivateKey:  i.serverKey,
+				Leaf:        i.serverCert,
+			},
+		},
+		ServerName: "FIXME", // FIXME: this will become the instance UID
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  pool,
 	})
 	if err != nil {
 		t.Fatalf("failed to start listener: %v", err)

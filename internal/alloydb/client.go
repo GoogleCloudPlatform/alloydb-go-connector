@@ -44,6 +44,10 @@ type GenerateClientCertificateResponse struct {
 	PemCertificateChain []string `json:"pemCertificateChain"`
 }
 
+// baseURL is the production API endpoint of the AlloyDB Admin API
+// TODO: replace this with production.
+const baseURL = "https://staging-alloydb.sandbox.googleapis.com"
+
 type Client struct {
 	client *http.Client
 	// endpoint is the base URL for the AlloyDB admin API (e.g.
@@ -52,10 +56,13 @@ type Client struct {
 }
 
 func NewClient(ctx context.Context, opts ...option.ClientOption) (*Client, error) {
-	var os []option.ClientOption
-	os = append(opts, option.WithScopes(
-		"https://www.googleapis.com/auth/cloud-platform",
-	))
+	os := append([]option.ClientOption{
+		option.WithEndpoint(baseURL),
+	}, opts...) // allow for overriding the endpoint
+	os = append(os,
+		// do not allow for overriding the scopes
+		option.WithScopes("https://www.googleapis.com/auth/cloud-platform"),
+	)
 	client, endpoint, err := htransport.NewClient(ctx, os...)
 	if err != nil {
 		return nil, err
