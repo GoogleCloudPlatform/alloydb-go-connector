@@ -160,9 +160,6 @@ func RecordRefreshResult(ctx context.Context, instance, dialerID string, err err
 // errorCode returns an error code as given from the AlloyDB Admin API, provided
 // the error wraps a googleapi.Error type. If multiple error codes are returned
 // from the API, then a comma-separated string of all codes is returned.
-//
-// For possible error codes and their meaning see:
-// https://cloud.google.com/sql/docs/mysql/admin-api-error-messages
 func errorCode(err error) string {
 	var apiErr *googleapi.Error
 	ok := errors.As(err, &apiErr)

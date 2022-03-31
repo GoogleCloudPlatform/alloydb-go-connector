@@ -50,7 +50,7 @@ const baseURL = "https://staging-alloydb.sandbox.googleapis.com"
 
 type Client struct {
 	client *http.Client
-	// endpoint is the base URL for the AlloyDB admin API (e.g.
+	// endpoint is the base URL for the AlloyDB Admin API (e.g.
 	// https://alloydb.googleapis.com/v1)
 	endpoint string
 }

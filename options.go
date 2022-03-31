@@ -26,7 +26,6 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	apiopt "google.golang.org/api/option"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 // An Option is an option for configuring a Dialer.
@@ -72,7 +71,7 @@ func WithCredentialsFile(filename string) Option {
 // or refresh token JSON credentials to be used as the basis for authentication.
 func WithCredentialsJSON(b []byte) Option {
 	return func(d *dialerConfig) {
-		c, err := google.CredentialsFromJSON(context.Background(), b, sqladmin.SqlserviceAdminScope)
+		c, err := google.CredentialsFromJSON(context.Background(), b) // TODO: add AlloyDB scope
 		if err != nil {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
@@ -113,7 +112,7 @@ func WithRefreshTimeout(t time.Duration) Option {
 	}
 }
 
-// WithHTTPClient configures the underlying admin API client with the
+// WithHTTPClient configures the underlying AlloyDB Admin API client with the
 // provided HTTP client. This option is generally unnecessary except for
 // advanced use-cases.
 func WithHTTPClient(client *http.Client) Option {
@@ -122,8 +121,8 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
-// WithAdminAPIEndpoint configures the underlying admin API client to use
-// the provided URL.
+// WithAdminAPIEndpoint configures the underlying AlloyDB Admin API client to
+// use the provided URL.
 func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
 		d.adminOpts = append(d.adminOpts, apiopt.WithEndpoint(url))

@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !skip_alloydb
-// +build !skip_alloydb
-
 package alloydbconn_test
 
 import (
@@ -32,11 +29,18 @@ import (
 )
 
 var (
-	alloydbConnName = os.Getenv("ALLOYDB_CONNECTION_NAME") // "AlloyDB instance connection name, in the form of 'project:region:instance'.
-	alloydbUser     = os.Getenv("ALLOYDB_USER")            // Name of database user.
-	alloydbPass     = os.Getenv("ALLOYDB_PASS")            // Password for the database user; be careful when entering a password on the command line (it may go into your terminal's history).
-	alloydbDB       = os.Getenv("ALLOYDB_DB")              // Name of the database to connect to.
-	alloydbUserIAM  = os.Getenv("ALLOYDB_USER_IAM")        // Name of database IAM user.
+	// AlloyDB instance connection name, in the form of
+	// project:region:cluster:instance
+	alloydbConnName = os.Getenv("ALLOYDB_CONNECTION_NAME")
+	// Name of database user.
+	alloydbUser = os.Getenv("ALLOYDB_USER")
+	// Password for the database user; be careful when entering a password on the
+	// command line (it may go into your terminal's history).
+	alloydbPass = os.Getenv("ALLOYDB_PASS")
+	// Name of the database to connect to.
+	alloydbDB = os.Getenv("ALLOYDB_DB")
+	// Name of database IAM user.
+	alloydbUserIAM = os.Getenv("ALLOYDB_USER_IAM")
 )
 
 func requireAlloyDBVars(t *testing.T) {
