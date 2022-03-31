@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	errtype "cloud.google.com/go/alloydbconn/errtype"
-	"cloud.google.com/go/alloydbconn/internal/alloydb"
+	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"google.golang.org/api/option"
 )
@@ -49,7 +49,7 @@ func TestRefresh(t *testing.T) {
 		}
 	}()
 
-	cl, err := alloydb.NewClient(
+	cl, err := alloydbapi.NewClient(
 		context.Background(),
 		option.WithHTTPClient(mc),
 		option.WithEndpoint(url),
@@ -90,7 +90,7 @@ func TestRefreshFailsFast(t *testing.T) {
 		}
 	}()
 
-	cl, err := alloydb.NewClient(
+	cl, err := alloydbapi.NewClient(
 		context.Background(),
 		option.WithHTTPClient(mc),
 		option.WithEndpoint(url),
