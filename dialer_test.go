@@ -19,6 +19,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -187,5 +188,17 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 	_, err = d.Dial(ctx, "my-project:my-region:my-cluster:my-instance")
 	if !strings.Contains(err.Error(), "sentinel error") {
 		t.Fatalf("want = sentinel error, got = %v", err)
+	}
+}
+
+func TestDialerUserAgent(t *testing.T) {
+	data, err := os.ReadFile("version.txt")
+	if err != nil {
+		t.Fatalf("failed to read version.txt: %v", err)
+	}
+	ver := strings.TrimSpace(string(data))
+	want := "cloud-sql-go-connector/" + ver
+	if want != userAgent {
+		t.Errorf("embed version mismatched: want %q, got %q", want, userAgent)
 	}
 }
