@@ -34,7 +34,7 @@ func NewConfigError(msg, cn string) *ConfigError {
 
 // ConfigError represents an incorrect request by the user. Config errors
 // usually indicate a semantic error (e.g., the instance connection name is
-// malformated, the SQL instance does not support the requested IP type, etc.)
+// malformated, etc).
 type ConfigError struct{ *genericError }
 
 // NewRefreshError initializes a RefreshError.
@@ -73,7 +73,7 @@ func NewDialError(msg, cn string, err error) *DialError {
 	}
 }
 
-// DialError represents a problem that occurred when trying to dial a SQL
+// DialError represents a problem that occurred when trying to dial an AlloyDB
 // instance (e.g., a failure to set the keep-alive property, a TLS handshake
 // failure, a missing certificate, etc.)
 type DialError struct {

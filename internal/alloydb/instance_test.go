@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cloudsql
+package alloydb
 
 import (
 	"context"
@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtype"
-	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
-	"cloud.google.com/go/cloudsqlconn/internal/mock"
+	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
+	"cloud.google.com/go/alloydbconn/internal/mock"
 	"google.golang.org/api/option"
 )
 
@@ -133,7 +133,7 @@ func TestConnectInfo(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydb.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestConnectInfo(t *testing.T) {
 
 func TestConnectInfoErrors(t *testing.T) {
 	ctx := context.Background()
-	c, err := alloydb.NewClient(ctx)
+	c, err := alloydbapi.NewClient(ctx)
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestConnectInfoErrors(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	ctx := context.Background()
-	c, err := alloydb.NewClient(ctx)
+	c, err := alloydbapi.NewClient(ctx)
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}

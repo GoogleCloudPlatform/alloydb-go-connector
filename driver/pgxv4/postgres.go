@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package pgxv4 provides a Cloud SQL Postgres driver that uses pgx v4 and works
-// with the database/sql package.
+// Package pgxv4 provides an AlloyDB driver that uses pgx v4 and works with the
+// database/sql package.
 package pgxv4
 
 import (
@@ -22,19 +22,19 @@ import (
 	"database/sql/driver"
 	"net"
 
-	"cloud.google.com/go/cloudsqlconn"
+	"cloud.google.com/go/alloydbconn"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/stdlib"
 )
 
-// RegisterDriver registers a Postgres driver that uses the cloudsqlconn.Dialer
+// RegisterDriver registers a Postgres driver that uses the alloydbconn.Dialer
 // configured with the provided options. The choice of name is entirely up to
 // the caller and may be used to distinguish between multiple registrations of
 // differently configured Dialers. The driver uses pgx/v4 internally.
 // RegisterDriver returns a cleanup function that should be called one the
 // database connection is no longer needed.
-func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, error) {
-	d, err := cloudsqlconn.NewDialer(context.Background(), opts...)
+func RegisterDriver(name string, opts ...alloydbconn.Option) (func() error, error) {
+	d, err := alloydbconn.NewDialer(context.Background(), opts...)
 	if err != nil {
 		return func() error { return nil }, err
 	}
@@ -45,14 +45,14 @@ func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, err
 }
 
 type pgDriver struct {
-	d *cloudsqlconn.Dialer
+	d *alloydbconn.Dialer
 }
 
 // Open accepts a keyword/value formatted connection string and returns a
-// connection to the database using cloudsqlconn.Dialer. The Cloud SQL instance
+// connection to the database using alloydbconn.Dialer. The AlloyDB instance
 // connection name should be specified in the host field. For example:
 //
-// "host=my-project:us-central1:my-db-instance user=myuser password=mypass"
+// "host=my-project:us-central1:my-cluster:my-db-instance user=myuser password=mypass"
 func (p *pgDriver) Open(name string) (driver.Conn, error) {
 	config, err := pgx.ParseConfig(name)
 	if err != nil {

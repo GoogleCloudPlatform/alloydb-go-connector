@@ -1,10 +1,8 @@
-module cloud.google.com/go/cloudsqlconn
+module cloud.google.com/go/alloydbconn
 
-go 1.15
+go 1.16
 
 require (
-	github.com/denisenkom/go-mssqldb v0.12.0
-	github.com/go-sql-driver/mysql v1.6.0
 	github.com/google/uuid v1.3.0
 	github.com/jackc/pgx/v4 v4.15.0
 	github.com/pkg/errors v0.9.1 // indirect
@@ -15,4 +13,5 @@ require (
 	google.golang.org/api v0.73.0
 	google.golang.org/genproto v0.0.0-20220317150908-0efb43f6373e
 	google.golang.org/grpc v1.45.0
+	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 )

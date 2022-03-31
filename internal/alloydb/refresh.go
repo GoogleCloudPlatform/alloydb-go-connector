@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cloudsql
+package alloydb
 
 import (
 	"bytes"
@@ -27,15 +27,16 @@ import (
 	"fmt"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtype"
-	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
-	"cloud.google.com/go/cloudsqlconn/internal/trace"
+	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
+	"cloud.google.com/go/alloydbconn/internal/trace"
 	"golang.org/x/time/rate"
 )
 
-// fetchMetadata uses the Cloud SQL Admin APIs get method to retreive the information about a Cloud SQL instance
-// that is used to create secure connections.
-func fetchMetadata(ctx context.Context, cl *alloydb.Client, inst connName) (ipAddr string, err error) {
+// fetchMetadata uses the AlloyDB Admin APIs get method to retreive the
+// information about an AlloyDB instance that is used to create secure
+// connections.
+func fetchMetadata(ctx context.Context, cl *alloydbapi.Client, inst connName) (ipAddr string, err error) {
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
 	defer func() { end(err) }()
@@ -56,12 +57,13 @@ func parseCert(cert string) (*x509.Certificate, error) {
 	return x509.ParseCertificate(b.Bytes)
 }
 
-// fetchEphemeralCert uses the Cloud SQL Admin API's createEphemeral method to
-// create a signed TLS certificate that authorized to connect via the Cloud SQL
-// instance's serverside proxy. The cert if valid for approximately one hour.
+// fetchEphemeralCert uses the AlloyDB Admin API's generateClientCertificate
+// method to create a signed TLS certificate that authorized to connect via the
+// AlloyDB instance's serverside proxy. The cert if valid for approximately one
+// hour.
 func fetchEphemeralCert(
 	ctx context.Context,
-	cl *alloydb.Client,
+	cl *alloydbapi.Client,
 	inst connName,
 	key *rsa.PrivateKey,
 ) (cc certChain, err error) {
@@ -136,7 +138,8 @@ func fetchEphemeralCert(
 	}, nil
 }
 
-// createTLSConfig returns a *tls.Config for connecting securely to the Cloud SQL instance.
+// createTLSConfig returns a *tls.Config for connecting securely to the AlloyDB
+// instance.
 func createTLSConfig(inst connName, cc certChain, k *rsa.PrivateKey) *tls.Config {
 	certs := x509.NewCertPool()
 	certs.AddCert(cc.root)
@@ -190,7 +193,7 @@ func createTLSConfig(inst connName, cc certChain, k *rsa.PrivateKey) *tls.Config
 
 // newRefresher creates a Refresher.
 func newRefresher(
-	client *alloydb.Client,
+	client *alloydbapi.Client,
 	timeout time.Duration,
 	interval time.Duration,
 	burst int,
@@ -204,11 +207,11 @@ func newRefresher(
 	}
 }
 
-// refresher manages the SQL Admin API access to instance metadata and to
+// refresher manages the AlloyDB Admin API access to instance metadata and to
 // ephemeral certificates.
 type refresher struct {
 	// client provides access to the AlloyDB Admin API
-	client *alloydb.Client
+	client *alloydbapi.Client
 
 	// timeout is the maximum amount of time a refresh operation should be allowed to take.
 	timeout time.Duration
@@ -248,7 +251,7 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 		return refreshResult{}, ctx.Err()
 	}
 
-	// avoid refreshing too often to try not to tax the SQL Admin API quotas
+	// avoid refreshing too often to try not to tax the AlloyDB Admin API quotas
 	err = r.clientLimiter.Wait(ctx)
 	if err != nil {
 		return refreshResult{}, errtype.NewDialError(

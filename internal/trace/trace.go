@@ -38,14 +38,14 @@ func (a Attribute) traceAttr() trace.Attribute {
 	return trace.StringAttribute(a.key, a.value.(string))
 }
 
-// AddInstanceName creates an attribute with the Cloud SQL instance name.
+// AddInstanceName creates an attribute with the AlloyDB instance name.
 func AddInstanceName(name string) Attribute {
-	return Attribute{key: "/cloudsql/instance", value: name}
+	return Attribute{key: "/alloydb/instance", value: name}
 }
 
 // AddDialerID creates an attribute to identify a particular dialer.
 func AddDialerID(dialerID string) Attribute {
-	return Attribute{key: "/cloudsql/dialer_id", value: dialerID}
+	return Attribute{key: "/alloydb/dialer_id", value: dialerID}
 }
 
 // StartSpan begins a span with the provided name and returns a context and a
