@@ -29,7 +29,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v4"
 
-	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
+	"cloud.google.com/go/cloudsqlconn/driver/pgxv4"
 )
 
 var (

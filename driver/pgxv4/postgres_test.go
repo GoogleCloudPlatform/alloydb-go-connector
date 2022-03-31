@@ -19,16 +19,16 @@ import (
 	"log"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
+	"cloud.google.com/go/cloudsqlconn/driver/pgxv4"
 )
 
 // Example shows how to use cloudsqlpostgres dialer
 func ExamplePostgresConnection() {
 	// Note that sslmode=disable is required it does not mean that the connection
 	// is unencrypted. All connections via the proxy are completely encrypted.
-	pgxv4.RegisterDriver("cloudsql-postgres")
+	pgxv4.RegisterDriver("alloydb-postgres")
 	db, err := sql.Open(
-		"cloudsql-postgres",
+		"alloydb-postgres",
 		"host=project:region:instance user=postgres dbname=postgres password=password sslmode=disable",
 	)
 	if err != nil {
