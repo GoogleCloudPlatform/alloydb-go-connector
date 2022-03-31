@@ -39,6 +39,7 @@ type dialerConfig struct {
 	refreshTimeout time.Duration
 	useIAMAuthN    bool
 	tokenSource    oauth2.TokenSource
+	useragents     []string
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -78,6 +79,13 @@ func WithCredentialsJSON(b []byte) Option {
 		}
 		d.tokenSource = c.TokenSource
 		d.adminOpts = append(d.adminOpts, apiopt.WithCredentials(c))
+	}
+}
+
+// WithUserAgent returns an Option that sets the User-Agent.
+func WithUserAgent(ua string) Option {
+	return func(d *dialerConfig) {
+		d.useragents = append(d.useragents, ua)
 	}
 }
 
