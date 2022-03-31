@@ -16,8 +16,8 @@ filing on GitHub. This will ensure a timely response.
 
 Please run down the following list and make sure you've tried the usual "quick fixes":
 
-  - Search the issues already opened: https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues
-  - Check for answers on StackOverflow: https://stackoverflow.com/questions/tagged/google-cloud-sql
+  - Search the issues already opened: https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues
+  - Check for answers on StackOverflow: https://stackoverflow.com/questions/tagged/google-alloydb
 
 If you are still having issues, please include as much information as possible:
 
