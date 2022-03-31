@@ -97,8 +97,8 @@ type Dialer struct {
 func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg := &dialerConfig{
 		refreshTimeout: 30 * time.Second,
-		adminOpts:      []option.ClientOption{option.WithUserAgent(userAgent)},
 		dialFunc:       proxy.Dial,
+		useragents:     []string{userAgent},
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -106,6 +106,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return nil, cfg.err
 		}
 	}
+	// Add this to the end to make sure it's not overridden
+	cfg.adminOpts = append(cfg.adminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
+
 	if cfg.rsaKey == nil {
 		key, err := getDefaultKeys()
 		if err != nil {
