@@ -33,7 +33,7 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
+	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 )
 
 type Option func(*FakeAlloyDBInstance)
@@ -248,7 +248,7 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 				http.Error(resp, fmt.Errorf("unable to read body: %w", err).Error(), http.StatusBadRequest)
 				return
 			}
-			var rreq alloydb.GenerateClientCertificateRequest
+			var rreq alloydbapi.GenerateClientCertificateRequest
 			err = json.Unmarshal(b, &rreq)
 			if err != nil {
 				http.Error(resp, fmt.Errorf("invalid or unexpected json: %w", err).Error(), http.StatusBadRequest)
@@ -291,7 +291,7 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 			caPEM := &bytes.Buffer{}
 			pem.Encode(caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: i.rootCACert.Raw})
 
-			rresp := alloydb.GenerateClientCertificateResponse{
+			rresp := alloydbapi.GenerateClientCertificateResponse{
 				PemCertificate:      certPEM.String(),
 				PemCertificateChain: []string{instancePEM.String(), caPEM.String()},
 			}

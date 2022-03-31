@@ -28,9 +28,9 @@ import (
 )
 
 var (
-	keyInstance, _  = tag.NewKey("cloudsql_instance")
-	keyDialerID, _  = tag.NewKey("cloudsql_dialer_id")
-	keyErrorCode, _ = tag.NewKey("cloudsql_error_code")
+	keyInstance, _  = tag.NewKey("alloydb_instance")
+	keyDialerID, _  = tag.NewKey("alloydb_dialer_id")
+	keyErrorCode, _ = tag.NewKey("alloydb_error_code")
 
 	mLatencyMS = stats.Int64(
 		"/alloydbconn/latency",
@@ -39,12 +39,12 @@ var (
 	)
 	mConnections = stats.Int64(
 		"/alloydbconn/connection",
-		"A connect or disconnect event to Cloud SQL",
+		"A connect or disconnect event to an AlloyDB instance",
 		stats.UnitDimensionless,
 	)
 	mDialError = stats.Int64(
 		"/alloydbconn/dial_failure",
-		"A failure to dial a Cloud SQL instance",
+		"A failure to dial an AlloyDB instance",
 		stats.UnitDimensionless,
 	)
 	mSuccessfulRefresh = stats.Int64(
@@ -69,7 +69,7 @@ var (
 	connectionsView = &view.View{
 		Name:        "/alloydbconn/open_connections",
 		Measure:     mConnections,
-		Description: "The current number of open Cloud SQL connections",
+		Description: "The current number of open AlloyDB connections",
 		Aggregation: view.LastValue(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
@@ -157,9 +157,9 @@ func RecordRefreshResult(ctx context.Context, instance, dialerID string, err err
 	stats.Record(ctx, mSuccessfulRefresh.M(1))
 }
 
-// errorCode returns an error code as given from the SQL Admin API, provided the
-// error wraps a googleapi.Error type. If multiple error codes are returned from
-// the API, then a comma-separated string of all codes is returned.
+// errorCode returns an error code as given from the AlloyDB Admin API, provided
+// the error wraps a googleapi.Error type. If multiple error codes are returned
+// from the API, then a comma-separated string of all codes is returned.
 //
 // For possible error codes and their meaning see:
 // https://cloud.google.com/sql/docs/mysql/admin-api-error-messages

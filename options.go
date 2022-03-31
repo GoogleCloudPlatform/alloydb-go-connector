@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cloudsqlconn
+package alloydbconn
 
 import (
 	"context"
@@ -22,7 +22,7 @@ import (
 	"net/http"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/alloydbconn/errtype"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	apiopt "google.golang.org/api/option"
@@ -113,7 +113,7 @@ func WithRefreshTimeout(t time.Duration) Option {
 	}
 }
 
-// WithHTTPClient configures the underlying SQL Admin API client with the
+// WithHTTPClient configures the underlying admin API client with the
 // provided HTTP client. This option is generally unnecessary except for
 // advanced use-cases.
 func WithHTTPClient(client *http.Client) Option {
@@ -122,7 +122,7 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
-// WithAdminAPIEndpoint configures the underlying SQL Admin API client to use
+// WithAdminAPIEndpoint configures the underlying admin API client to use
 // the provided URL.
 func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cloudsql
+package alloydb
 
 import (
 	"context"
@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	errtype "cloud.google.com/go/cloudsqlconn/errtype"
-	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
-	"cloud.google.com/go/cloudsqlconn/internal/mock"
+	errtype "cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/internal/alloydb"
+	"cloud.google.com/go/alloydbconn/internal/mock"
 	"google.golang.org/api/option"
 )
 

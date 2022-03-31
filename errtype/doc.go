@@ -13,5 +13,5 @@
 // limitations under the License.
 
 // Package errtype provides a number of concrete types which are used by the
-// cloudsqlconn package.
-package errtype // import "cloud.google.com/go/cloudsqlconn/errtype"
+// alloydbconn package.
+package errtype // import "cloud.google.com/go/alloydbconn/errtype"

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cloudsqlconn
+package alloydbconn
 
 import (
 	"context"
@@ -23,9 +23,9 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtype"
-	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
-	"cloud.google.com/go/cloudsqlconn/internal/mock"
+	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
+	"cloud.google.com/go/alloydbconn/internal/mock"
 	"google.golang.org/api/option"
 )
 
@@ -45,7 +45,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydb.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydb.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydb.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydb.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}

@@ -1,18 +1,18 @@
 // Copyright 2020 Google LLC
-
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-
+//
 //     https://www.apache.org/licenses/LICENSE-2.0
-
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cloudsqlconn
+package alloydbconn
 
 import (
 	"context"
@@ -25,10 +25,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtype"
-	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
-	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
-	"cloud.google.com/go/cloudsqlconn/internal/trace"
+	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/internal/alloydb"
+	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
+	"cloud.google.com/go/alloydbconn/internal/trace"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
@@ -39,7 +39,8 @@ const (
 	versionString = "0.2.1-dev"
 	userAgent     = "cloud-sql-go-connector/" + versionString
 
-	// defaultTCPKeepAlive is the default keep alive value used on connections to a Cloud SQL instance.
+	// defaultTCPKeepAlive is the default keep alive value used on connections
+	// to a AlloyDB instance
 	defaultTCPKeepAlive = 30 * time.Second
 	// serverProxyPort is the port the server-side proxy receives connections on.
 	serverProxyPort = "5433"
@@ -59,18 +60,18 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 	return defaultKey, defaultKeyErr
 }
 
-// A Dialer is used to create connections to Cloud SQL instances.
+// A Dialer is used to create connections to AlloyDB instance.
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
 	lock sync.RWMutex
 	// instances map connection names (e.g., my-project:us-central1:my-instance)
-	// to *cloudsql.Instance types.
-	instances      map[string]*cloudsql.Instance
+	// to *alloydb.Instance types.
+	instances      map[string]*alloydb.Instance
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
 
-	client *alloydb.Client
+	client *alloydbapi.Client
 
 	// defaultDialCfg holds the constructor level DialOptions, so that it can
 	// be copied and mutated by the Dial function.
@@ -110,7 +111,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		cfg.rsaKey = key
 	}
 
-	client, err := alloydb.NewClient(ctx, cfg.adminOpts...)
+	client, err := alloydbapi.NewClient(ctx, cfg.adminOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AlloyDB Admin API client: %v", err)
 	}
@@ -126,7 +127,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, err
 	}
 	d := &Dialer{
-		instances:      make(map[string]*cloudsql.Instance),
+		instances:      make(map[string]*alloydb.Instance),
 		key:            cfg.rsaKey,
 		refreshTimeout: cfg.refreshTimeout,
 		client:         client,
@@ -137,8 +138,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	return d, nil
 }
 
-// Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
-// instance's connection name, which is in the format "project-name:region:instance-name".
+// Dial returns a net.Conn connected to the specified AlloyDB instance. The
+// instance argument must be the instance's connection name, which is in the
+// format "project-name:region:cluster:instance-name".
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
 	startTime := time.Now()
 	var endDial trace.EndSpanFunc
@@ -246,7 +248,7 @@ func (d *Dialer) Close() error {
 	return nil
 }
 
-func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
+func (d *Dialer) instance(connName string) (*alloydb.Instance, error) {
 	// Check instance cache
 	d.lock.RLock()
 	i, ok := d.instances[connName]
@@ -258,7 +260,7 @@ func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
 		if !ok {
 			// Create a new instance
 			var err error
-			i, err = cloudsql.NewInstance(connName, d.client, d.key, d.refreshTimeout, d.dialerID)
+			i, err = alloydb.NewInstance(connName, d.client, d.key, d.refreshTimeout, d.dialerID)
 			if err != nil {
 				d.lock.Unlock()
 				return nil, err

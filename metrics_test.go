@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package cloudsqlconn
+package alloydbconn
 
 import (
 	"context"
@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
-	"cloud.google.com/go/cloudsqlconn/internal/mock"
+	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
+	"cloud.google.com/go/alloydbconn/internal/mock"
 	"go.opencensus.io/stats/view"
 	"google.golang.org/api/option"
 )
@@ -116,7 +116,7 @@ func TestDialerWithMetrics(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydb.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}

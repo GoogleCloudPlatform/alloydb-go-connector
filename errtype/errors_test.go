@@ -18,7 +18,7 @@ import (
 	"errors"
 	"testing"
 
-	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/alloydbconn/errtype"
 )
 
 func TestErrorFormatting(t *testing.T) {

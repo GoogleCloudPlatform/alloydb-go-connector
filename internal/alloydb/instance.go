@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cloudsql
+package alloydb
 
 import (
 	"context"
@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
-	errtype "cloud.google.com/go/cloudsqlconn/errtype"
-	"cloud.google.com/go/cloudsqlconn/internal/alloydb"
+	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 )
 
 const (
@@ -120,9 +120,10 @@ func (r *refreshOperation) IsValid() bool {
 	}
 }
 
-// Instance manages the information used to connect to the Cloud SQL instance by periodically calling
-// the Cloud SQL Admin API. It automatically refreshes the required information approximately 5 minutes
-// before the previous certificate expires (every 55 minutes).
+// Instance manages the information used to connect to the AlloyDB instance by
+// periodically calling the AlloyDB Admin API. It automatically refreshes the
+// required information approximately 5 minutes before the previous certificate
+// expires (every 55 minutes).
 type Instance struct {
 	connName
 	key *rsa.PrivateKey
@@ -148,7 +149,7 @@ type Instance struct {
 // NewInstance initializes a new Instance given an instance connection name
 func NewInstance(
 	instance string,
-	client *alloydb.Client,
+	client *alloydbapi.Client,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
 	dialerID string,
@@ -180,15 +181,13 @@ func NewInstance(
 	return i, nil
 }
 
-// Close closes the instance; it stops the refresh cycle and prevents it from making
-// additional calls to the Cloud SQL Admin API.
+// Close closes the instance; it stops the refresh cycle and prevents it from
+// making additional calls to the AlloyDB Admin API.
 func (i *Instance) Close() {
 	i.cancel()
 }
 
-// ConnectInfo returns an IP address specified by ipType (i.e., public or
-// private) and a TLS config that can be used to connect to a Cloud SQL
-// instance.
+// ConnectInfo returns an IP address of the AlloyDB instance.
 func (i *Instance) ConnectInfo(ctx context.Context) (string, *tls.Config, error) {
 	res, err := i.result(ctx)
 	if err != nil {
