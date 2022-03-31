@@ -114,7 +114,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	ctx := context.Background()
 	inst := mock.NewFakeInstance(
 		"my-project", "my-region", "my-cluster", "my-instance",
-		mock.WithCertExpiry(time.Now().Add(-time.Hour)), // expired cert
+		mock.WithCertExpiry(time.Now().Add(-24*time.Hour)), // expired cert
 	)
 	mc, url, cleanup := mock.HTTPClient(
 		mock.InstanceGetSuccess(inst, 1),

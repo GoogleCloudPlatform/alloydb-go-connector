@@ -145,7 +145,11 @@ func createTLSConfig(inst connName, cc certChain, k *rsa.PrivateKey) *tls.Config
 		InsecureSkipVerify: true,
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			if len(rawCerts) != 2 {
-				return errtype.NewDialError("no certificate to verify", inst.String(), nil)
+				msg := fmt.Sprintf(
+					"unexpected number of certificates to verify, want = 2, got = %v",
+					len(rawCerts),
+				)
+				return errtype.NewDialError(msg, inst.String(), nil)
 			}
 			chain, err := x509.ParseCertificate(rawCerts[1])
 			if err != nil {
