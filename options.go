@@ -37,7 +37,6 @@ type dialerConfig struct {
 	dialOpts       []DialOption
 	dialFunc       func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout time.Duration
-	useIAMAuthN    bool
 	tokenSource    oauth2.TokenSource
 	useragents     []string
 	// err tracks any dialer options that may have failed.
@@ -151,7 +150,6 @@ type DialOption func(d *dialCfg)
 
 type dialCfg struct {
 	tcpKeepAlive time.Duration
-	ipType       string
 }
 
 // DialOptions turns a list of DialOption instances into an DialOption.
