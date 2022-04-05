@@ -25,6 +25,7 @@ import (
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 	"cloud.google.com/go/alloydbconn/internal/mock"
+	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 )
 
@@ -114,6 +115,12 @@ func TestParseConnNameErrors(t *testing.T) {
 	}
 }
 
+type stubTokenSource struct{}
+
+func (stubTokenSource) Token() (*oauth2.Token, error) {
+	return nil, nil
+}
+
 func TestConnectInfo(t *testing.T) {
 	ctx := context.Background()
 
@@ -133,7 +140,10 @@ func TestConnectInfo(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc),
+		option.WithEndpoint(url),
+		option.WithTokenSource(stubTokenSource{}),
+	)
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -171,7 +181,7 @@ func TestConnectInfo(t *testing.T) {
 
 func TestConnectInfoErrors(t *testing.T) {
 	ctx := context.Background()
-	c, err := alloydbapi.NewClient(ctx)
+	c, err := alloydbapi.NewClient(ctx, option.WithTokenSource(stubTokenSource{}))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -194,7 +204,7 @@ func TestConnectInfoErrors(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	ctx := context.Background()
-	c, err := alloydbapi.NewClient(ctx)
+	c, err := alloydbapi.NewClient(ctx, option.WithTokenSource(stubTokenSource{}))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}

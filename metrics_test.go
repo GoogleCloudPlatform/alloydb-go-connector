@@ -121,7 +121,7 @@ func TestDialerWithMetrics(t *testing.T) {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
 
-	d, err := NewDialer(ctx)
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}))
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
