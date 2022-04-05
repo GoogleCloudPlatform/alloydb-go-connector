@@ -27,8 +27,15 @@ import (
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 	"cloud.google.com/go/alloydbconn/internal/mock"
+	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 )
+
+type stubTokenSource struct{}
+
+func (stubTokenSource) Token() (*oauth2.Token, error) {
+	return nil, nil
+}
 
 func TestDialerCanConnectToInstance(t *testing.T) {
 	ctx := context.Background()
@@ -51,7 +58,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
 
-	d, err := NewDialer(ctx)
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}))
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
@@ -84,7 +91,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
-	d, err := NewDialer(ctx)
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}))
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
@@ -131,7 +138,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
 
-	d, err := NewDialer(ctx)
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}))
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
@@ -179,6 +186,7 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 		WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return nil, errors.New("sentinel error")
 		}),
+		WithTokenSource(stubTokenSource{}),
 	)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
