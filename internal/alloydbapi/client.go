@@ -45,13 +45,12 @@ type GenerateClientCertificateResponse struct {
 }
 
 // baseURL is the production API endpoint of the AlloyDB Admin API
-// TODO: replace this with production.
-const baseURL = "https://staging-alloydb.sandbox.googleapis.com"
+const baseURL = "https://alloydb.googleapis.com"
 
 type Client struct {
 	client *http.Client
 	// endpoint is the base URL for the AlloyDB Admin API (e.g.
-	// https://alloydb.googleapis.com/v1)
+	// https://alloydb.googleapis.com)
 	endpoint string
 }
 
