@@ -82,7 +82,9 @@ func (c *Client) InstanceGet(ctx context.Context, project, region, cluster, inst
 	if err != nil {
 		return InstanceGetResponse{}, err
 	}
-	if res != nil && res.StatusCode == http.StatusNotModified {
+	defer res.Body.Close()
+
+	if res.StatusCode >= http.StatusNotModified {
 		var body []byte
 		if res.Body != nil {
 			defer res.Body.Close()
@@ -98,10 +100,6 @@ func (c *Client) InstanceGet(ctx context.Context, project, region, cluster, inst
 			Body:   string(body),
 		}
 	}
-	if err != nil {
-		return InstanceGetResponse{}, err
-	}
-	defer res.Body.Close()
 	ret := InstanceGetResponse{
 		ServerResponse: googleapi.ServerResponse{
 			Header:         res.Header,
@@ -132,6 +130,22 @@ func (c *Client) GenerateClientCert(ctx context.Context, project, region, cluste
 		return GenerateClientCertificateResponse{}, err
 	}
 	defer res.Body.Close()
+	if res.StatusCode >= http.StatusNotModified {
+		var body []byte
+		if res.Body != nil {
+			defer res.Body.Close()
+			body, err = ioutil.ReadAll(res.Body)
+			if err != nil {
+				return GenerateClientCertificateResponse{}, err
+			}
+		}
+
+		return GenerateClientCertificateResponse{}, &googleapi.Error{
+			Code:   res.StatusCode,
+			Header: res.Header,
+			Body:   string(body),
+		}
+	}
 	ret := GenerateClientCertificateResponse{
 		ServerResponse: googleapi.ServerResponse{
 			Header:         res.Header,
