@@ -64,7 +64,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	}
 	d.client = c
 
-	conn, err := d.Dial(ctx, "my-project:my-region:my-cluster:my-instance")
+	conn, err := d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
 	}
@@ -106,12 +106,12 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
 
-	_, err = d.Dial(ctx, "my-project:my-region:my-cluster:my-instance")
+	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("when context is canceled, want = %T, got = %v", context.Canceled, err)
 	}
 
-	_, err = d.Dial(context.Background(), "my-project:my-region:my-cluster:my-instance")
+	_, err = d.Dial(context.Background(), "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
 	var wantErr2 *errtype.RefreshError
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when API call fails, want = %T, got = %v", wantErr2, err)
@@ -144,7 +144,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	}
 	d.client = c
 
-	_, err = d.Dial(ctx, "my-project:my-region:my-cluster:my-instance")
+	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
 	var wantErr2 *errtype.DialError
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when server proxy socket is unavailable, want = %T, got = %v", wantErr2, err)
@@ -155,7 +155,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 
 	// TODO: restore this test and figure out why the test proxy server isn't
 	// rejected an invalid client certificate.
-	// _, err = d.Dial(ctx, "my-project:my-region:my-cluster:my-instance")
+	// _, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
 	// if !errors.As(err, &wantErr2) {
 	// 	t.Fatalf("when TLS handshake fails, want = %T, got = %v", wantErr2, err)
 	// }
@@ -193,7 +193,7 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 	}
 	d.client = c
 
-	_, err = d.Dial(ctx, "my-project:my-region:my-cluster:my-instance")
+	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
 	if !strings.Contains(err.Error(), "sentinel error") {
 		t.Fatalf("want = sentinel error, got = %v", err)
 	}
