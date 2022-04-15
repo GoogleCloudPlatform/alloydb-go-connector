@@ -34,37 +34,38 @@ const (
 )
 
 var (
-	// Instance connection name is the format <PROJECT>:<REGION>:<CLUSTER>:<INSTANCE>
+	// Instance URI is in the format:
+	// '/projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>'
 	// Additionally, we have to support legacy "domain-scoped" projects (e.g. "google.com:PROJECT")
-	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+):([^:]+)")
+	instURIRegex = regexp.MustCompile("projects/([^:]+(:[^:]+)?)/locations/([^:]+)/clusters/([^:]+)/instances/([^:]+)")
 )
 
-// connName represents the "instance connection name", in the format "project:region:name". Use the
+// instanceURI represents the "instance connection name", in the format "project:region:name". Use the
 // "parseConnName" method to initialize this struct.
-type connName struct {
+type instanceURI struct {
 	project string
 	region  string
 	cluster string
 	name    string
 }
 
-func (c *connName) String() string {
+func (c *instanceURI) String() string {
 	return fmt.Sprintf("%s:%s:%s:%s", c.project, c.region, c.cluster, c.name)
 }
 
-// parseConnName initializes a new connName struct.
-func parseConnName(cn string) (connName, error) {
+// parseInstURI initializes a new instanceURI struct.
+func parseInstURI(cn string) (instanceURI, error) {
 	b := []byte(cn)
-	m := connNameRegex.FindSubmatch(b)
+	m := instURIRegex.FindSubmatch(b)
 	if m == nil {
 		err := errtype.NewConfigError(
-			"invalid instance connection name, expected PROJECT:REGION:CLUSTER:INSTANCE",
+			"invalid instance connection name, expected /projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
 			cn,
 		)
-		return connName{}, err
+		return instanceURI{}, err
 	}
 
-	c := connName{
+	c := instanceURI{
 		project: string(m[1]),
 		region:  string(m[3]),
 		cluster: string(m[4]),
@@ -125,7 +126,7 @@ func (r *refreshOperation) IsValid() bool {
 // required information approximately 5 minutes before the previous certificate
 // expires (every 55 minutes).
 type Instance struct {
-	connName
+	instanceURI
 	key *rsa.PrivateKey
 	r   refresher
 
@@ -154,14 +155,14 @@ func NewInstance(
 	refreshTimeout time.Duration,
 	dialerID string,
 ) (*Instance, error) {
-	cn, err := parseConnName(instance)
+	cn, err := parseInstURI(instance)
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &Instance{
-		connName: cn,
-		key:      key,
+		instanceURI: cn,
+		key:         key,
 		r: newRefresher(
 			client,
 			refreshTimeout,
@@ -227,7 +228,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 	res := &refreshOperation{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		res.result, res.err = i.r.performRefresh(i.ctx, i.connName, i.key)
+		res.result, res.err = i.r.performRefresh(i.ctx, i.instanceURI, i.key)
 		close(res.ready)
 
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh
@@ -261,5 +262,5 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 
 // String returns the instance's connection name.
 func (i *Instance) String() string {
-	return i.connName.String()
+	return i.instanceURI.String()
 }

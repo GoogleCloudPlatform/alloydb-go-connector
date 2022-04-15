@@ -36,7 +36,7 @@ import (
 // fetchMetadata uses the AlloyDB Admin APIs get method to retreive the
 // information about an AlloyDB instance that is used to create secure
 // connections.
-func fetchMetadata(ctx context.Context, cl *alloydbapi.Client, inst connName) (ipAddr string, err error) {
+func fetchMetadata(ctx context.Context, cl *alloydbapi.Client, inst instanceURI) (ipAddr string, err error) {
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
 	defer func() { end(err) }()
@@ -64,7 +64,7 @@ func parseCert(cert string) (*x509.Certificate, error) {
 func fetchEphemeralCert(
 	ctx context.Context,
 	cl *alloydbapi.Client,
-	inst connName,
+	inst instanceURI,
 	key *rsa.PrivateKey,
 ) (cc certChain, err error) {
 	var end trace.EndSpanFunc
@@ -140,7 +140,7 @@ func fetchEphemeralCert(
 
 // createTLSConfig returns a *tls.Config for connecting securely to the AlloyDB
 // instance.
-func createTLSConfig(inst connName, cc certChain, k *rsa.PrivateKey) *tls.Config {
+func createTLSConfig(inst instanceURI, cc certChain, k *rsa.PrivateKey) *tls.Config {
 	certs := x509.NewCertPool()
 	certs.AddCert(cc.root)
 
@@ -235,7 +235,7 @@ type certChain struct {
 	client       *x509.Certificate
 }
 
-func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (res refreshResult, err error) {
+func (r refresher) performRefresh(ctx context.Context, cn instanceURI, k *rsa.PrivateKey) (res refreshResult, err error) {
 	var refreshEnd trace.EndSpanFunc
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.RefreshConnection",
 		trace.AddInstanceName(cn.String()),
