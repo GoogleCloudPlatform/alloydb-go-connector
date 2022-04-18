@@ -41,16 +41,16 @@ func genRSAKey() *rsa.PrivateKey {
 // RSAKey is used for test only.
 var RSAKey = genRSAKey()
 
-func TestParseConnName(t *testing.T) {
+func TestParseInstURI(t *testing.T) {
 	tcs := []struct {
 		desc string
 		in   string
-		want connName
+		want instanceURI
 	}{
 		{
 			desc: "vanilla instance connection name",
-			in:   "proj:reg:clust:name",
-			want: connName{
+			in:   "/projects/proj/locations/reg/clusters/clust/instances/name",
+			want: instanceURI{
 				project: "proj",
 				region:  "reg",
 				cluster: "clust",
@@ -59,8 +59,8 @@ func TestParseConnName(t *testing.T) {
 		},
 		{
 			desc: "with legacy domain-scoped project",
-			in:   "google.com:proj:reg:clust:name",
-			want: connName{
+			in:   "/projects/google.com:proj/locations/reg/clusters/clust/instances/name",
+			want: instanceURI{
 				project: "google.com:proj",
 				region:  "reg",
 				cluster: "clust",
@@ -71,7 +71,7 @@ func TestParseConnName(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
-			got, err := parseConnName(tc.in)
+			got, err := parseInstURI(tc.in)
 			if err != nil {
 				t.Fatalf("want no error, got = %v", err)
 			}
@@ -107,7 +107,7 @@ func TestParseConnNameErrors(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
-			_, err := parseConnName(tc.in)
+			_, err := parseInstURI(tc.in)
 			if err == nil {
 				t.Fatal("want error, got nil")
 			}
@@ -149,7 +149,7 @@ func TestConnectInfo(t *testing.T) {
 	}
 
 	i, err := NewInstance(
-		"my-project:my-region:my-cluster:my-instance",
+		"/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance",
 		c, RSAKey, 30*time.Second, "dialer-id",
 	)
 	if err != nil {
@@ -188,7 +188,7 @@ func TestConnectInfoErrors(t *testing.T) {
 
 	// Use a timeout that should fail instantly
 	im, err := NewInstance(
-		"my-project:my-region:my-cluster:my-instance",
+		"/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance",
 		c, RSAKey, 0, "dialer-id",
 	)
 	if err != nil {
@@ -211,7 +211,7 @@ func TestClose(t *testing.T) {
 
 	// Set up an instance and then close it immediately
 	im, err := NewInstance(
-		"my-proj:my-region:my-cluster:my-inst",
+		"/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance",
 		c, RSAKey, 30, "dialer-ider",
 	)
 	if err != nil {

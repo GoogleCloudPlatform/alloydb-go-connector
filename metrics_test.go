@@ -128,13 +128,13 @@ func TestDialerWithMetrics(t *testing.T) {
 	d.client = c
 
 	// dial a good instance
-	conn, err := d.Dial(ctx, "my-project:my-region:my-cluster:my-instance")
+	conn, err := d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
 	}
 	defer conn.Close()
 	// dial a bogus instance
-	_, err = d.Dial(ctx, "my-project:my-region:notaninstance")
+	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/notaninstance")
 	if err == nil {
 		t.Fatal("expected Dial to fail, but got no error")
 	}
