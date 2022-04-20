@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -344,24 +345,38 @@ func HTTPClient(requests ...*Request) (*http.Client, string, func() error) {
 // on all interfaces, configured with TLS as specified by the
 // FakeAlloyDBInstance. Callers should invoke the returned function to clean up
 // all resources.
-func StartServerProxy(t *testing.T, i FakeAlloyDBInstance) func() {
+func StartServerProxy(t *testing.T, inst FakeAlloyDBInstance) func() {
 	pool := x509.NewCertPool()
-	pool.AddCert(i.rootCACert)
-	ln, err := tls.Listen("tcp", ":5433", &tls.Config{
-		Certificates: []tls.Certificate{
-			tls.Certificate{
-				Certificate: [][]byte{i.serverCert.Raw, i.rootCACert.Raw},
-				PrivateKey:  i.serverKey,
-				Leaf:        i.serverCert,
-			},
-		},
-		ServerName: "FIXME", // FIXME: this will become the instance UID
-		ClientAuth: tls.RequireAndVerifyClientCert,
-		ClientCAs:  pool,
-	})
-	if err != nil {
+	pool.AddCert(inst.rootCACert)
+	tryListen := func(t *testing.T, attempts int) net.Listener {
+		var (
+			ln  net.Listener
+			err error
+		)
+		for i := 0; i < attempts; i++ {
+			ln, err = tls.Listen("tcp", ":5433", &tls.Config{
+				Certificates: []tls.Certificate{
+					tls.Certificate{
+						Certificate: [][]byte{inst.serverCert.Raw, inst.rootCACert.Raw},
+						PrivateKey:  inst.serverKey,
+						Leaf:        inst.serverCert,
+					},
+				},
+				ServerName: "FIXME", // FIXME: this will become the instance UID
+				ClientAuth: tls.RequireAndVerifyClientCert,
+				ClientCAs:  pool,
+			})
+			if err != nil {
+				t.Log("listener failed to start, waiting 100ms")
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			return ln
+		}
 		t.Fatalf("failed to start listener: %v", err)
+		return nil
 	}
+	ln := tryListen(t, 10)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		for {
@@ -374,7 +389,7 @@ func StartServerProxy(t *testing.T, i FakeAlloyDBInstance) func() {
 					t.Logf("fake server proxy will close listener after error: %v", err)
 					return
 				}
-				conn.Write([]byte(i.name))
+				conn.Write([]byte(inst.name))
 				conn.Close()
 			}
 		}
