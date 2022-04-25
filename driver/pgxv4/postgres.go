@@ -40,7 +40,8 @@ func RegisterDriver(name string, opts ...alloydbconn.Option) (func() error, erro
 		return func() error { return nil }, err
 	}
 	sql.Register(name, &pgDriver{
-		d: d,
+		d:      d,
+		dbURIs: make(map[string]string),
 	})
 	return func() error { return d.Close() }, nil
 }
