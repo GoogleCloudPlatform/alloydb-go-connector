@@ -49,16 +49,16 @@ type pgDriver struct {
 }
 
 // Open accepts a keyword/value formatted connection string and returns a
-// connection to the database using alloydbconn.Dialer. The AlloyDB instance
-// connection name should be specified in the host field. For example:
+// connection to the database using alloydbconn.Dialer. The AlloyDB instance URI
+// should be specified in the host field. For example:
 //
-// "host=my-project:us-central1:my-cluster:my-db-instance user=myuser password=mypass"
+// /projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>
 func (p *pgDriver) Open(name string) (driver.Conn, error) {
 	config, err := pgx.ParseConfig(name)
 	if err != nil {
 		return nil, err
 	}
-	instConnName := config.Config.Host // Extract instance connection name
+	instConnName := config.Config.Host // Extract instance URI
 	config.Config.Host = "localhost"   // Replace it with a default value
 	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return p.d.Dial(ctx, instConnName)
