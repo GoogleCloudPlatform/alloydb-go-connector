@@ -93,7 +93,7 @@ func TestPgxConnect(t *testing.T) {
 
 func TestAlloyDBHook(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping Postgres integration tests")
+		t.Skip("skipping integration tests")
 	}
 	testConn := func(db *sql.DB) {
 		var now time.Time
@@ -102,7 +102,11 @@ func TestAlloyDBHook(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	pgxv4.RegisterDriver("alloydb")
+	cleanup, err := pgxv4.RegisterDriver("alloydb")
+	if err != nil {
+		t.Fatalf("failed to register driver: %v", err)
+	}
+	defer cleanup()
 	db, err := sql.Open(
 		"alloydb",
 		fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
