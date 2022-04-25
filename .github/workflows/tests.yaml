@@ -38,14 +38,14 @@ jobs:
           uses: 'google-github-actions/get-secretmanager-secrets@v0'
           with:
             secrets: |-
-              ALLOYDB_CONN_NAME:alloydb-connector-testing/ALLOYDB_CONN_NAME
+              ALLOYDB_URI:alloydb-connector-testing/ALLOYDB_URI
               ALLOYDB_CLUSTER_PASS:alloydb-connector-testing/ALLOYDB_CLUSTER_PASS
         - name: Run tests
           env:
             ALLOYDB_DB: 'postgres'
             ALLOYDB_USER: 'postgres'
             ALLOYDB_PASS: '${{ steps.secrets.outputs.ALLOYDB_CLUSTER_PASS }}'
-            ALLOYDB_URI: '${{ steps.secrets.outputs.ALLOYDB_CONN_NAME }}'
+            ALLOYDB_URI: '${{ steps.secrets.outputs.ALLOYDB_URI }}'
           run: |
             go test -v -race -cover ./...
   build:
