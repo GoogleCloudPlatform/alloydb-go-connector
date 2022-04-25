@@ -29,9 +29,9 @@ import (
 )
 
 var (
-	// AlloyDB instance connection name, in the form of
-	// project:region:cluster:instance
-	alloydbConnName = os.Getenv("ALLOYDB_CONNECTION_NAME")
+	// AlloyDB instance URI, in the form of
+	// /projects/PROJECT_ID/locations/REGION_ID/clusters/CLUSTER_ID/instances/INSTANCE_ID
+	alloydbURI = os.Getenv("ALLOYDB_URI")
 	// Name of database user.
 	alloydbUser = os.Getenv("ALLOYDB_USER")
 	// Password for the database user; be careful when entering a password on the
@@ -43,8 +43,8 @@ var (
 
 func requireAlloyDBVars(t *testing.T) {
 	switch "" {
-	case alloydbConnName:
-		t.Fatal("'ALLOYDB_CONNECTION_NAME' env var not set")
+	case alloydbURI:
+		t.Fatal("'ALLOYDB_URI' env var not set")
 	case alloydbUser:
 		t.Fatal("'ALLOYDB_USER' env var not set")
 	case alloydbPass:
@@ -74,7 +74,7 @@ func TestPgxConnect(t *testing.T) {
 	}
 
 	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
-		return d.Dial(ctx, alloydbConnName)
+		return d.Dial(ctx, alloydbURI)
 	}
 
 	conn, connErr := pgx.ConnectConfig(ctx, config)
@@ -106,7 +106,7 @@ func TestAlloyDBHook(t *testing.T) {
 	db, err := sql.Open(
 		"alloydb",
 		fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
-			alloydbConnName, alloydbUser, alloydbPass, alloydbDB),
+			alloydbURI, alloydbUser, alloydbPass, alloydbDB),
 	)
 	if err != nil {
 		t.Fatalf("sql.Open want err = nil, got = %v", err)
