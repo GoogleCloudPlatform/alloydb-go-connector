@@ -49,7 +49,7 @@ type instanceURI struct {
 }
 
 func (i *instanceURI) String() string {
-	return fmt.Sprintf("/projects/%s/locations/%s/clusters/%s/instances/%s", i.project, i.region, i.cluster, i.name)
+	return fmt.Sprintf("%s/%s/%s/%s", i.project, i.region, i.cluster, i.name)
 }
 
 // parseInstURI initializes a new instanceURI struct.
@@ -58,7 +58,7 @@ func parseInstURI(cn string) (instanceURI, error) {
 	m := instURIRegex.FindSubmatch(b)
 	if m == nil {
 		err := errtype.NewConfigError(
-			"invalid instance URI, expected /projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
+			"invalid instance URI, expected projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
 			cn,
 		)
 		return instanceURI{}, err
