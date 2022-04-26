@@ -52,7 +52,7 @@ type pgDriver struct {
 // connection to the database using alloydbconn.Dialer. The AlloyDB instance URI
 // should be specified in the host field. For example:
 //
-// /projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>
+// "host=/projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE> user=myuser password=mypass"
 func (p *pgDriver) Open(name string) (driver.Conn, error) {
 	config, err := pgx.ParseConfig(name)
 	if err != nil {

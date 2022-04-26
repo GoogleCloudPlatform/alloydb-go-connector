@@ -48,8 +48,8 @@ type instanceURI struct {
 	name    string
 }
 
-func (c *instanceURI) String() string {
-	return fmt.Sprintf("/projects/%s/locations/%s/clusters/%s/instances/%s", c.project, c.region, c.cluster, c.name)
+func (i *instanceURI) String() string {
+	return fmt.Sprintf("/projects/%s/locations/%s/clusters/%s/instances/%s", i.project, i.region, i.cluster, i.name)
 }
 
 // parseInstURI initializes a new instanceURI struct.
