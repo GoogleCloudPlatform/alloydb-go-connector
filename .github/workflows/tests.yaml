@@ -47,7 +47,7 @@ jobs:
             ALLOYDB_PASS: '${{ steps.secrets.outputs.ALLOYDB_CLUSTER_PASS }}'
             ALLOYDB_URI: '${{ steps.secrets.outputs.ALLOYDB_URI }}'
           run: |
-            go test -v -race -cover alloydbconn_test
+            go test -v -race -cover ./e2e_test.go
   build:
     name: "unit tests"
     runs-on: ${{ matrix.os }}
