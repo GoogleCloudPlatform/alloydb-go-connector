@@ -29,36 +29,36 @@ func TestErrorFormatting(t *testing.T) {
 	}{
 		{
 			desc: "config error message",
-			err:  errtype.NewConfigError("error message", "proj:reg:inst"),
-			want: "Config error: error message (connection name = \"proj:reg:inst\")",
+			err:  errtype.NewConfigError("error message", "proj/reg/inst"),
+			want: "Config error: error message (instance URI = \"proj/reg/inst\")",
 		},
 		{
 			desc: "refresh error message without internal error",
-			err:  errtype.NewRefreshError("error message", "proj:reg:inst", nil),
-			want: "Refresh error: error message (connection name = \"proj:reg:inst\")",
+			err:  errtype.NewRefreshError("error message", "proj/reg/inst", nil),
+			want: "Refresh error: error message (instance URI = \"proj/reg/inst\")",
 		},
 		{
 			desc: "refresh error message with internal error",
-			err:  errtype.NewRefreshError("error message", "proj:reg:inst", errors.New("inner-error")),
-			want: "Refresh error: error message (connection name = \"proj:reg:inst\"): inner-error",
+			err:  errtype.NewRefreshError("error message", "proj/reg/inst", errors.New("inner-error")),
+			want: "Refresh error: error message (instance URI = \"proj/reg/inst\"): inner-error",
 		},
 		{
 			desc: "Dial error without inner error",
 			err: errtype.NewDialError(
 				"message",
-				"proj:reg:inst",
+				"proj/reg/inst",
 				nil, // no error here
 			),
-			want: "Dial error: message (connection name = \"proj:reg:inst\")",
+			want: "Dial error: message (instance URI = \"proj/reg/inst\")",
 		},
 		{
 			desc: "Dial error with inner error",
 			err: errtype.NewDialError(
 				"message",
-				"proj:reg:inst",
+				"proj/reg/inst",
 				errors.New("inner-error"),
 			),
-			want: "Dial error: message (connection name = \"proj:reg:inst\"): inner-error",
+			want: "Dial error: message (instance URI = \"proj/reg/inst\"): inner-error",
 		},
 	}
 

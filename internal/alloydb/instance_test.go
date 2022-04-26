@@ -48,7 +48,7 @@ func TestParseInstURI(t *testing.T) {
 		want instanceURI
 	}{
 		{
-			desc: "vanilla instance connection name",
+			desc: "vanilla instance URI",
 			in:   "/projects/proj/locations/reg/clusters/clust/instances/name",
 			want: instanceURI{
 				project: "proj",
