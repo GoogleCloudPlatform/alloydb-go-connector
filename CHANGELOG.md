@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 (2022-04-26)
+## 0.1.0 (2022-04-26)
 
 
 ### ⚠ BREAKING CHANGES
@@ -9,8 +9,6 @@
 
 ### Features
 
-* add AlloyDB instance type ([da23ca9](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/da23ca9579f5b90e86287e5b7dc689a549ea9240))
-* add AlloyDB refresher ([c3a4372](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/c3a43727a1b1d76ce50c288155fa8c6bb31d09ab))
 * add AlloyDB refresher ([#2](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/2)) ([d0d6a11](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/d0d6a119fcb3cc5613de065a168f415dbce70789))
 * add support for dialer ([#4](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/4)) ([483ffda](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/483ffdae1870835db79aa04c59a6322b9ec8e9bb))
 * add WithUserAgent opt ([#10](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/10)) ([6582164](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/658216477813b92aadfd44403b9389dcaea9f081))
