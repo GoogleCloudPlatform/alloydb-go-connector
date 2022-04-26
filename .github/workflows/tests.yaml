@@ -38,22 +38,22 @@ jobs:
           uses: 'google-github-actions/get-secretmanager-secrets@v0'
           with:
             secrets: |-
-              ALLOYDB_CONN_NAME:alloydb-connector-testing/ALLOYDB_CONN_NAME
+              ALLOYDB_URI:alloydb-connector-testing/ALLOYDB_URI
               ALLOYDB_CLUSTER_PASS:alloydb-connector-testing/ALLOYDB_CLUSTER_PASS
         - name: Run tests
           env:
             ALLOYDB_DB: 'postgres'
             ALLOYDB_USER: 'postgres'
             ALLOYDB_PASS: '${{ steps.secrets.outputs.ALLOYDB_CLUSTER_PASS }}'
-            ALLOYDB_CONNECTION_NAME: '${{ steps.secrets.outputs.ALLOYDB_CONN_NAME }}'
+            ALLOYDB_URI: '${{ steps.secrets.outputs.ALLOYDB_URI }}'
           run: |
-            go test -v -race -cover ./...
+            go test -v -race -cover ./e2e_test.go
   build:
     name: "unit tests"
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-latest, windows-latest, ubuntu-latest]
         go-version: [1.16, 1.17, 1.18]
     steps:
       - name: Setup Go ${{ matrix.go-version }}

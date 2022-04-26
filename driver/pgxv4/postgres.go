@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"net"
+	"sync"
 
 	"cloud.google.com/go/alloydbconn"
 	"github.com/jackc/pgx/v4"
@@ -39,13 +40,17 @@ func RegisterDriver(name string, opts ...alloydbconn.Option) (func() error, erro
 		return func() error { return nil }, err
 	}
 	sql.Register(name, &pgDriver{
-		d: d,
+		d:      d,
+		dbURIs: make(map[string]string),
 	})
 	return func() error { return d.Close() }, nil
 }
 
 type pgDriver struct {
-	d *alloydbconn.Dialer
+	d  *alloydbconn.Dialer
+	mu sync.RWMutex
+	// dbURIs is a map of DSN to DB URI for registered connection names.
+	dbURIs map[string]string
 }
 
 // Open accepts a keyword/value formatted connection string and returns a
@@ -54,6 +59,27 @@ type pgDriver struct {
 //
 // "host=/projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE> user=myuser password=mypass"
 func (p *pgDriver) Open(name string) (driver.Conn, error) {
+	var (
+		dbURI string
+		ok    bool
+	)
+
+	p.mu.RLock()
+	dbURI, ok = p.dbURIs[name]
+	p.mu.RUnlock()
+
+	if ok {
+		return stdlib.GetDefaultDriver().Open(dbURI)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// Recheck to ensure dbURI wasn't created between locks
+	dbURI, ok = p.dbURIs[name]
+	if ok {
+		return stdlib.GetDefaultDriver().Open(dbURI)
+	}
+
 	config, err := pgx.ParseConfig(name)
 	if err != nil {
 		return nil, err
@@ -63,6 +89,9 @@ func (p *pgDriver) Open(name string) (driver.Conn, error) {
 	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return p.d.Dial(ctx, instConnName)
 	}
-	dbURI := stdlib.RegisterConnConfig(config)
+
+	dbURI = stdlib.RegisterConnConfig(config)
+	p.dbURIs[name] = dbURI
+
 	return stdlib.GetDefaultDriver().Open(dbURI)
 }
