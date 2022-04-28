@@ -38,8 +38,8 @@ This package requires the following to connect successfully:
   Project. By default, the API will be called in the project associated with the
   IAM principal.
 
-[admin-api]:   TODO
-[client-role]: TODO
+[admin-api]:   https://console.cloud.google.com/apis/api/alloydb.googleapis.com
+[client-role]: https://cloud.google.com/alloydb/docs/roles-and-permissions
 
 ### Credentials
 
