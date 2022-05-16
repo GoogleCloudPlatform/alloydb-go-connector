@@ -26,6 +26,15 @@ This package provides several functions for authorizing and encrypting
 connections. These functions can be used with your database driver to connect to
 your AlloyDB instance.
 
+AlloyDB supports network connectivity through private, internal IP addresses only. 
+This package must be run in an environment that is connected to the
+[VPC Network][vpc] that hosts your AlloyDB private IP address.
+
+Please see [Configuring AlloyDB Connectivity][alloydb-connectivity] for more details.
+
+[vpc]: https://cloud.google.com/vpc/docs/vpc
+[alloydb-connectivity]: https://cloud.google.com/alloydb/docs/configure-connectivity
+
 ### APIs and Services
 
 This package requires the following to connect successfully:
@@ -78,7 +87,7 @@ config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string
     return d.Dial(ctx, "projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>")
 }
 
-// Interact with the dirver directly as you normally would
+// Interact with the driver directly as you normally would
 conn, err := pgxpool.ConnectConfig(context.Background(), config)
 if err != nil {
     log.Fatalf("failed to connect: %v", connErr)
@@ -117,7 +126,7 @@ If you want to customize things about how the connection is created, use
 conn, err := d.Dial(
     ctx,
     "projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
-    alloydbconn.WithPrivateIP(),
+    alloydbconn.WithTCPKeepAlive(30*time.Second),
 )
 ```
 
@@ -153,7 +162,7 @@ import (
 )
 
 func Connect() {
-    cleanup, err := pgxv4.RegisterDriver("alloydb", alloydbconn.WithIAMAuthN())
+    cleanup, err := pgxv4.RegisterDriver("alloydb")
     if err != nil {
         // ... handle error
     }
