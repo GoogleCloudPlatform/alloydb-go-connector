@@ -127,7 +127,7 @@ func (r *refreshOperation) IsValid() bool {
 type Instance struct {
 	// OpenConns is the number of open connections to the instance.
 	OpenConns uint64
-	
+
 	instanceURI
 	key *rsa.PrivateKey
 	r   refresher
