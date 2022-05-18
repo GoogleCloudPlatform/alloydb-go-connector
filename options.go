@@ -28,6 +28,8 @@ import (
 	apiopt "google.golang.org/api/option"
 )
 
+const CloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
+
 // An Option is an option for configuring a Dialer.
 type Option func(d *dialerConfig)
 
@@ -71,7 +73,8 @@ func WithCredentialsFile(filename string) Option {
 // or refresh token JSON credentials to be used as the basis for authentication.
 func WithCredentialsJSON(b []byte) Option {
 	return func(d *dialerConfig) {
-		c, err := google.CredentialsFromJSON(context.Background(), b) // TODO: add AlloyDB scope
+		// TODO: Use AlloyDB-specfic scope
+		c, err := google.CredentialsFromJSON(context.Background(), b, CloudPlatformScope)
 		if err != nil {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
