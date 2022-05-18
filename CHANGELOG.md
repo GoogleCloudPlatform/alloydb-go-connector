@@ -1,5 +1,13 @@
 # Changelog
 
+### [0.1.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v0.1.0...v0.1.1) (2022-05-18)
+
+
+### Bug Fixes
+
+* adjust alignment for 32-bit arch ([#33](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/33)) ([b0e76fa](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/b0e76fa5384fc66365b5d15b56927942f4031fda))
+* specify scope for WithCredentialsFile/JSON ([#29](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/29)) ([9424d57](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/9424d572346f16cee86e80dccc9e01618b97df73))
+
 ## 0.1.0 (2022-04-26)
 
 
