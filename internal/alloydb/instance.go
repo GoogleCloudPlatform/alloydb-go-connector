@@ -125,6 +125,9 @@ func (r *refreshOperation) IsValid() bool {
 // required information approximately 5 minutes before the previous certificate
 // expires (every 55 minutes).
 type Instance struct {
+	// OpenConns is the number of open connections to the instance.
+	OpenConns uint64
+
 	instanceURI
 	key *rsa.PrivateKey
 	r   refresher
@@ -136,9 +139,6 @@ type Instance struct {
 	// next represents a future or ongoing refreshOperation. Once complete, it will replace cur and schedule a
 	// replacement to occur.
 	next *refreshOperation
-
-	// OpenConns is the number of open connections to the instance.
-	OpenConns uint64
 
 	// ctx is the default ctx for refresh operations. Canceling it prevents new refresh
 	// operations from being triggered.
