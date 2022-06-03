@@ -386,7 +386,6 @@ func StartServerProxy(t *testing.T, inst FakeAlloyDBInstance) func() {
 			default:
 				conn, err := ln.Accept()
 				if err != nil {
-					t.Logf("fake server proxy will close listener after error: %v", err)
 					return
 				}
 				conn.Write([]byte(inst.name))
@@ -395,7 +394,7 @@ func StartServerProxy(t *testing.T, inst FakeAlloyDBInstance) func() {
 		}
 	}()
 	return func() {
-		ln.Close()
 		cancel()
+		ln.Close()
 	}
 }
