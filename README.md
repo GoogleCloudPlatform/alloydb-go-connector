@@ -1,4 +1,14 @@
 # AlloyDB Go Connector
+*Warning*: This project is in Public Preview, and may contain breaking changes
+before it becomes Generally Available.
+
+[![CI][ci-badge]][ci-build]
+[![Go Reference][pkg-badge]][pkg-docs]
+
+[ci-badge]: https://github.com/GoogleCloudPlatform/alloydb-go-connector/actions/workflows/tests.yaml/badge.svg?event=push
+[ci-build]: https://github.com/GoogleCloudPlatform/alloydb-go-connector/actions/workflows/tests.yaml?query=event%3Apush+branch%3Amain
+[pkg-badge]: https://pkg.go.dev/badge/cloud.google.com/go/alloydbconn.svg
+[pkg-docs]: https://pkg.go.dev/cloud.google.com/go/alloydbconn
 
 The _AlloyDB Go Connector_ is an AlloyDB connector designed for use with the Go
 language. Using an AlloyDB connector provides the following benefits:
