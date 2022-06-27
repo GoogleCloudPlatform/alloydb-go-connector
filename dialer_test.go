@@ -124,15 +124,14 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		"my-project", "my-region", "my-cluster", "my-instance",
 		mock.WithCertExpiry(time.Now().Add(-24*time.Hour)), // expired cert
 	)
-	mc, url, cleanup := mock.HTTPClient(
-		mock.InstanceGetSuccess(inst, 1),
-		mock.CreateEphemeralSuccess(inst, 1),
+	// Don't use the cleanup function. Because this test is about error
+	// cases, API requests (started in two separate goroutines) will
+	// sometimes succeed and clear the mock, and sometimes not.
+	// This test is about error return values from Dial, not API interaction.
+	mc, url, _ := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 2),
+		mock.CreateEphemeralSuccess(inst, 2),
 	)
-	defer func() {
-		if err := cleanup(); err != nil {
-			t.Fatalf("%v", err)
-		}
-	}()
 	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
