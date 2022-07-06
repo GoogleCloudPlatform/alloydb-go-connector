@@ -40,7 +40,7 @@ func fetchMetadata(ctx context.Context, cl *alloydbapi.Client, inst instanceURI)
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
 	defer func() { end(err) }()
-	resp, err := cl.InstanceGet(ctx, inst.project, inst.region, inst.cluster, inst.name)
+	resp, err := cl.ConnectionInfo(ctx, inst.project, inst.region, inst.cluster, inst.name)
 	if err != nil {
 		return "", errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}

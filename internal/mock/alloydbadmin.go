@@ -219,7 +219,7 @@ func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
 		"projects/%s/locations/%s/clusters/%s/instances/%s",
 		i.project, i.region, i.cluster, i.name,
 	)
-	p := fmt.Sprintf("/projects/%s/locations/%s/clusters/%s/instances/%s",
+	p := fmt.Sprintf("/projects/%s/locations/%s/clusters/%s/instances/%s/connectionInfo",
 		i.project, i.region, i.cluster, i.name)
 	return &Request{
 		reqMethod: http.MethodGet,
