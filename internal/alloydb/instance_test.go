@@ -125,11 +125,9 @@ func TestConnectInfo(t *testing.T) {
 	ctx := context.Background()
 
 	wantAddr := "0.0.0.0"
-	wantUID := "8369b7bd-b777-45df-bea5-be8599d9716b"
 	inst := mock.NewFakeInstance(
 		"my-project", "my-region", "my-cluster", "my-instance",
 		mock.WithIPAddr(wantAddr),
-		mock.WithUID(wantUID),
 	)
 	mc, url, cleanup := mock.HTTPClient(
 		mock.InstanceGetSuccess(inst, 1),

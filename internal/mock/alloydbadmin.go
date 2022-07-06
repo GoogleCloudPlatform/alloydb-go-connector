@@ -45,12 +45,6 @@ func WithIPAddr(addr string) Option {
 	}
 }
 
-func WithUID(uid string) Option {
-	return func(f *FakeAlloyDBInstance) {
-		f.uid = uid
-	}
-}
-
 func WithServerName(name string) Option {
 	return func(f *FakeAlloyDBInstance) {
 		f.serverName = name
