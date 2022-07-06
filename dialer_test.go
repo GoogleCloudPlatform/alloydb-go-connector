@@ -22,7 +22,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
@@ -122,7 +121,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	ctx := context.Background()
 	inst := mock.NewFakeInstance(
 		"my-project", "my-region", "my-cluster", "my-instance",
-		mock.WithCertExpiry(time.Now().Add(-24*time.Hour)), // expired cert
+		mock.WithServerName("not-the-server-youre-looking-for"),
 	)
 	// Don't use the cleanup function. Because this test is about error
 	// cases, API requests (started in two separate goroutines) will
@@ -152,12 +151,10 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	stop := mock.StartServerProxy(t, inst)
 	defer stop()
 
-	// TODO: restore this test and figure out why the test proxy server isn't
-	// rejected an invalid client certificate.
-	// _, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
-	// if !errors.As(err, &wantErr2) {
-	// 	t.Fatalf("when TLS handshake fails, want = %T, got = %v", wantErr2, err)
-	// }
+	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
+	if !errors.As(err, &wantErr2) {
+		t.Fatalf("when TLS handshake fails, want = %T, got = %v", wantErr2, err)
+	}
 }
 
 func TestDialerWithCustomDialFunc(t *testing.T) {

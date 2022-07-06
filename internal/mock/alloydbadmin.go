@@ -45,6 +45,18 @@ func WithIPAddr(addr string) Option {
 	}
 }
 
+func WithUID(uid string) Option {
+	return func(f *FakeAlloyDBInstance) {
+		f.uid = uid
+	}
+}
+
+func WithServerName(name string) Option {
+	return func(f *FakeAlloyDBInstance) {
+		f.serverName = name
+	}
+}
+
 func WithCertExpiry(expiry time.Time) Option {
 	return func(f *FakeAlloyDBInstance) {
 		f.certExpiry = expiry
@@ -58,6 +70,8 @@ type FakeAlloyDBInstance struct {
 	name    string
 
 	ipAddr     string
+	uid        string
+	serverName string
 	certExpiry time.Time
 
 	rootCACert *x509.Certificate
@@ -85,6 +99,21 @@ var (
 )
 
 func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBInstance {
+	f := FakeAlloyDBInstance{
+		project:    proj,
+		region:     reg,
+		cluster:    clust,
+		name:       name,
+		ipAddr:     "127.0.0.1",
+		uid:        "00000000-0000-0000-0000-000000000000",
+		serverName: "00000000-0000-0000-0000-000000000000.server.alloydb",
+		certExpiry: time.Now().Add(24 * time.Hour),
+	}
+
+	for _, o := range opts {
+		o(&f)
+	}
+
 	rootTemplate := &x509.Certificate{
 		SerialNumber: &big.Int{},
 		Subject: pkix.Name{
@@ -134,7 +163,7 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 	serverTemplate := &x509.Certificate{
 		SerialNumber: &big.Int{},
 		Subject: pkix.Name{
-			CommonName: "server.alloydb",
+			CommonName: f.serverName,
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(0, 0, 1),
@@ -149,24 +178,14 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 		panic(err)
 	}
 
-	f := FakeAlloyDBInstance{
-		project:      proj,
-		region:       reg,
-		cluster:      clust,
-		name:         name,
-		ipAddr:       "127.0.0.1",
-		certExpiry:   time.Now().Add(24 * time.Hour),
-		rootCACert:   rootCert,
-		rootKey:      rootCAKey,
-		intermedCert: intermedCert,
-		intermedKey:  intermedCAKey,
-		serverCert:   serverCert,
-		serverKey:    serverKey,
-	}
+	// save all TLS certificates for later use.
+	f.rootCACert = rootCert
+	f.rootKey = rootCAKey
+	f.intermedCert = intermedCert
+	f.intermedKey = intermedCAKey
+	f.serverCert = serverCert
+	f.serverKey = serverKey
 
-	for _, o := range opts {
-		o(&f)
-	}
 	return f
 }
 
@@ -215,10 +234,6 @@ func (r *Request) matches(hR *http.Request) bool {
 // InstanceGetSuccess returns a Request that responds to the `instance.get`
 // AlloyDB Admin API endpoint.
 func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
-	instanceName := fmt.Sprintf(
-		"projects/%s/locations/%s/clusters/%s/instances/%s",
-		i.project, i.region, i.cluster, i.name,
-	)
 	p := fmt.Sprintf("/projects/%s/locations/%s/clusters/%s/instances/%s/connectionInfo",
 		i.project, i.region, i.cluster, i.name)
 	return &Request{
@@ -227,7 +242,7 @@ func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
 		reqCt:     ct,
 		handle: func(resp http.ResponseWriter, req *http.Request) {
 			resp.WriteHeader(http.StatusOK)
-			resp.Write([]byte(fmt.Sprintf(`{"name":"%s","ipAddress":"%s"}`, instanceName, i.ipAddr)))
+			resp.Write([]byte(fmt.Sprintf(`{"ipAddress":"%s","instanceUid":"%s"}`, i.ipAddr, i.uid)))
 		},
 	}
 }
