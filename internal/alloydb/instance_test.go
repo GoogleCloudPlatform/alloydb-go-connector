@@ -156,7 +156,7 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("failed to create mock instance: %v", err)
 	}
 
-	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx)
+	gotAddr, _, err := i.ConnectInfo(ctx)
 	if err != nil {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
@@ -167,16 +167,6 @@ func TestConnectInfo(t *testing.T) {
 			wantAddr, gotAddr,
 		)
 	}
-
-	_ = gotTLSCfg
-	// TODO: this should be the instance UID
-	// wantServerName := "TODO instance UID"
-	// if gotTLSCfg.ServerName != wantServerName {
-	// 	t.Fatalf(
-	// 		"ConnectInfo return unexpected server name in TLS Config, want = %v, got = %v",
-	// 		wantServerName, gotTLSCfg.ServerName,
-	// 	)
-	// }
 }
 
 func TestConnectInfoErrors(t *testing.T) {

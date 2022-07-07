@@ -33,18 +33,25 @@ import (
 	"golang.org/x/time/rate"
 )
 
+type connectInfo struct {
+	// ipAddr is the instance's IP addresss
+	ipAddr string
+	// uid is the instance UID
+	uid string
+}
+
 // fetchMetadata uses the AlloyDB Admin APIs get method to retreive the
 // information about an AlloyDB instance that is used to create secure
 // connections.
-func fetchMetadata(ctx context.Context, cl *alloydbapi.Client, inst instanceURI) (ipAddr string, err error) {
+func fetchMetadata(ctx context.Context, cl *alloydbapi.Client, inst instanceURI) (i connectInfo, err error) {
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
 	defer func() { end(err) }()
-	resp, err := cl.InstanceGet(ctx, inst.project, inst.region, inst.cluster, inst.name)
+	resp, err := cl.ConnectionInfo(ctx, inst.project, inst.region, inst.cluster, inst.name)
 	if err != nil {
-		return "", errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
+		return connectInfo{}, errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
-	return resp.IPAddress, nil
+	return connectInfo{ipAddr: resp.IPAddress, uid: resp.InstanceUID}, nil
 }
 
 var errInvalidPEM = errors.New("certificate is not a valid PEM")
@@ -140,7 +147,7 @@ func fetchEphemeralCert(
 
 // createTLSConfig returns a *tls.Config for connecting securely to the AlloyDB
 // instance.
-func createTLSConfig(inst instanceURI, cc certChain, k *rsa.PrivateKey) *tls.Config {
+func createTLSConfig(inst instanceURI, cc certChain, info connectInfo, k *rsa.PrivateKey) *tls.Config {
 	certs := x509.NewCertPool()
 	certs.AddCert(cc.root)
 
@@ -164,21 +171,19 @@ func createTLSConfig(inst instanceURI, cc certChain, k *rsa.PrivateKey) *tls.Con
 				return errtype.NewDialError("failed to verify certificate", inst.String(), err)
 			}
 
-			// TODO: restore the server name check when it becomes the instance
-			// UID
-			// server, err := x509.ParseCertificate(rawCerts[0])
-			// if err != nil {
-			//  return errtype.NewDialError("failed to parse X.509 certificate", inst.String(), err)
-			// }
-			// serverName := "FIXME:INSTANCE_UID"
-			// if server.Subject.CommonName != serverName {
-			//  return errtype.NewDialError(
-			//      fmt.Sprintf("certificate had CN %q, expected %q",
-			//          chain.Subject.CommonName, serverName),
-			//      inst.String(),
-			//      nil,
-			//  )
-			// }
+			server, err := x509.ParseCertificate(rawCerts[0])
+			if err != nil {
+				return errtype.NewDialError("failed to parse X.509 certificate", inst.String(), err)
+			}
+			serverName := fmt.Sprintf("%v.server.alloydb", info.uid)
+			if server.Subject.CommonName != serverName {
+				return errtype.NewDialError(
+					fmt.Sprintf("certificate had CN %q, expected %q",
+						server.Subject.CommonName, serverName),
+					inst.String(),
+					nil,
+				)
+			}
 			return nil
 		},
 		Certificates: []tls.Certificate{tls.Certificate{
@@ -262,14 +267,14 @@ func (r refresher) performRefresh(ctx context.Context, cn instanceURI, k *rsa.Pr
 	}
 
 	type mdRes struct {
-		ipAddr string
-		err    error
+		info connectInfo
+		err  error
 	}
 	mdCh := make(chan mdRes, 1)
 	go func() {
 		defer close(mdCh)
-		addr, err := fetchMetadata(ctx, r.client, cn)
-		mdCh <- mdRes{ipAddr: addr, err: err}
+		c, err := fetchMetadata(ctx, r.client, cn)
+		mdCh <- mdRes{info: c, err: err}
 	}()
 
 	type certRes struct {
@@ -283,13 +288,13 @@ func (r refresher) performRefresh(ctx context.Context, cn instanceURI, k *rsa.Pr
 		certCh <- certRes{cc: cc, err: err}
 	}()
 
-	var ipAddr string
+	var info connectInfo
 	select {
 	case r := <-mdCh:
 		if r.err != nil {
 			return refreshResult{}, fmt.Errorf("failed to get instance IP address: %w", r.err)
 		}
-		ipAddr = r.ipAddr
+		info = r.info
 	case <-ctx.Done():
 		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
@@ -305,11 +310,11 @@ func (r refresher) performRefresh(ctx context.Context, cn instanceURI, k *rsa.Pr
 		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
-	c := createTLSConfig(cn, cc, k)
+	c := createTLSConfig(cn, cc, info, k)
 	var expiry time.Time
 	// This should never not be the case, but we check to avoid a potential nil-pointer
 	if len(c.Certificates) > 0 {
 		expiry = c.Certificates[0].Leaf.NotAfter
 	}
-	return refreshResult{instanceIPAddr: ipAddr, conf: c, expiry: expiry}, nil
+	return refreshResult{instanceIPAddr: info.ipAddr, conf: c, expiry: expiry}, nil
 }

@@ -27,11 +27,10 @@ import (
 	htransport "google.golang.org/api/transport/http"
 )
 
-type InstanceGetResponse struct {
+type ConnectionInfoResponse struct {
 	ServerResponse googleapi.ServerResponse
-	Name           string `json:"name"`
-	State          string `json:"state"`
 	IPAddress      string `json:"ipAddress"`
+	InstanceUID    string `json:"instanceUid"`
 }
 
 type GenerateClientCertificateRequest struct {
@@ -69,18 +68,18 @@ func NewClient(ctx context.Context, opts ...option.ClientOption) (*Client, error
 	return &Client{client: client, endpoint: endpoint}, nil
 }
 
-func (c *Client) InstanceGet(ctx context.Context, project, region, cluster, instance string) (InstanceGetResponse, error) {
+func (c *Client) ConnectionInfo(ctx context.Context, project, region, cluster, instance string) (ConnectionInfoResponse, error) {
 	u := fmt.Sprintf(
-		"%s/projects/%s/locations/%s/clusters/%s/instances/%s",
+		"%s/projects/%s/locations/%s/clusters/%s/instances/%s/connectionInfo",
 		c.endpoint, project, region, cluster, instance,
 	)
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
-		return InstanceGetResponse{}, err
+		return ConnectionInfoResponse{}, err
 	}
 	res, err := c.client.Do(req)
 	if err != nil {
-		return InstanceGetResponse{}, err
+		return ConnectionInfoResponse{}, err
 	}
 	defer res.Body.Close()
 
@@ -89,23 +88,23 @@ func (c *Client) InstanceGet(ctx context.Context, project, region, cluster, inst
 	if res.StatusCode >= http.StatusMultipleChoices {
 		body, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			return InstanceGetResponse{}, err
+			return ConnectionInfoResponse{}, err
 		}
 
-		return InstanceGetResponse{}, &googleapi.Error{
+		return ConnectionInfoResponse{}, &googleapi.Error{
 			Code:   res.StatusCode,
 			Header: res.Header,
 			Body:   string(body),
 		}
 	}
-	ret := InstanceGetResponse{
+	ret := ConnectionInfoResponse{
 		ServerResponse: googleapi.ServerResponse{
 			Header:         res.Header,
 			HTTPStatusCode: res.StatusCode,
 		},
 	}
 	if err := json.NewDecoder(res.Body).Decode(&ret); err != nil {
-		return InstanceGetResponse{}, err
+		return ConnectionInfoResponse{}, err
 	}
 	return ret, nil
 }
