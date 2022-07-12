@@ -29,10 +29,6 @@
 * use instance uri instead of conn name ([#15](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/15)) ([0da01fd](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/0da01fd311f1e8829be0a9eb0efdeb169ee7c555))
 
 
-### Miscellaneous Chores
-
-* set release version to 0.2.0 ([#71](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/71)) ([d3c342f](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/d3c342faa68308d7820dfdd6648245d490258313))
-
 ## [0.1.2](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v0.1.1...v0.1.2) (2022-06-07)
 
 
