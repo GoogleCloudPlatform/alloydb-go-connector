@@ -12,6 +12,6 @@ require (
 	golang.org/x/time v0.0.0-20220609170525-579cf78fd858
 	google.golang.org/api v0.86.0
 	google.golang.org/genproto v0.0.0-20220627151210-f754eecb4be7
-	google.golang.org/grpc v1.47.0
+	google.golang.org/grpc v1.48.0
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 )
