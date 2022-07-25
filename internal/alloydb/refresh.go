@@ -153,27 +153,25 @@ func createTLSConfig(inst instanceURI, cc certChain, info connectInfo, k *rsa.Pr
 	return &tls.Config{
 		InsecureSkipVerify: true,
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			if len(rawCerts) != 2 {
-				msg := fmt.Sprintf(
-					"unexpected number of certificates to verify, want = 2, got = %v",
-					len(rawCerts),
-				)
-				return errtype.NewDialError(msg, inst.String(), nil)
+			var parsed []*x509.Certificate
+			for _, r := range rawCerts {
+				c, err := x509.ParseCertificate(r)
+				if err != nil {
+					return errtype.NewDialError("failed to parse X.509 certificate", inst.String(), err)
+				}
+				parsed = append(parsed, c)
 			}
-			chain, err := x509.ParseCertificate(rawCerts[1])
-			if err != nil {
-				return errtype.NewDialError("failed to parse X.509 certificate", inst.String(), err)
+			server := parsed[0]
+			inter := x509.NewCertPool()
+			for i := 1; i < len(parsed); i++ {
+				inter.AddCert(parsed[i])
 			}
 
-			opts := x509.VerifyOptions{Roots: certs}
-			if _, err = chain.Verify(opts); err != nil {
+			opts := x509.VerifyOptions{Roots: certs, Intermediates: inter}
+			if _, err := server.Verify(opts); err != nil {
 				return errtype.NewDialError("failed to verify certificate", inst.String(), err)
 			}
 
-			server, err := x509.ParseCertificate(rawCerts[0])
-			if err != nil {
-				return errtype.NewDialError("failed to parse X.509 certificate", inst.String(), err)
-			}
 			serverName := fmt.Sprintf("%v.server.alloydb", info.uid)
 			if server.Subject.CommonName != serverName {
 				return errtype.NewDialError(
