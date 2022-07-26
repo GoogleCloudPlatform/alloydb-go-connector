@@ -377,7 +377,7 @@ func StartServerProxy(t *testing.T, inst FakeAlloyDBInstance) func() {
 			})
 			if err != nil {
 				t.Log("listener failed to start, waiting 100ms")
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(500 * time.Millisecond)
 				continue
 			}
 			return ln
