@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package errtype provides a number of concrete types which are used by the
+// alloydbconn package.
 package errtype
 
 import "fmt"
