@@ -1,6 +1,6 @@
 module cloud.google.com/go/alloydbconn
 
-go 1.16
+go 1.19
 
 require (
 	github.com/google/uuid v1.3.0
