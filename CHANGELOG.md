@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v0.2.0...v0.2.1) (2022-08-01)
+
+
+### Bug Fixes
+
+* include intermediate cert when verifying server ([#83](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/83)) ([072c20d](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/072c20d974ac6705617f10cd8f3889a4adc685ee))
+
 ## [0.2.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v0.1.2...v0.2.0) (2022-07-12)
 
 
