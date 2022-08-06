@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/google/uuid v1.3.0
-	github.com/jackc/pgx/v4 v4.16.1
+	github.com/jackc/pgx/v4 v4.17.0
 	github.com/pkg/errors v0.9.1 // indirect
 	go.opencensus.io v0.23.0
 	golang.org/x/net v0.0.0-20220624214902-1bab6f366d9e
@@ -13,5 +13,4 @@ require (
 	google.golang.org/api v0.91.0
 	google.golang.org/genproto v0.0.0-20220805133916-01dd62135a58
 	google.golang.org/grpc v1.48.0
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 )
