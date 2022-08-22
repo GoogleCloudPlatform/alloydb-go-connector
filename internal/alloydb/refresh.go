@@ -151,7 +151,6 @@ func createTLSConfig(inst instanceURI, cc certChain, info connectInfo, k *rsa.Pr
 	certs.AddCert(cc.root)
 
 	return &tls.Config{
-		InsecureSkipVerify: true,
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			var parsed []*x509.Certificate
 			for _, r := range rawCerts {
