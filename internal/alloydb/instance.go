@@ -27,12 +27,6 @@ import (
 	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 )
 
-const (
-	// refreshBuffer is the amount of time before a result expires to start a
-	// new refresh attempt.
-	refreshBuffer = 12 * time.Hour
-)
-
 var (
 	// Instance URI is in the format:
 	// '/projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>'
@@ -220,6 +214,17 @@ func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 	return res, nil
 }
 
+// refreshDuration returns the duration to wait before starting the next
+// refresh. Certificates that expire in an hour or less are refreshed in 55
+// minutes. Otherwise, the duration is half of the time until the expiration.
+func refreshDuration(now, certExpiry time.Time) time.Duration {
+	d := certExpiry.Sub(now)
+	if d <= time.Hour {
+		return 55 * time.Minute
+	}
+	return time.Until(now.Add(time.Duration(d / 2)))
+}
+
 // scheduleRefresh schedules a refresh operation to be triggered after a given
 // duration. The returned refreshOperation can be used to either Cancel or Wait
 // for the operations result.
@@ -253,8 +258,8 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			return
 		default:
 		}
-		nextRefresh := i.cur.result.expiry.Add(-refreshBuffer)
-		i.next = i.scheduleRefresh(time.Until(nextRefresh))
+		t := refreshDuration(time.Now(), i.cur.result.expiry)
+		i.next = i.scheduleRefresh(t)
 	})
 	return res
 }
