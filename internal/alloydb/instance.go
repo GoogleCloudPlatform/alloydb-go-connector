@@ -215,7 +215,7 @@ func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 }
 
 // refreshDuration returns the duration to wait before starting the next
-// minutes. Usually that duration will be half of the time until certificate
+// refresh. Usually that duration will be half of the time until certificate
 // expiration.
 func refreshDuration(now, certExpiry time.Time) time.Duration {
 	d := certExpiry.Sub(now)
