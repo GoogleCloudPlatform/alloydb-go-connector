@@ -215,14 +215,19 @@ func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 }
 
 // refreshDuration returns the duration to wait before starting the next
-// refresh. Certificates that expire in an hour or less are refreshed in 55
-// minutes. Otherwise, the duration is half of the time until the expiration.
+// minutes. Usually that duration will be half of the time until certificate
+// expiration.
 func refreshDuration(now, certExpiry time.Time) time.Duration {
 	d := certExpiry.Sub(now)
-	if d <= time.Hour {
-		return 55 * time.Minute
+	if d < time.Hour {
+		// Something is wrong with the certification, refresh now.
+		if d < 5*time.Minute {
+			return 0
+		}
+		// Otherwise, wait five minutes before starting the refresh cycle.
+		return 5 * time.Minute
 	}
-	return time.Until(now.Add(time.Duration(d / 2)))
+	return d / 2
 }
 
 // scheduleRefresh schedules a refresh operation to be triggered after a given

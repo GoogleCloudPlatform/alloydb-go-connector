@@ -215,7 +215,7 @@ func TestClose(t *testing.T) {
 	}
 }
 
-func TestNextRefresh(t *testing.T) {
+func TestRefreshDuration(t *testing.T) {
 	now := time.Now()
 	tcs := []struct {
 		desc   string
@@ -230,12 +230,22 @@ func TestNextRefresh(t *testing.T) {
 		{
 			desc:   "when expiration is equal to 1 hour",
 			expiry: now.Add(time.Hour),
-			want:   55 * time.Minute,
+			want:   30 * time.Minute,
 		},
 		{
-			desc:   "when expiration is less than 1 hour",
-			expiry: now.Add(59 * time.Minute),
-			want:   55 * time.Minute,
+			desc:   "when expiration is less than 1 hour, but greater than 5 minutes",
+			expiry: now.Add(6 * time.Minute),
+			want:   5 * time.Minute,
+		},
+		{
+			desc:   "when expiration is less than 5 minutes",
+			expiry: now.Add(4 * time.Minute),
+			want:   0,
+		},
+		{
+			desc:   "when expiration is now",
+			expiry: now,
+			want:   0,
 		},
 	}
 	for _, tc := range tcs {
