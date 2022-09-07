@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v0.2.1...v0.2.2) (2022-09-07)
+
+
+### Bug Fixes
+
+* support shorter refresh durations ([#103](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/103)) ([6f6a7a0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/6f6a7a05875c3d62a8a71cd54c59db8d793d3c25))
+
 ## [0.2.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v0.2.0...v0.2.1) (2022-08-01)
 
 
