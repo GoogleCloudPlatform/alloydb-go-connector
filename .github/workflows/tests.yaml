@@ -25,7 +25,7 @@ jobs:
       name: "integration tests (linux)"
       strategy:
         matrix:
-          go-version: [1.16, 1.17, 1.18]
+          go-version: [1.16, 1.17, 1.18, 1.19]
         fail-fast: false
       steps:
         - name: Setup Go ${{ matrix.go-version }}
@@ -56,7 +56,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
         goarch: ["", "386"]
-        go-version: [1.16, 1.17, 1.18]
+        go-version: [1.16, 1.17, 1.18, 1.19]
         exclude:
           - os: macos-latest
             goarch: "386"
