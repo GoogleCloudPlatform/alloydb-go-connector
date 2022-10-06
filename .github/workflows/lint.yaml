@@ -19,12 +19,13 @@ on:
     types: [labeled]
 
 jobs:
+<<<<<<< HEAD
   lint:
     if: "${{ github.event.action != 'labeled' || github.event.label.name == 'tests: run' }}"
     name: Run lint
     runs-on: ubuntu-latest
     steps:
-      - name: Remove PR label
+      - name: Remove PR Label
         if: "${{ github.event.action == 'labeled' && github.event.label.name == 'tests: run' }}"
         uses: actions/github-script@v6
         with:
@@ -40,22 +41,21 @@ jobs:
             } catch (e) {
               console.log('Failed to remove label. Another job may have already removed it!');
             }
-
       - name: Setup Go
         uses: actions/setup-go@v3
         with:
           go-version: "1.19"
-
-      - name: Install goimports
-        run: go install golang.org/x/tools/cmd/goimports@latest
-
       - name: Checkout code
         uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-
-      - run: goimports -w .
-      - run: go mod tidy
-      - name: Verify no changes from goimports and go mod tidy. If you're reading this and the check has failed, run `goimports -w . && go mod tidy`.
-        run: git diff --exit-code
+      - name: >
+          Verify go mod tidy. If you're reading this and the check has
+          failed, run `goimports -w . && go mod tidy && golangci-lint run`
+        run: |
+          go mod tidy && git diff --exit-code
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
