@@ -37,26 +37,32 @@ import (
 	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 )
 
+// Option configures a FakeAlloyDBInstance
 type Option func(*FakeAlloyDBInstance)
 
+// WithIPAddr sets the IP address of the instance.
 func WithIPAddr(addr string) Option {
 	return func(f *FakeAlloyDBInstance) {
 		f.ipAddr = addr
 	}
 }
 
+// WithServerName sets the name that server uses to identify itself in the TLS
+// handshake.
 func WithServerName(name string) Option {
 	return func(f *FakeAlloyDBInstance) {
 		f.serverName = name
 	}
 }
 
+// WithCertExpiry sets the expiration time of the fake instance
 func WithCertExpiry(expiry time.Time) Option {
 	return func(f *FakeAlloyDBInstance) {
 		f.certExpiry = expiry
 	}
 }
 
+// FakeAlloyDBInstance represents the server side proxy.
 type FakeAlloyDBInstance struct {
 	project string
 	region  string
@@ -92,7 +98,8 @@ var (
 	serverKey     = mustGenerateKey()
 )
 
-func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBInstance {
+// NewFakeInstance creates a Fake AlloyDB instance.
+func NewFakeInstance(proj, reg, clust, name string, _ ...Option) FakeAlloyDBInstance {
 	f := FakeAlloyDBInstance{
 		project:    proj,
 		region:     reg,

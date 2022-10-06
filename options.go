@@ -28,6 +28,7 @@ import (
 	apiopt "google.golang.org/api/option"
 )
 
+// CloudPlatformScope is the default OAuth2 scope set on the API client.
 const CloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 
 // An Option is an option for configuring a Dialer.
