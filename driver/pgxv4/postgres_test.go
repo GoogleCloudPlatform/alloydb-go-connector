@@ -23,7 +23,7 @@ import (
 )
 
 // Example shows how to use the AlloyDB driver
-func ExamplePostgresConnection() {
+func ExampleRegisterDriver() {
 	// Note that sslmode=disable is required it does not mean that the connection
 	// is unencrypted. All connections via the proxy are completely encrypted.
 	pgxv4.RegisterDriver("alloydb")

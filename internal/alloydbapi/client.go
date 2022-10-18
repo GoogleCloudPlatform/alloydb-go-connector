@@ -19,7 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"google.golang.org/api/googleapi"
@@ -95,7 +95,7 @@ func (c *Client) ConnectionInfo(ctx context.Context, project, region, cluster, i
 	// If the status code is 300 or greater, capture any information in the
 	// response and return it as part of the error.
 	if res.StatusCode >= http.StatusMultipleChoices {
-		body, err := ioutil.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
 		if err != nil {
 			return ConnectionInfoResponse{}, err
 		}
@@ -143,7 +143,7 @@ func (c *Client) GenerateClientCert(ctx context.Context, project, region, cluste
 	// If the status code is 300 or greater, capture any information in the
 	// response and return it as part of the error.
 	if res.StatusCode >= http.StatusMultipleChoices {
-		body, err := ioutil.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
 		if err != nil {
 			return GenerateClientCertificateResponse{}, err
 		}

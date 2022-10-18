@@ -25,7 +25,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -99,7 +99,7 @@ var (
 )
 
 // NewFakeInstance creates a Fake AlloyDB instance.
-func NewFakeInstance(proj, reg, clust, name string, _ ...Option) FakeAlloyDBInstance {
+func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBInstance {
 	f := FakeAlloyDBInstance{
 		project:    proj,
 		region:     reg,
@@ -174,6 +174,9 @@ func NewFakeInstance(proj, reg, clust, name string, _ ...Option) FakeAlloyDBInst
 	}
 	signedServer, err := x509.CreateCertificate(
 		rand.Reader, serverTemplate, rootCert, &serverKey.PublicKey, rootCAKey)
+	if err != nil {
+		panic(err)
+	}
 	serverCert, err := x509.ParseCertificate(signedServer)
 	if err != nil {
 		panic(err)
@@ -188,18 +191,6 @@ func NewFakeInstance(proj, reg, clust, name string, _ ...Option) FakeAlloyDBInst
 	f.serverKey = serverKey
 
 	return f
-}
-
-func (f FakeAlloyDBInstance) clientCert() *x509.Certificate {
-	return &x509.Certificate{
-		SerialNumber: &big.Int{},
-		Subject: pkix.Name{
-			CommonName: "alloydb-client",
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(0, 0, 1),
-		BasicConstraintsValid: true,
-	}
 }
 
 // Request represents a HTTP request for a test Server to mock responses for.
@@ -259,7 +250,7 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 		reqCt: ct,
 		handle: func(resp http.ResponseWriter, req *http.Request) {
 			// Read the body from the request.
-			b, err := ioutil.ReadAll(req.Body)
+			b, err := io.ReadAll(req.Body)
 			defer req.Body.Close()
 			if err != nil {
 				http.Error(resp, fmt.Errorf("unable to read body: %w", err).Error(), http.StatusBadRequest)
@@ -298,6 +289,10 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 
 			cert, err := x509.CreateCertificate(
 				rand.Reader, template, i.intermedCert, template.PublicKey, i.intermedKey)
+			if err != nil {
+				http.Error(resp, fmt.Errorf("unable to create certificate: %w", err).Error(), http.StatusBadRequest)
+				return
+			}
 
 			certPEM := &bytes.Buffer{}
 			pem.Encode(certPEM, &pem.Block{Type: "CERTIFICATE", Bytes: cert})

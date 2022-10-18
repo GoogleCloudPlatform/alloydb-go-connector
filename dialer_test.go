@@ -17,7 +17,7 @@ package alloydbconn
 import (
 	"context"
 	"errors"
-	"io/ioutil"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -69,7 +69,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	}
 	defer conn.Close()
 
-	data, err := ioutil.ReadAll(conn)
+	data, err := io.ReadAll(conn)
 	if err != nil {
 		t.Fatalf("expected ReadAll to succeed, got error %v", err)
 	}
