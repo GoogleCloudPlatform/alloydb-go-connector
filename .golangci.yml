@@ -15,44 +15,36 @@
 linters:
   disable-all: true
   enable:
-    # From https://golangci-lint.run/usage/linters/
-    # This is a minor deviation from the default linters
     - goimports
-    - gosimple
-    - govet
-    - ineffassign
     - revive
-    - staticcheck
-    - unused
 issues:
   exclude-use-default: false
 linters-settings:
   revive:
     rules:
-      # From https://revive.run/docs#recommended-configuration
       - name: blank-imports
       - name: context-as-argument
       - name: context-keys-type
       - name: dot-imports
-      - name: empty-block
-      - name: errorf
-      - name: error-naming
       - name: error-return
       - name: error-strings
+      - name: error-naming
       - name: exported
       - name: if-return
-      - name: import-shadowing
       - name: increment-decrement
-      - name: indent-error-flow
+      - name: var-naming
+      - name: var-declaration
       - name: range
-      - name: range-val-address
-      - name: range-val-in-closure
       - name: receiver-naming
-      - name: redefines-builtin-id
-      - name: superfluous-else
       - name: time-naming
       - name: unexported-return
-      - name: unreachable-code
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
       - name: unused-parameter
-      - name: var-declaration
-      - name: var-naming
+      - name: unreachable-code
+      - name: redefines-builtin-id
+      - name: range-val-in-closure
+      - name: range-val-address
+      - name: import-shadowing
