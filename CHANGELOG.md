@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v0.3.0...v0.3.1) (2022-11-01)
+
+
+### Bug Fixes
+
+* update dependencies to latest versions ([#150](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/150)) ([369121b](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/369121b7421243c2be6f2fa3e6c998a8d01d08e2))
+
 ## [0.3.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v0.2.2...v0.3.0) (2022-10-18)
 
 
