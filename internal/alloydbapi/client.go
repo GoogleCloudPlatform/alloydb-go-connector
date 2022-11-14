@@ -34,7 +34,8 @@ type ConnectionInfoResponse struct {
 }
 
 type GenerateClientCertificateRequest struct {
-	PemCSR string `json:"pemCsr"`
+	PemCSR              string `json:"pemCsr"`
+	CertificateDuration string `json:"certificateDuration"`
 }
 
 type GenerateClientCertificateResponse struct {
@@ -114,7 +115,10 @@ func (c *Client) GenerateClientCert(ctx context.Context, project, region, cluste
 		"%s/projects/%s/locations/%s/clusters/%s:generateClientCertificate",
 		c.endpoint, project, region, cluster,
 	)
-	body, err := json.Marshal(GenerateClientCertificateRequest{PemCSR: string(csr)})
+	body, err := json.Marshal(GenerateClientCertificateRequest{
+		PemCSR:              string(csr),
+		CertificateDuration: "3600s",
+	})
 	if err != nil {
 		return GenerateClientCertificateResponse{}, err
 	}
