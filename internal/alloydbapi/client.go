@@ -35,7 +35,7 @@ type ConnectionInfoResponse struct {
 
 type GenerateClientCertificateRequest struct {
 	PemCSR              string `json:"pemCsr"`
-	CertificateDuration string `json:"certificateDuration"`
+	CertificateDuration string `json:"certDuration"`
 }
 
 type GenerateClientCertificateResponse struct {
