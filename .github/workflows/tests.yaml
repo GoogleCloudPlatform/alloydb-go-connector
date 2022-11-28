@@ -176,7 +176,7 @@ jobs:
           go test -v -cover -short ./...
       
       - name: Convert test output to XML
-        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() && matrix.goarch == '' }}
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'pull_request') && always() && matrix.goarch == '' }}
         run: |
           go install github.com/jstemmer/go-junit-report/v2@latest
           go-junit-report -in test_results.txt -set-exit-code -out unit_sponge_log.xml
