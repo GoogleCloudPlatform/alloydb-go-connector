@@ -19,7 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"google.golang.org/api/googleapi"
@@ -27,17 +27,22 @@ import (
 	htransport "google.golang.org/api/transport/http"
 )
 
+// ConnectionInfoResponse is the response from the connection info endpoint.
 type ConnectionInfoResponse struct {
 	ServerResponse googleapi.ServerResponse
 	IPAddress      string `json:"ipAddress"`
 	InstanceUID    string `json:"instanceUid"`
 }
 
+// GenerateClientCertificateRequest is the request to generate a client
+// certificate.
 type GenerateClientCertificateRequest struct {
 	PemCSR              string `json:"pemCsr"`
 	CertificateDuration string `json:"certDuration"`
 }
 
+// GenerateClientCertificateResponse is the response from the certificate
+// endpoint.
 type GenerateClientCertificateResponse struct {
 	ServerResponse      googleapi.ServerResponse
 	PemCertificate      string   `json:"pemCertificate"`
@@ -47,6 +52,7 @@ type GenerateClientCertificateResponse struct {
 // baseURL is the production API endpoint of the AlloyDB Admin API
 const baseURL = "https://alloydb.googleapis.com/v1beta"
 
+// Client is an API client to the AlloyDB Rest API
 type Client struct {
 	client *http.Client
 	// endpoint is the base URL for the AlloyDB Admin API (e.g.
@@ -54,6 +60,7 @@ type Client struct {
 	endpoint string
 }
 
+// NewClient initializes a Client.
 func NewClient(ctx context.Context, opts ...option.ClientOption) (*Client, error) {
 	os := append([]option.ClientOption{
 		option.WithEndpoint(baseURL),
@@ -69,6 +76,7 @@ func NewClient(ctx context.Context, opts ...option.ClientOption) (*Client, error
 	return &Client{client: client, endpoint: endpoint}, nil
 }
 
+// ConnectionInfo retrieves connection info for the provided instance.
 func (c *Client) ConnectionInfo(ctx context.Context, project, region, cluster, instance string) (ConnectionInfoResponse, error) {
 	u := fmt.Sprintf(
 		"%s/projects/%s/locations/%s/clusters/%s/instances/%s/connectionInfo",
@@ -87,7 +95,7 @@ func (c *Client) ConnectionInfo(ctx context.Context, project, region, cluster, i
 	// If the status code is 300 or greater, capture any information in the
 	// response and return it as part of the error.
 	if res.StatusCode >= http.StatusMultipleChoices {
-		body, err := ioutil.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
 		if err != nil {
 			return ConnectionInfoResponse{}, err
 		}
@@ -110,6 +118,7 @@ func (c *Client) ConnectionInfo(ctx context.Context, project, region, cluster, i
 	return ret, nil
 }
 
+// GenerateClientCert creates a client certificate using the provided CSR.
 func (c *Client) GenerateClientCert(ctx context.Context, project, region, cluster string, csr []byte) (GenerateClientCertificateResponse, error) {
 	u := fmt.Sprintf(
 		"%s/projects/%s/locations/%s/clusters/%s:generateClientCertificate",
@@ -134,7 +143,7 @@ func (c *Client) GenerateClientCert(ctx context.Context, project, region, cluste
 	// If the status code is 300 or greater, capture any information in the
 	// response and return it as part of the error.
 	if res.StatusCode >= http.StatusMultipleChoices {
-		body, err := ioutil.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
 		if err != nil {
 			return GenerateClientCertificateResponse{}, err
 		}

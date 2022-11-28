@@ -67,11 +67,6 @@ func parseInstURI(cn string) (instanceURI, error) {
 	return c, nil
 }
 
-type metadata struct {
-	ipAddrs map[string]string
-	version string
-}
-
 // refreshOperation is a pending result of a refresh operation of data used to connect securely. It should
 // only be initialized by the Instance struct as part of a refresh cycle.
 type refreshOperation struct {
