@@ -89,8 +89,24 @@ jobs:
           ALLOYDB_USER: 'postgres'
           ALLOYDB_PASS: '${{ steps.secrets.outputs.ALLOYDB_CLUSTER_PASS }}'
           ALLOYDB_URI: '${{ steps.secrets.outputs.ALLOYDB_URI }}'
+        # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
+        shell: bash
         run: |
-          go test -v -race -cover ./e2e_test.go
+          go test -v -race -cover ./e2e_test.go | tee test_results.txt
+      
+      - name: Convert test output to XML
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() }}
+        run: |
+          go install github.com/jstemmer/go-junit-report/v2@latest
+          go-junit-report -in test_results.txt -set-exit-code -out integration_sponge_log.xml
+
+      - name: FlakyBot
+        # only run flakybot on periodic (schedule) and continuous (push) events
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() }}
+        run: |
+          curl https://github.com/googleapis/repo-automation-bots/releases/download/flakybot-1.1.0/flakybot -o flakybot -s -L
+          chmod +x ./flakybot
+          ./flakybot --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
 
   unit:
     # run job on proper workflow event triggers (skip job for pull_request event from forks and only run pull_request_target for "tests: run" label)
@@ -106,6 +122,9 @@ jobs:
           - os: macos-latest
             goarch: "386"
       fail-fast: false
+    permissions:
+      contents: 'read'
+      id-token: 'write'
     env:
       GOARCH: ${{ matrix.goarch }}
     steps:
@@ -137,12 +156,48 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
 
+      - id: 'auth'
+        name: 'Authenticate to Google Cloud'
+        uses: 'google-github-actions/auth@v1.0.0'
+        with:
+          workload_identity_provider: ${{ secrets.PROVIDER_NAME }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+
       - name: Run tests
         if: matrix.goarch == ''
+        # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
+        shell: bash
         run: |
-          go test -v -race -cover -short ./...
+          go test -v -race -cover -short ./... | tee test_results.txt
       - name: Run tests (386)
         # 386 archs don't support race detector
         if: matrix.goarch == '386'
         run: |
           go test -v -cover -short ./...
+      
+      - name: Convert test output to XML
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() && matrix.goarch == '' }}
+        run: |
+          go install github.com/jstemmer/go-junit-report/v2@latest
+          go-junit-report -in test_results.txt -set-exit-code -out unit_sponge_log.xml
+
+      - name: FlakyBot (Linux)
+        # only run flakybot on periodic (schedule) and continuous (push) events
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && runner.os == 'Linux' && always() }}
+        run: |
+          curl https://github.com/googleapis/repo-automation-bots/releases/download/flakybot-1.1.0/flakybot -o flakybot -s -L
+          chmod +x ./flakybot
+          ./flakybot --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
+      - name: FlakyBot (Windows)
+        # only run flakybot on periodic (schedule) and continuous (push) events
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && runner.os == 'Windows' && always() }}
+        run: |
+          curl https://github.com/googleapis/repo-automation-bots/releases/download/flakybot-1.1.0/flakybot.exe -o flakybot.exe -s -L
+          ./flakybot.exe --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
+      - name: FlakyBot (macOS)
+        # only run flakybot on periodic (schedule) and continuous (push) events
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && runner.os == 'macOS' && always() }}
+        run: |
+          curl https://github.com/googleapis/repo-automation-bots/releases/download/flakybot-1.1.0/flakybot-darwin-amd64 -o flakybot -s -L
+          chmod +x ./flakybot
+          ./flakybot --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
