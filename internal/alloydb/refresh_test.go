@@ -74,10 +74,6 @@ func TestRefresh(t *testing.T) {
 func TestRefreshFailsFast(t *testing.T) {
 	wantInstURI := "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
 	cn, err := parseInstURI(wantInstURI)
-	// throw error
-	if true {
-		panic("THROWING ERROR FOR FLAKYBOT TO CATCH")
-	}
 	if err != nil {
 		t.Fatalf("parseConnName(%s)failed : %v", cn, err)
 	}
