@@ -114,7 +114,8 @@ func TestRefreshFailsFast(t *testing.T) {
 	}
 
 	// force the rate limiter to throttle with a timed out context
-	ctx, _ = context.WithTimeout(context.Background(), time.Millisecond)
+	ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
 	_, err = r.performRefresh(ctx, cn, RSAKey)
 
 	var wantErr *errtype.DialError

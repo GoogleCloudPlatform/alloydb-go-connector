@@ -17,9 +17,9 @@ package alloydbconn
 import (
 	"context"
 	"crypto/rsa"
-	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"cloud.google.com/go/alloydbconn/errtype"
@@ -28,6 +28,7 @@ import (
 	apiopt "google.golang.org/api/option"
 )
 
+// CloudPlatformScope is the default OAuth2 scope set on the API client.
 const CloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 
 // An Option is an option for configuring a Dialer.
@@ -59,7 +60,7 @@ func WithOptions(opts ...Option) Option {
 // authentication.
 func WithCredentialsFile(filename string) Option {
 	return func(d *dialerConfig) {
-		b, err := ioutil.ReadFile(filename)
+		b, err := os.ReadFile(filename)
 		if err != nil {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
