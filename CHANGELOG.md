@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v0.3.1...v0.4.0) (2022-11-28)
+
+
+### Features
+
+* limit ephemeral certificates to 1 hour ([#168](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/168)) ([b9bb918](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/b9bb918a1a9befb44c4a0cfce5e7a48a80e3ea20))
+
 ## [0.3.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v0.3.0...v0.3.1) (2022-11-01)
 
 
