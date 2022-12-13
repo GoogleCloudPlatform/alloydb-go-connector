@@ -1,6 +1,4 @@
 # AlloyDB Go Connector
-*Warning*: This project is in Public Preview, and may contain breaking changes
-before it becomes Generally Available.
 
 [![CI][ci-badge]][ci-build]
 [![Go Reference][pkg-badge]][pkg-docs]
