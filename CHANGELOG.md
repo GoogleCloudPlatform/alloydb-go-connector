@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.0.0...v1.1.0) (2023-01-10)
+
+
+### Features
+
+* use handshake context when possible ([#199](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/199)) ([533eb4e](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/533eb4e3cce97ac5f3fbfa3c0c7cd4f2e857ff05))
+
 ## [1.0.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v0.4.0...v1.0.0) (2022-12-13)
 
 
