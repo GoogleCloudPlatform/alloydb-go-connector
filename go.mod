@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/google/uuid v1.3.0
 	github.com/jackc/pgx/v4 v4.17.2
+	github.com/jackc/pgx/v5 v5.2.0
 	github.com/pkg/errors v0.9.1 // indirect
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.0.0-20221014081412-f15817d10f9b
