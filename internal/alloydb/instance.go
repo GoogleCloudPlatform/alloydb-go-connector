@@ -34,7 +34,8 @@ const refreshBuffer = 4 * time.Minute
 var (
 	// Instance URI is in the format:
 	// '/projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>'
-	// Additionally, we have to support legacy "domain-scoped" projects (e.g. "google.com:PROJECT")
+	// Additionally, we have to support legacy "domain-scoped" projects
+	// (e.g. "google.com:PROJECT")
 	instURIRegex = regexp.MustCompile("projects/([^:]+(:[^:]+)?)/locations/([^:]+)/clusters/([^:]+)/instances/([^:]+)")
 )
 
@@ -71,8 +72,9 @@ func parseInstURI(cn string) (instanceURI, error) {
 	return c, nil
 }
 
-// refreshOperation is a pending result of a refresh operation of data used to connect securely. It should
-// only be initialized by the Instance struct as part of a refresh cycle.
+// refreshOperation is a pending result of a refresh operation of data used to
+// connect securely. It should only be initialized by the Instance struct as
+// part of a refresh cycle.
 type refreshOperation struct {
 	result refreshResult
 	err    error
@@ -83,24 +85,16 @@ type refreshOperation struct {
 	ready chan struct{}
 }
 
-// Cancel prevents the instanceInfo from starting, if it hasn't already started. Returns true if timer
-// was stopped successfully, or false if it has already started.
-func (r *refreshOperation) Cancel() bool {
+// Cancel prevents the instanceInfo from starting, if it hasn't already
+// started. Returns true if timer was stopped successfully, or false if it has
+// already started.
+func (r *refreshOperation) cancel() bool {
 	return r.timer.Stop()
 }
 
-// Wait blocks until the refreshOperation attempt is completed.
-func (r *refreshOperation) Wait(ctx context.Context) error {
-	select {
-	case <-r.ready:
-		return r.err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// IsValid returns true if this result is complete, successful, and is still valid.
-func (r *refreshOperation) IsValid() bool {
+// IsValid returns true if this result is complete, successful, and is still
+// valid.
+func (r *refreshOperation) isValid() bool {
 	// verify the result has finished running
 	select {
 	default:
@@ -126,15 +120,16 @@ type Instance struct {
 	r   refresher
 
 	resultGuard sync.RWMutex
-	// cur represents the current refreshOperation that will be used to create connections. If a valid complete
-	// refreshOperation isn't available it's possible for cur to be equal to next.
+	// cur represents the current refreshOperation that will be used to
+	// create connections. If a valid complete refreshOperation isn't
+	// available it's possible for cur to be equal to next.
 	cur *refreshOperation
-	// next represents a future or ongoing refreshOperation. Once complete, it will replace cur and schedule a
-	// replacement to occur.
+	// next represents a future or ongoing refreshOperation. Once complete,
+	// it will replace cur and schedule a replacement to occur.
 	next *refreshOperation
 
-	// ctx is the default ctx for refresh operations. Canceling it prevents new refresh
-	// operations from being triggered.
+	// ctx is the default ctx for refresh operations. Canceling it prevents
+	// new refresh operations from being triggered.
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -165,8 +160,8 @@ func NewInstance(
 		ctx:    ctx,
 		cancel: cancel,
 	}
-	// For the initial refresh operation, set cur = next so that connection requests block
-	// until the first refresh is complete.
+	// For the initial refresh operation, set cur = next so that connection
+	// requests block until the first refresh is complete.
 	i.resultGuard.Lock()
 	i.cur = i.scheduleRefresh(0)
 	i.next = i.cur
@@ -189,24 +184,32 @@ func (i *Instance) ConnectInfo(ctx context.Context) (string, *tls.Config, error)
 	return res.result.instanceIPAddr, res.result.conf, nil
 }
 
-// ForceRefresh triggers an immediate refresh operation to be scheduled and used for future connection attempts.
+// ForceRefresh triggers an immediate refresh operation to be scheduled and
+// used for future connection attempts.
 func (i *Instance) ForceRefresh() {
 	i.resultGuard.Lock()
 	defer i.resultGuard.Unlock()
 	// If the next refresh hasn't started yet, we can cancel it and start an immediate one
-	if i.next.Cancel() {
+	if i.next.cancel() {
 		i.next = i.scheduleRefresh(0)
 	}
 	// block all sequential connection attempts on the next refresh result
 	i.cur = i.next
 }
 
-// result returns the most recent refresh result (waiting for it to complete if necessary)
+// result returns the most recent refresh result (waiting for it to complete if
+// necessary)
 func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 	i.resultGuard.RLock()
 	res := i.cur
 	i.resultGuard.RUnlock()
-	err := res.Wait(ctx)
+	var err error
+	select {
+	case <-res.ready:
+		err = res.err
+	case <-ctx.Done():
+		err = ctx.Err()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -239,22 +242,26 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		res.result, res.err = i.r.performRefresh(i.ctx, i.instanceURI, i.key)
 		close(res.ready)
 
-		// Once the refresh is complete, update "current" with working result and schedule a new refresh
+		// Once the refresh is complete, update "current" with working
+		// result and schedule a new refresh
 		i.resultGuard.Lock()
 		defer i.resultGuard.Unlock()
 		// if failed, scheduled the next refresh immediately
 		if res.err != nil {
 			i.next = i.scheduleRefresh(0)
-			// If the latest result is bad, avoid replacing the used result while it's
-			// still valid and potentially able to provide successful connections.
-			// TODO: This means that errors while the current result is still valid are
-			// surpressed. We should try to surface errors in a more meaningful way.
-			if !i.cur.IsValid() {
+			// If the latest result is bad, avoid replacing the
+			// used result while it's still valid and potentially
+			// able to provide successful connections. TODO: This
+			// means that errors while the current result is still
+			// valid are surpressed. We should try to surface
+			// errors in a more meaningful way.
+			if !i.cur.isValid() {
 				i.cur = res
 			}
 			return
 		}
-		// Update the current results, and schedule the next refresh in the future
+		// Update the current results, and schedule the next refresh in
+		// the future
 		i.cur = res
 		select {
 		case <-i.ctx.Done():
