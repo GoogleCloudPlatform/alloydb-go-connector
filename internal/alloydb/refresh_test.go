@@ -20,11 +20,12 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"google.golang.org/api/option"
 )
+
+const testDialerID = "some-dialer-id"
 
 func TestRefresh(t *testing.T) {
 	wantIP := "10.0.0.1"
@@ -57,7 +58,7 @@ func TestRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admin API client error: %v", err)
 	}
-	r := newRefresher(cl, time.Hour, 30*time.Second, 2, "some-id")
+	r := newRefresher(cl, testDialerID)
 	res, err := r.performRefresh(context.Background(), cn, RSAKey)
 	if err != nil {
 		t.Fatalf("performRefresh unexpectedly failed with error: %v", err)
@@ -98,7 +99,7 @@ func TestRefreshFailsFast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admin API client error: %v", err)
 	}
-	r := newRefresher(cl, time.Hour, 30*time.Second, 1, "some-id")
+	r := newRefresher(cl, testDialerID)
 
 	_, err = r.performRefresh(context.Background(), cn, RSAKey)
 	if err != nil {
@@ -111,15 +112,5 @@ func TestRefreshFailsFast(t *testing.T) {
 	_, err = r.performRefresh(ctx, cn, RSAKey)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled error, got = %v", err)
-	}
-
-	// force the rate limiter to throttle with a timed out context
-	ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond)
-	defer cancel()
-	_, err = r.performRefresh(ctx, cn, RSAKey)
-
-	var wantErr *errtype.DialError
-	if !errors.As(err, &wantErr) {
-		t.Fatalf("when refresh is throttled, want = %T, got = %v", wantErr, err)
 	}
 }
