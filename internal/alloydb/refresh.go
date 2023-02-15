@@ -30,7 +30,6 @@ import (
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 	"cloud.google.com/go/alloydbconn/internal/trace"
-	"golang.org/x/time/rate"
 )
 
 type connectInfo struct {
@@ -196,16 +195,11 @@ func createTLSConfig(inst instanceURI, cc certChain, info connectInfo, k *rsa.Pr
 // newRefresher creates a Refresher.
 func newRefresher(
 	client *alloydbapi.Client,
-	timeout time.Duration,
-	interval time.Duration,
-	burst int,
 	dialerID string,
 ) refresher {
 	return refresher{
-		client:        client,
-		timeout:       timeout,
-		clientLimiter: rate.NewLimiter(rate.Every(interval), burst),
-		dialerID:      dialerID,
+		client:   client,
+		dialerID: dialerID,
 	}
 }
 
@@ -215,14 +209,8 @@ type refresher struct {
 	// client provides access to the AlloyDB Admin API
 	client *alloydbapi.Client
 
-	// timeout is the maximum amount of time a refresh operation should be allowed to take.
-	timeout time.Duration
-
 	// dialerID is the unique ID of the associated dialer.
 	dialerID string
-
-	// clientLimiter limits the number of refreshes.
-	clientLimiter *rate.Limiter
 }
 
 type refreshResult struct {
@@ -246,22 +234,6 @@ func (r refresher) performRefresh(ctx context.Context, cn instanceURI, k *rsa.Pr
 		go trace.RecordRefreshResult(context.Background(), cn.String(), r.dialerID, err)
 		refreshEnd(err)
 	}()
-
-	ctx, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
-	if ctx.Err() == context.Canceled {
-		return refreshResult{}, ctx.Err()
-	}
-
-	// avoid refreshing too often to try not to tax the AlloyDB Admin API quotas
-	err = r.clientLimiter.Wait(ctx)
-	if err != nil {
-		return refreshResult{}, errtype.NewDialError(
-			"refresh was throttled until context expired",
-			cn.String(),
-			nil,
-		)
-	}
 
 	type mdRes struct {
 		info connectInfo
