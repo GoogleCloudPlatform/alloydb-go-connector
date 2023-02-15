@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.1.0...v1.2.0) (2023-02-15)
+
+
+### Features
+
+* add support for Go 1.20 ([#216](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/216)) ([43e16c0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/43e16c049b7e2d55c73ee2a21ef936f18620923f))
+
+
+### Bug Fixes
+
+* improve reliability of certificate refresh ([#220](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/220)) ([db686a9](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/db686a9058b7998472a3a32df6598c90390abf84))
+* prevent repeated context expired errors ([#228](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/228)) ([33d1369](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/33d1369f4ce7011b15e91004caddc350a64d2127))
+
 ## [1.1.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.0.0...v1.1.0) (2023-01-10)
 
 
