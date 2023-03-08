@@ -192,6 +192,27 @@ This library includes support for metrics and tracing using [OpenCensus][]. To
 enable metrics or tracing, you need to configure an [exporter][]. OpenCensus
 supports many backends for exporters.
 
+Supported metrics include:
+
+- `alloydbconn/dial_latency`: The distribution of dialer latencies (ms)
+- `alloydbconn/open_connections`: The current number of open AlloyDB
+  connections
+- `alloydbconn/dial_failure_count`: The number of failed dial attempts
+- `alloydbconn/refresh_success_count`: The number of successful certificate
+  refresh operations
+- `alloydbconn/refresh_failure_count`: The number of failed refresh
+  operations.
+
+Supported traces include:
+
+- `cloud.google.com/go/alloydbconn.Dial`: The dial operation including
+  refreshing an ephemeral certificate and connecting to the instance
+- `cloud.google.com/go/alloydbconn/internal.InstanceInfo`: The call to retrieve
+  instance metadata (e.g., IP address, etc)
+- `cloud.google.com/go/alloydbconn/internal.Connect`: The connection attempt
+  using the ephemeral certificate
+- AlloyDB API client operations
+
 For example, to use [Cloud Monitoring][] and [Cloud Trace][], you would
 configure an exporter like so:
 
