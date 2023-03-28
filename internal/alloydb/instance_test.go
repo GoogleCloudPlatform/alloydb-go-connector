@@ -183,7 +183,7 @@ func TestConnectInfoErrors(t *testing.T) {
 	}
 
 	// Use a timeout that should fail instantly
-	im := NewInstance(
+	i := NewInstance(
 		testInstanceURI(),
 		c, RSAKey, 0, "dialer-id",
 	)
@@ -191,7 +191,7 @@ func TestConnectInfoErrors(t *testing.T) {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 
-	_, _, err = im.ConnectInfo(ctx)
+	_, _, err = i.ConnectInfo(ctx)
 	var wantErr *errtype.DialError
 	if !errors.As(err, &wantErr) {
 		t.Fatalf("when connect info fails, want = %T, got = %v", wantErr, err)
@@ -206,16 +206,16 @@ func TestClose(t *testing.T) {
 	}
 
 	// Set up an instance and then close it immediately
-	im := NewInstance(
+	i := NewInstance(
 		testInstanceURI(),
 		c, RSAKey, 30, "dialer-ider",
 	)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
-	im.Close()
+	i.Close()
 
-	_, _, err = im.ConnectInfo(ctx)
+	_, _, err = i.ConnectInfo(ctx)
 	if !strings.Contains(err.Error(), "context was canceled or expired") {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
