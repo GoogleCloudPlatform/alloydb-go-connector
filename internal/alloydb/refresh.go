@@ -33,16 +33,16 @@ import (
 )
 
 type connectInfo struct {
-	// ipAddr is the instance's IP addresss
+	// ipAddr is the instance's IP addresses
 	ipAddr string
 	// uid is the instance UID
 	uid string
 }
 
-// fetchMetadata uses the AlloyDB Admin APIs get method to retreive the
+// fetchMetadata uses the AlloyDB Admin APIs get method to retrieve the
 // information about an AlloyDB instance that is used to create secure
 // connections.
-func fetchMetadata(ctx context.Context, cl *alloydbapi.Client, inst instanceURI) (i connectInfo, err error) {
+func fetchMetadata(ctx context.Context, cl *alloydbapi.Client, inst InstanceURI) (i connectInfo, err error) {
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
 	defer func() { end(err) }()
@@ -65,11 +65,11 @@ func parseCert(cert string) (*x509.Certificate, error) {
 
 // fetchEphemeralCert uses the AlloyDB Admin API's generateClientCertificate
 // method to create a signed TLS certificate that authorized to connect via the
-// AlloyDB instance's serverside proxy. The cert is valid for twenty four hours.
+// AlloyDB instance's serverside proxy. The cert is valid for twenty-four hours.
 func fetchEphemeralCert(
 	ctx context.Context,
 	cl *alloydbapi.Client,
-	inst instanceURI,
+	inst InstanceURI,
 	key *rsa.PrivateKey,
 ) (cc certChain, err error) {
 	var end trace.EndSpanFunc
@@ -93,7 +93,10 @@ func fetchEphemeralCert(
 		return certChain{}, err
 	}
 	buf := &bytes.Buffer{}
-	pem.Encode(buf, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
+	err = pem.Encode(buf, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
+	if err != nil {
+		return certChain{}, err
+	}
 	resp, err := cl.GenerateClientCert(ctx, inst.project, inst.region, inst.cluster, buf.Bytes())
 	if err != nil {
 		return certChain{}, errtype.NewRefreshError(
@@ -145,7 +148,7 @@ func fetchEphemeralCert(
 
 // createTLSConfig returns a *tls.Config for connecting securely to the AlloyDB
 // instance.
-func createTLSConfig(inst instanceURI, cc certChain, info connectInfo, k *rsa.PrivateKey) *tls.Config {
+func createTLSConfig(inst InstanceURI, cc certChain, info connectInfo, k *rsa.PrivateKey) *tls.Config {
 	certs := x509.NewCertPool()
 	certs.AddCert(cc.root)
 
@@ -182,7 +185,7 @@ func createTLSConfig(inst instanceURI, cc certChain, info connectInfo, k *rsa.Pr
 			}
 			return nil
 		},
-		Certificates: []tls.Certificate{tls.Certificate{
+		Certificates: []tls.Certificate{{
 			Certificate: [][]byte{cc.client.Raw, cc.intermediate.Raw},
 			PrivateKey:  k,
 			Leaf:        cc.client,
@@ -225,7 +228,7 @@ type certChain struct {
 	client       *x509.Certificate
 }
 
-func (r refresher) performRefresh(ctx context.Context, cn instanceURI, k *rsa.PrivateKey) (res refreshResult, err error) {
+func (r refresher) performRefresh(ctx context.Context, cn InstanceURI, k *rsa.PrivateKey) (res refreshResult, err error) {
 	var refreshEnd trace.EndSpanFunc
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.RefreshConnection",
 		trace.AddInstanceName(cn.String()),

@@ -46,12 +46,12 @@ func TestParseInstURI(t *testing.T) {
 	tcs := []struct {
 		desc string
 		in   string
-		want instanceURI
+		want InstanceURI
 	}{
 		{
 			desc: "vanilla instance URI",
 			in:   "/projects/proj/locations/reg/clusters/clust/instances/name",
-			want: instanceURI{
+			want: InstanceURI{
 				project: "proj",
 				region:  "reg",
 				cluster: "clust",
@@ -61,7 +61,7 @@ func TestParseInstURI(t *testing.T) {
 		{
 			desc: "with legacy domain-scoped project",
 			in:   "/projects/google.com:proj/locations/reg/clusters/clust/instances/name",
-			want: instanceURI{
+			want: InstanceURI{
 				project: "google.com:proj",
 				region:  "reg",
 				cluster: "clust",
@@ -72,7 +72,7 @@ func TestParseInstURI(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
-			got, err := parseInstURI(tc.in)
+			got, err := ParseInstURI(tc.in)
 			if err != nil {
 				t.Fatalf("want no error, got = %v", err)
 			}
@@ -108,7 +108,7 @@ func TestParseConnNameErrors(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
-			_, err := parseInstURI(tc.in)
+			_, err := ParseInstURI(tc.in)
 			if err == nil {
 				t.Fatal("want error, got nil")
 			}
@@ -149,8 +149,8 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
 
-	i, err := NewInstance(
-		"/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance",
+	i := NewInstance(
+		testInstanceURI(),
 		c, RSAKey, 30*time.Second, "dialer-id",
 	)
 	if err != nil {
@@ -170,6 +170,11 @@ func TestConnectInfo(t *testing.T) {
 	}
 }
 
+func testInstanceURI() InstanceURI {
+	i, _ := ParseInstURI("/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
+	return i
+}
+
 func TestConnectInfoErrors(t *testing.T) {
 	ctx := context.Background()
 	c, err := alloydbapi.NewClient(ctx, option.WithTokenSource(stubTokenSource{}))
@@ -178,8 +183,8 @@ func TestConnectInfoErrors(t *testing.T) {
 	}
 
 	// Use a timeout that should fail instantly
-	im, err := NewInstance(
-		"/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance",
+	im := NewInstance(
+		testInstanceURI(),
 		c, RSAKey, 0, "dialer-id",
 	)
 	if err != nil {
@@ -201,8 +206,8 @@ func TestClose(t *testing.T) {
 	}
 
 	// Set up an instance and then close it immediately
-	im, err := NewInstance(
-		"/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance",
+	im := NewInstance(
+		testInstanceURI(),
 		c, RSAKey, 30, "dialer-ider",
 	)
 	if err != nil {
