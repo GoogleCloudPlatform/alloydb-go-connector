@@ -68,7 +68,7 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 type Dialer struct {
 	lock sync.RWMutex
 	// instances map instance URIs to *alloydb.Instance types
-	instances      map[string]*alloydb.Instance
+	instances      map[alloydb.InstanceURI]*alloydb.Instance
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
 
@@ -131,7 +131,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, err
 	}
 	d := &Dialer{
-		instances:      make(map[string]*alloydb.Instance),
+		instances:      make(map[alloydb.InstanceURI]*alloydb.Instance),
 		key:            cfg.rsaKey,
 		refreshTimeout: cfg.refreshTimeout,
 		client:         client,
@@ -160,10 +160,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	inst, err := alloydb.ParseInstURI(instance)
+	if err != nil {
+		return nil, err
+	}
 
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.InstanceInfo")
-	i, err := d.instance(instance)
+	i, err := d.instance(inst)
 	if err != nil {
 		endInfo(err)
 		return nil, err
@@ -249,24 +253,24 @@ func (d *Dialer) Close() error {
 	return nil
 }
 
-func (d *Dialer) instance(instanceURI string) (*alloydb.Instance, error) {
+func (d *Dialer) instance(instance alloydb.InstanceURI) (*alloydb.Instance, error) {
 	// Check instance cache
 	d.lock.RLock()
-	i, ok := d.instances[instanceURI]
+	i, ok := d.instances[instance]
 	d.lock.RUnlock()
 	if !ok {
 		d.lock.Lock()
 		// Recheck to ensure instance wasn't created between locks
-		i, ok = d.instances[instanceURI]
+		i, ok = d.instances[instance]
 		if !ok {
 			// Create a new instance
 			var err error
-			i, err = alloydb.NewInstance(instanceURI, d.client, d.key, d.refreshTimeout, d.dialerID)
+			i = alloydb.NewInstance(instance, d.client, d.key, d.refreshTimeout, d.dialerID)
 			if err != nil {
 				d.lock.Unlock()
 				return nil, err
 			}
-			d.instances[instanceURI] = i
+			d.instances[instance] = i
 		}
 		d.lock.Unlock()
 	}

@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	// the refresh buffer is the amount of time before a refresh's result
+	// the refresh buffer is the amount of time before a refresh cycle's result
 	// expires that a new refresh operation begins.
 	refreshBuffer = 4 * time.Minute
 
@@ -54,20 +54,20 @@ var (
 	instURIRegex = regexp.MustCompile("projects/([^:]+(:[^:]+)?)/locations/([^:]+)/clusters/([^:]+)/instances/([^:]+)")
 )
 
-// instanceURI reprents an AlloyDB instance.
-type instanceURI struct {
+// InstanceURI represents an AlloyDB instance.
+type InstanceURI struct {
 	project string
 	region  string
 	cluster string
 	name    string
 }
 
-func (i *instanceURI) String() string {
+func (i *InstanceURI) String() string {
 	return fmt.Sprintf("%s/%s/%s/%s", i.project, i.region, i.cluster, i.name)
 }
 
-// parseInstURI initializes a new instanceURI struct.
-func parseInstURI(cn string) (instanceURI, error) {
+// ParseInstURI initializes a new InstanceURI struct.
+func ParseInstURI(cn string) (InstanceURI, error) {
 	b := []byte(cn)
 	m := instURIRegex.FindSubmatch(b)
 	if m == nil {
@@ -75,10 +75,10 @@ func parseInstURI(cn string) (instanceURI, error) {
 			"invalid instance URI, expected projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
 			cn,
 		)
-		return instanceURI{}, err
+		return InstanceURI{}, err
 	}
 
-	c := instanceURI{
+	c := InstanceURI{
 		project: string(m[1]),
 		region:  string(m[3]),
 		cluster: string(m[4]),
@@ -130,7 +130,7 @@ type Instance struct {
 	// OpenConns is the number of open connections to the instance.
 	OpenConns uint64
 
-	instanceURI
+	InstanceURI
 	key *rsa.PrivateKey
 	// refreshTimeout sets the maximum duration a refresh cycle can run
 	// for.
@@ -156,19 +156,15 @@ type Instance struct {
 
 // NewInstance initializes a new Instance given an instance URI
 func NewInstance(
-	instance string,
+	instance InstanceURI,
 	client *alloydbapi.Client,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
 	dialerID string,
-) (*Instance, error) {
-	cn, err := parseInstURI(instance)
-	if err != nil {
-		return nil, err
-	}
+) *Instance {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &Instance{
-		instanceURI:    cn,
+		InstanceURI:    instance,
 		key:            key,
 		l:              rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
 		r:              newRefresher(client, dialerID),
@@ -182,7 +178,7 @@ func NewInstance(
 	i.cur = i.scheduleRefresh(0)
 	i.next = i.cur
 	i.resultGuard.Unlock()
-	return i, nil
+	return i
 }
 
 // Close closes the instance; it stops the refresh cycle and prevents it from
@@ -262,11 +258,11 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		if err != nil {
 			r.err = errtype.NewDialError(
 				"context was canceled or expired before refresh completed",
-				i.instanceURI.String(),
+				i.InstanceURI.String(),
 				nil,
 			)
 		} else {
-			r.result, r.err = i.r.performRefresh(i.ctx, i.instanceURI, i.key)
+			r.result, r.err = i.r.performRefresh(i.ctx, i.InstanceURI, i.key)
 		}
 
 		close(r.ready)
@@ -282,7 +278,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			// used result while it's still valid and potentially
 			// able to provide successful connections. TODO: This
 			// means that errors while the current result is still
-			// valid are surpressed. We should try to surface
+			// valid are suppressed. We should try to surface
 			// errors in a more meaningful way.
 			if !i.cur.isValid() {
 				i.cur = r
@@ -306,5 +302,5 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 
 // String returns the instance's URI.
 func (i *Instance) String() string {
-	return i.instanceURI.String()
+	return i.InstanceURI.String()
 }
