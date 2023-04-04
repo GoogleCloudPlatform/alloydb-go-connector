@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"google.golang.org/api/option"
 )
@@ -50,7 +50,7 @@ func TestRefresh(t *testing.T) {
 		}
 	}()
 
-	cl, err := alloydbapi.NewClient(
+	cl, err := alloydbadmin.NewAlloyDBAdminRESTClient(
 		context.Background(),
 		option.WithHTTPClient(mc),
 		option.WithEndpoint(url),
@@ -91,7 +91,7 @@ func TestRefreshFailsFast(t *testing.T) {
 		}
 	}()
 
-	cl, err := alloydbapi.NewClient(
+	cl, err := alloydbadmin.NewAlloyDBAdminRESTClient(
 		context.Background(),
 		option.WithHTTPClient(mc),
 		option.WithEndpoint(url),
