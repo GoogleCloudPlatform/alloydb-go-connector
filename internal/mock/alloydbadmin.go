@@ -29,6 +29,7 @@ import (
 	"time"
 
 	alloydbpb "cloud.google.com/go/alloydb/apiv1beta/alloydbpb"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // Request represents a HTTP request for a test Server to mock responses for.
@@ -95,7 +96,7 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 				return
 			}
 			var rreq alloydbpb.GenerateClientCertificateRequest
-			err = json.Unmarshal(b, &rreq)
+			err = protojson.Unmarshal(b, &rreq)
 			if err != nil {
 				http.Error(resp, fmt.Errorf("invalid or unexpected json: %w", err).Error(), http.StatusBadRequest)
 				return

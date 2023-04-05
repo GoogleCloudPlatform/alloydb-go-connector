@@ -3,7 +3,7 @@ module cloud.google.com/go/alloydbconn
 go 1.20
 
 require (
-	cloud.google.com/go/alloydb v0.2.0
+	cloud.google.com/go/alloydb v0.2.1
 	github.com/google/uuid v1.3.0
 	github.com/jackc/pgx/v4 v4.18.1
 	go.opencensus.io v0.24.0
