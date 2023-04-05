@@ -108,7 +108,7 @@ func fetchEphemeralCert(
 		Parent: fmt.Sprintf(
 			"projects/%s/locations/%s/clusters/%s", inst.project, inst.region, inst.cluster,
 		),
-		PemCsr:       string(buf.Bytes()),
+		PemCsr:       buf.String(),
 		CertDuration: durationpb.New(time.Second * 3600),
 	}
 	resp, err := cl.GenerateClientCertificate(ctx, req)
