@@ -64,7 +64,7 @@ func (r *Request) matches(hR *http.Request) bool {
 // InstanceGetSuccess returns a Request that responds to the `instance.get`
 // AlloyDB Admin API endpoint.
 func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
-	p := fmt.Sprintf("/projects/%s/locations/%s/clusters/%s/instances/%s/connectionInfo",
+	p := fmt.Sprintf("/v1beta/projects/%s/locations/%s/clusters/%s/instances/%s/connectionInfo",
 		i.project, i.region, i.cluster, i.name)
 	return &Request{
 		reqMethod: http.MethodGet,
@@ -83,7 +83,7 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 	return &Request{
 		reqMethod: http.MethodPost,
 		reqPath: fmt.Sprintf(
-			"/projects/%s/locations/%s/clusters/%s:generateClientCertificate",
+			"/v1beta/projects/%s/locations/%s/clusters/%s:generateClientCertificate",
 			i.project, i.region, i.cluster),
 		reqCt: ct,
 		handle: func(resp http.ResponseWriter, req *http.Request) {
