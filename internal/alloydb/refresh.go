@@ -28,10 +28,10 @@ import (
 	"time"
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
-	alloydbpb "cloud.google.com/go/alloydb/apiv1beta/alloydbpb"
+	"cloud.google.com/go/alloydb/apiv1beta/alloydbpb"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/trace"
-	durationpb "google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 type connectInfo struct {
