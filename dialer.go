@@ -26,9 +26,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
-	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 	"cloud.google.com/go/alloydbconn/internal/trace"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
@@ -72,7 +72,7 @@ type Dialer struct {
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
 
-	client *alloydbapi.Client
+	client *alloydbadmin.AlloyDBAdminClient
 
 	// defaultDialCfg holds the constructor level DialOptions, so that it can
 	// be copied and mutated by the Dial function.
@@ -115,7 +115,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		cfg.rsaKey = key
 	}
 
-	client, err := alloydbapi.NewClient(ctx, cfg.adminOpts...)
+	client, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, cfg.adminOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AlloyDB Admin API client: %v", err)
 	}

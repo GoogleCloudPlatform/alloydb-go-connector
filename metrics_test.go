@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"go.opencensus.io/stats/view"
 	"google.golang.org/api/option"
@@ -116,7 +116,7 @@ func TestDialerWithMetrics(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}

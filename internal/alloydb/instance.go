@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
 	"cloud.google.com/go/alloydbconn/errtype"
-	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 	"golang.org/x/time/rate"
 )
 
@@ -157,7 +157,7 @@ type Instance struct {
 // NewInstance initializes a new Instance given an instance URI
 func NewInstance(
 	instance InstanceURI,
-	client *alloydbapi.Client,
+	client *alloydbadmin.AlloyDBAdminClient,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
 	dialerID string,
