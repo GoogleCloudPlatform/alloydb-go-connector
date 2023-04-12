@@ -27,9 +27,11 @@ import (
 	"fmt"
 	"time"
 
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
+	"cloud.google.com/go/alloydb/apiv1beta/alloydbpb"
 	"cloud.google.com/go/alloydbconn/errtype"
-	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 	"cloud.google.com/go/alloydbconn/internal/trace"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 type connectInfo struct {
@@ -42,15 +44,20 @@ type connectInfo struct {
 // fetchMetadata uses the AlloyDB Admin APIs get method to retrieve the
 // information about an AlloyDB instance that is used to create secure
 // connections.
-func fetchMetadata(ctx context.Context, cl *alloydbapi.Client, inst InstanceURI) (i connectInfo, err error) {
+func fetchMetadata(ctx context.Context, cl *alloydbadmin.AlloyDBAdminClient, inst InstanceURI) (i connectInfo, err error) {
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
 	defer func() { end(err) }()
-	resp, err := cl.ConnectionInfo(ctx, inst.project, inst.region, inst.cluster, inst.name)
+	req := &alloydbpb.GetConnectionInfoRequest{
+		Parent: fmt.Sprintf(
+			"projects/%s/locations/%s/clusters/%s/instances/%s", inst.project, inst.region, inst.cluster, inst.name,
+		),
+	}
+	resp, err := cl.GetConnectionInfo(ctx, req)
 	if err != nil {
 		return connectInfo{}, errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
-	return connectInfo{ipAddr: resp.IPAddress, uid: resp.InstanceUID}, nil
+	return connectInfo{ipAddr: resp.IpAddress, uid: resp.InstanceUid}, nil
 }
 
 var errInvalidPEM = errors.New("certificate is not a valid PEM")
@@ -68,7 +75,7 @@ func parseCert(cert string) (*x509.Certificate, error) {
 // AlloyDB instance's serverside proxy. The cert is valid for twenty-four hours.
 func fetchEphemeralCert(
 	ctx context.Context,
-	cl *alloydbapi.Client,
+	cl *alloydbadmin.AlloyDBAdminClient,
 	inst InstanceURI,
 	key *rsa.PrivateKey,
 ) (cc certChain, err error) {
@@ -97,7 +104,14 @@ func fetchEphemeralCert(
 	if err != nil {
 		return certChain{}, err
 	}
-	resp, err := cl.GenerateClientCert(ctx, inst.project, inst.region, inst.cluster, buf.Bytes())
+	req := &alloydbpb.GenerateClientCertificateRequest{
+		Parent: fmt.Sprintf(
+			"projects/%s/locations/%s/clusters/%s", inst.project, inst.region, inst.cluster,
+		),
+		PemCsr:       buf.String(),
+		CertDuration: durationpb.New(time.Second * 3600),
+	}
+	resp, err := cl.GenerateClientCertificate(ctx, req)
 	if err != nil {
 		return certChain{}, errtype.NewRefreshError(
 			"create ephemeral cert failed",
@@ -197,7 +211,7 @@ func createTLSConfig(inst InstanceURI, cc certChain, info connectInfo, k *rsa.Pr
 
 // newRefresher creates a Refresher.
 func newRefresher(
-	client *alloydbapi.Client,
+	client *alloydbadmin.AlloyDBAdminClient,
 	dialerID string,
 ) refresher {
 	return refresher{
@@ -210,7 +224,7 @@ func newRefresher(
 // ephemeral certificates.
 type refresher struct {
 	// client provides access to the AlloyDB Admin API
-	client *alloydbapi.Client
+	client *alloydbadmin.AlloyDBAdminClient
 
 	// dialerID is the unique ID of the associated dialer.
 	dialerID string

@@ -23,8 +23,8 @@ import (
 	"strings"
 	"testing"
 
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
 	"cloud.google.com/go/alloydbconn/errtype"
-	"cloud.google.com/go/alloydbconn/internal/alloydbapi"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
@@ -52,7 +52,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		mock.InstanceGetSuccess(inst, 2),
 		mock.CreateEphemeralSuccess(inst, 2),
 	)
-	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydbapi.NewClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
