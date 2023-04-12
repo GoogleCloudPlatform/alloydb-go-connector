@@ -73,7 +73,7 @@ func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
 		reqCt:     ct,
 		handle: func(resp http.ResponseWriter, req *http.Request) {
 			resp.WriteHeader(http.StatusOK)
-			resp.Write([]byte(fmt.Sprintf(`{"IpAddress":"%s","InstanceUid":"%s"}`, i.ipAddr, i.uid)))
+			resp.Write([]byte(fmt.Sprintf(`{"ipAddress":"%s","instanceUid":"%s"}`, i.ipAddr, i.uid)))
 		},
 	}
 }
