@@ -73,7 +73,7 @@ func parseCert(cert string) (*x509.Certificate, error) {
 
 // fetchEphemeralCert uses the AlloyDB Admin API's generateClientCertificate
 // method to create a signed TLS certificate that authorized to connect via the
-// AlloyDB instance's serverside proxy. The cert is valid for twenty-four hours.
+// AlloyDB instance's serverside proxy. The cert is valid for one hour.
 func fetchEphemeralCert(
 	ctx context.Context,
 	cl *alloydbadmin.AlloyDBAdminClient,
