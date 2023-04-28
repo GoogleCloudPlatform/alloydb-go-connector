@@ -124,7 +124,7 @@ func fetchEphemeralCert(
 	certChainPEM := append([]string{resp.PemCertificate}, resp.PemCertificateChain...)
 	certPEMBlock := []byte(strings.Join(certChainPEM, "\n"))
 	keyPEMBlock := &pem.Block{
-		Type: "RSA PRIVATE KEY",
+		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(key),
 	}
 
@@ -175,8 +175,8 @@ func fetchEphemeralCert(
 
 	return &certs{
 		certChain: &cert,
-		caCert: caCert,
-		expiry: clientCert.NotAfter,
+		caCert:    caCert,
+		expiry:    clientCert.NotAfter,
 	}, nil
 }
 
@@ -221,9 +221,9 @@ type refreshResult struct {
 }
 
 type certs struct {
-	certChain *tls.Certificate // TLS client certificate
+	certChain *tls.Certificate  // TLS client certificate
 	caCert    *x509.Certificate // CA certificate
-	expiry time.Time
+	expiry    time.Time
 }
 
 func (r refresher) performRefresh(ctx context.Context, cn InstanceURI, k *rsa.PrivateKey) (res refreshResult, err error) {
