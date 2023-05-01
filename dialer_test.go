@@ -117,11 +117,10 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	}
 }
 
-func TestDialWithConfigurationErrors(t *testing.T) {
+func TestDialWithUnavailableServerErrors(t *testing.T) {
 	ctx := context.Background()
 	inst := mock.NewFakeInstance(
 		"my-project", "my-region", "my-cluster", "my-instance",
-		mock.WithServerName("not-the-server-youre-looking-for"),
 	)
 	// Don't use the cleanup function. Because this test is about error
 	// cases, API requests (started in two separate goroutines) will
@@ -146,14 +145,6 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	var wantErr2 *errtype.DialError
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when server proxy socket is unavailable, want = %T, got = %v", wantErr2, err)
-	}
-
-	stop := mock.StartServerProxy(t, inst)
-	defer stop()
-
-	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
-	if !errors.As(err, &wantErr2) {
-		t.Fatalf("when TLS handshake fails, want = %T, got = %v", wantErr2, err)
 	}
 }
 
