@@ -174,23 +174,10 @@ func fetchEphemeralCert(
 	}
 
 	return &certs{
-		certChain: &cert,
+		certChain: cert,
 		caCert:    caCert,
 		expiry:    clientCert.NotAfter,
 	}, nil
-}
-
-// createTLSConfig returns a *tls.Config for connecting securely to the AlloyDB
-// instance.
-func createTLSConfig(inst InstanceURI, cc *certs, info connectInfo) *tls.Config {
-	caCerts := x509.NewCertPool()
-	caCerts.AddCert(cc.caCert)
-
-	return &tls.Config{
-		Certificates: []tls.Certificate{*cc.certChain},
-		RootCAs:      caCerts,
-		ServerName:   info.ipAddr,
-	}
 }
 
 // newRefresher creates a Refresher.
@@ -221,7 +208,7 @@ type refreshResult struct {
 }
 
 type certs struct {
-	certChain *tls.Certificate  // TLS client certificate
+	certChain tls.Certificate  // TLS client certificate
 	caCert    *x509.Certificate // CA certificate
 	expiry    time.Time
 }
@@ -279,7 +266,14 @@ func (r refresher) performRefresh(ctx context.Context, cn InstanceURI, k *rsa.Pr
 	case <-ctx.Done():
 		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
-	c := createTLSConfig(cn, cc, info)
+
+	caCerts := x509.NewCertPool()
+	caCerts.AddCert(cc.caCert)
+	c := &tls.Config{
+		Certificates: []tls.Certificate{cc.certChain},
+		RootCAs:      caCerts,
+		ServerName:   info.ipAddr,
+	}
 
 	return refreshResult{instanceIPAddr: info.ipAddr, conf: c, expiry: cc.expiry}, nil
 }
