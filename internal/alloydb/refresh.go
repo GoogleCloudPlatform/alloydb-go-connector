@@ -208,7 +208,7 @@ type refreshResult struct {
 }
 
 type certs struct {
-	certChain tls.Certificate  // TLS client certificate
+	certChain tls.Certificate   // TLS client certificate
 	caCert    *x509.Certificate // CA certificate
 	expiry    time.Time
 }
