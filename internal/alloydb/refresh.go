@@ -273,6 +273,7 @@ func (r refresher) performRefresh(ctx context.Context, cn InstanceURI, k *rsa.Pr
 		Certificates: []tls.Certificate{cc.certChain},
 		RootCAs:      caCerts,
 		ServerName:   info.ipAddr,
+		MinVersion:   tls.VersionTLS13,
 	}
 
 	return refreshResult{instanceIPAddr: info.ipAddr, conf: c, expiry: cc.expiry}, nil
