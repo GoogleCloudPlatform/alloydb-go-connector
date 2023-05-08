@@ -25,6 +25,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
@@ -72,13 +73,13 @@ func parseCert(cert string) (*x509.Certificate, error) {
 
 // fetchEphemeralCert uses the AlloyDB Admin API's generateClientCertificate
 // method to create a signed TLS certificate that authorized to connect via the
-// AlloyDB instance's serverside proxy. The cert is valid for twenty-four hours.
+// AlloyDB instance's serverside proxy. The cert is valid for one hour.
 func fetchEphemeralCert(
 	ctx context.Context,
 	cl *alloydbadmin.AlloyDBAdminClient,
 	inst InstanceURI,
 	key *rsa.PrivateKey,
-) (cc certChain, err error) {
+) (cc *certs, err error) {
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchEphemeralCert")
 	defer func() { end(err) }()
@@ -97,12 +98,12 @@ func fetchEphemeralCert(
 	}
 	csrBytes, err := x509.CreateCertificateRequest(rand.Reader, &tmpl, key)
 	if err != nil {
-		return certChain{}, err
+		return nil, err
 	}
 	buf := &bytes.Buffer{}
 	err = pem.Encode(buf, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
 	if err != nil {
-		return certChain{}, err
+		return nil, err
 	}
 	req := &alloydbpb.GenerateClientCertificateRequest{
 		Parent: fmt.Sprintf(
@@ -113,100 +114,70 @@ func fetchEphemeralCert(
 	}
 	resp, err := cl.GenerateClientCertificate(ctx, req)
 	if err != nil {
-		return certChain{}, errtype.NewRefreshError(
+		return nil, errtype.NewRefreshError(
 			"create ephemeral cert failed",
 			inst.String(),
 			err,
 		)
 	}
-	// There should always be two certs in the chain. If this fails, the API has
-	// broken its contract with the client.
-	if len(resp.PemCertificateChain) != 2 {
-		return certChain{}, errtype.NewRefreshError(
-			"missing instance and root certificates",
-			inst.String(),
-			err,
-		)
+
+	certChainPEM := append([]string{resp.PemCertificate}, resp.PemCertificateChain...)
+	certPEMBlock := []byte(strings.Join(certChainPEM, "\n"))
+	keyPEMBlock := &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
 	}
-	rc, err := parseCert(resp.PemCertificateChain[1]) // root cert
+
+	cert, err := tls.X509KeyPair(certPEMBlock, pem.EncodeToMemory(keyPEMBlock))
 	if err != nil {
-		return certChain{}, errtype.NewRefreshError(
-			"failed to parse root cert",
-			inst.String(),
-			err,
-		)
-	}
-	ic, err := parseCert(resp.PemCertificateChain[0]) // intermediate cert
-	if err != nil {
-		return certChain{}, errtype.NewRefreshError(
-			"failed to parse intermediate cert",
-			inst.String(),
-			err,
-		)
-	}
-	c, err := parseCert(resp.PemCertificate) // client cert
-	if err != nil {
-		return certChain{}, errtype.NewRefreshError(
-			"failed to parse client cert",
+		return nil, errtype.NewRefreshError(
+			"create ephemeral cert failed",
 			inst.String(),
 			err,
 		)
 	}
 
-	return certChain{
-		root:         rc,
-		intermediate: ic,
-		client:       c,
+	// TODO(fixme) Take the root cert from the cert chain for now.
+	caCertPEMBlock, _ := pem.Decode([]byte(certChainPEM[2]))
+	if caCertPEMBlock == nil {
+		return nil, errtype.NewRefreshError(
+			"create ephemeral cert failed",
+			inst.String(),
+			errors.New("no PEM data found in the ca cert"),
+		)
+	}
+	caCert, err := x509.ParseCertificate(caCertPEMBlock.Bytes)
+	if err != nil {
+		return nil, errtype.NewRefreshError(
+			"create ephemeral cert failed",
+			inst.String(),
+			err,
+		)
+	}
+
+	// Extract expiry
+	clientCertPEMBlock, _ := pem.Decode([]byte(certChainPEM[0]))
+	if clientCertPEMBlock == nil {
+		return nil, errtype.NewRefreshError(
+			"create ephemeral cert failed",
+			inst.String(),
+			errors.New("no PEM data found in the client cert"),
+		)
+	}
+	clientCert, err := x509.ParseCertificate(clientCertPEMBlock.Bytes)
+	if err != nil {
+		return nil, errtype.NewRefreshError(
+			"create ephemeral cert failed",
+			inst.String(),
+			err,
+		)
+	}
+
+	return &certs{
+		certChain: cert,
+		caCert:    caCert,
+		expiry:    clientCert.NotAfter,
 	}, nil
-}
-
-// createTLSConfig returns a *tls.Config for connecting securely to the AlloyDB
-// instance.
-func createTLSConfig(inst InstanceURI, cc certChain, info connectInfo, k *rsa.PrivateKey) *tls.Config {
-	certs := x509.NewCertPool()
-	certs.AddCert(cc.root)
-
-	return &tls.Config{
-		InsecureSkipVerify: true,
-		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			var parsed []*x509.Certificate
-			for _, r := range rawCerts {
-				c, err := x509.ParseCertificate(r)
-				if err != nil {
-					return errtype.NewDialError("failed to parse X.509 certificate", inst.String(), err)
-				}
-				parsed = append(parsed, c)
-			}
-			server := parsed[0]
-			inter := x509.NewCertPool()
-			for i := 1; i < len(parsed); i++ {
-				inter.AddCert(parsed[i])
-			}
-
-			opts := x509.VerifyOptions{Roots: certs, Intermediates: inter}
-			if _, err := server.Verify(opts); err != nil {
-				return errtype.NewDialError("failed to verify certificate", inst.String(), err)
-			}
-
-			serverName := fmt.Sprintf("%v.server.alloydb", info.uid)
-			if server.Subject.CommonName != serverName {
-				return errtype.NewDialError(
-					fmt.Sprintf("certificate had CN %q, expected %q",
-						server.Subject.CommonName, serverName),
-					inst.String(),
-					nil,
-				)
-			}
-			return nil
-		},
-		Certificates: []tls.Certificate{{
-			Certificate: [][]byte{cc.client.Raw, cc.intermediate.Raw},
-			PrivateKey:  k,
-			Leaf:        cc.client,
-		}},
-		RootCAs:    certs,
-		MinVersion: tls.VersionTLS13,
-	}
 }
 
 // newRefresher creates a Refresher.
@@ -236,10 +207,10 @@ type refreshResult struct {
 	expiry         time.Time
 }
 
-type certChain struct {
-	root         *x509.Certificate
-	intermediate *x509.Certificate
-	client       *x509.Certificate
+type certs struct {
+	certChain tls.Certificate   // TLS client certificate
+	caCert    *x509.Certificate // CA certificate
+	expiry    time.Time
 }
 
 func (r refresher) performRefresh(ctx context.Context, cn InstanceURI, k *rsa.PrivateKey) (res refreshResult, err error) {
@@ -264,7 +235,7 @@ func (r refresher) performRefresh(ctx context.Context, cn InstanceURI, k *rsa.Pr
 	}()
 
 	type certRes struct {
-		cc  certChain
+		cc  *certs
 		err error
 	}
 	certCh := make(chan certRes, 1)
@@ -285,7 +256,7 @@ func (r refresher) performRefresh(ctx context.Context, cn InstanceURI, k *rsa.Pr
 		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
-	var cc certChain
+	var cc *certs
 	select {
 	case r := <-certCh:
 		if r.err != nil {
@@ -296,11 +267,14 @@ func (r refresher) performRefresh(ctx context.Context, cn InstanceURI, k *rsa.Pr
 		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
-	c := createTLSConfig(cn, cc, info, k)
-	var expiry time.Time
-	// This should never not be the case, but we check to avoid a potential nil-pointer
-	if len(c.Certificates) > 0 {
-		expiry = c.Certificates[0].Leaf.NotAfter
+	caCerts := x509.NewCertPool()
+	caCerts.AddCert(cc.caCert)
+	c := &tls.Config{
+		Certificates: []tls.Certificate{cc.certChain},
+		RootCAs:      caCerts,
+		ServerName:   info.ipAddr,
+		MinVersion:   tls.VersionTLS13,
 	}
-	return refreshResult{instanceIPAddr: info.ipAddr, conf: c, expiry: expiry}, nil
+
+	return refreshResult{instanceIPAddr: info.ipAddr, conf: c, expiry: cc.expiry}, nil
 }
