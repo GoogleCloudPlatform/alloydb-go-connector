@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.2.2...v1.3.0) (2023-05-09)
+
+
+### Features
+
+* use auto-generated AlloyDB client ([#268](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/268)) ([6613965](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/66139656f17dfdf0c34a987f86034135f70974c6))
+* use instance IP as SAN ([#289](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/289)) ([30d9740](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/30d9740885d8aa1c31877cb12f8754ccdf418e1c))
+
+
+### Bug Fixes
+
+* require TLS 1.3 always ([#292](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/292)) ([05f8430](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/05f84302b11c7abeff22c1a6a04c18f9b61cd19b))
+
 ## [1.2.2](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.2.1...v1.2.2) (2023-04-11)
 
 
