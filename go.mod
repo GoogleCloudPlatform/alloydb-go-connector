@@ -3,16 +3,16 @@ module cloud.google.com/go/alloydbconn
 go 1.20
 
 require (
-	cloud.google.com/go/alloydb v1.0.0
+	cloud.google.com/go/alloydb v1.0.1
 	github.com/google/uuid v1.3.0
 	github.com/jackc/pgx/v4 v4.18.1
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.10.0
-	golang.org/x/oauth2 v0.7.0
+	golang.org/x/oauth2 v0.8.0
 	golang.org/x/time v0.3.0
 	google.golang.org/api v0.121.0
 	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1
-	google.golang.org/grpc v1.54.0
+	google.golang.org/grpc v1.55.0
 	google.golang.org/protobuf v1.30.0
 )
 
