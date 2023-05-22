@@ -56,6 +56,7 @@ func (e *spyMetricsExporter) Data() []metric {
 // wantLastValueMetric ensures the provided metrics include a metric with the
 // wanted name and at least data point.
 func wantLastValueMetric(t *testing.T, wantName string, ms []metric) {
+	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
 	for _, m := range ms {
 		gotNames[m.name] = m.data
@@ -139,7 +140,7 @@ func TestDialerWithMetrics(t *testing.T) {
 		t.Fatal("expected Dial to fail, but got no error")
 	}
 
-	time.Sleep(10 * time.Millisecond) // allow exporter a chance to run
+	time.Sleep(100 * time.Millisecond) // allow exporter a chance to run
 
 	// success metrics
 	wantLastValueMetric(t, "/alloydbconn/open_connections", spy.Data())
