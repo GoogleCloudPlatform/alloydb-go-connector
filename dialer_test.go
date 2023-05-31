@@ -15,19 +15,20 @@
 package alloydbconn
 
 import (
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
+	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/internal/alloydb"
+	"cloud.google.com/go/alloydbconn/internal/mock"
 	"context"
 	"errors"
+	"golang.org/x/oauth2"
+	"google.golang.org/api/option"
 	"io"
 	"net"
 	"os"
 	"strings"
 	"testing"
-
-	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
-	"cloud.google.com/go/alloydbconn/errtype"
-	"cloud.google.com/go/alloydbconn/internal/mock"
-	"golang.org/x/oauth2"
-	"google.golang.org/api/option"
+	"time"
 )
 
 type stubTokenSource struct{}
@@ -195,5 +196,47 @@ func TestDialerUserAgent(t *testing.T) {
 	want := "alloydb-go-connector/" + ver
 	if want != userAgent {
 		t.Errorf("embed version mismatched: want %q, got %q", want, userAgent)
+	}
+}
+
+func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
+	// When a dialer attempts to retrieve connection info for a
+	// non-existent instance, it should delete the instance from
+	// the cache and ensure no background refresh happens (which would be
+	// wasted cycles).
+	ctx := context.Background()
+	mc, url, cleanup := mock.HTTPClient()
+	defer func() { _ = cleanup() }()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx,
+		option.WithHTTPClient(mc),
+		option.WithEndpoint(url),
+	)
+
+	d, err := NewDialer(context.Background(),
+		WithTokenSource(stubTokenSource{}),
+		WithRefreshTimeout(time.Second),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+	defer func(d *Dialer) {
+		err := d.Close()
+		if err != nil {
+			t.Log(err)
+		}
+	}(d)
+
+	badInstanceName := "/projects/bad/locations/bad/clusters/bad/instances/bad"
+	_, _ = d.Dial(context.Background(), badInstanceName)
+
+	// The internal cache is not revealed publicly, so check the internal cache
+	// to confirm the instance is no longer present.
+	badCN, _ := alloydb.ParseInstURI(badInstanceName)
+	d.lock.RLock()
+	_, ok := d.instances[badCN]
+	d.lock.RUnlock()
+	if ok {
+		t.Fatal("bad instance was not removed from the cache")
 	}
 }
