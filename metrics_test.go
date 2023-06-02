@@ -71,6 +71,7 @@ func wantLastValueMetric(t *testing.T, wantName string, ms []metric) {
 // wantDistributionMetric ensures the provided metrics include a metric with the
 // wanted name and at least one data point.
 func wantDistributionMetric(t *testing.T, wantName string, ms []metric) {
+	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
 	for _, m := range ms {
 		gotNames[m.name] = m.data
@@ -85,6 +86,7 @@ func wantDistributionMetric(t *testing.T, wantName string, ms []metric) {
 // wantCountMetric ensures the provided metrics include a metric with the wanted
 // name and at least one data point.
 func wantCountMetric(t *testing.T, wantName string, ms []metric) {
+	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
 	for _, m := range ms {
 		gotNames[m.name] = m.data
@@ -143,11 +145,11 @@ func TestDialerWithMetrics(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // allow exporter a chance to run
 
 	// success metrics
-	wantLastValueMetric(t, "/alloydbconn/open_connections", spy.Data())
-	wantDistributionMetric(t, "/alloydbconn/dial_latency", spy.Data())
-	wantCountMetric(t, "/alloydbconn/refresh_success_count", spy.Data())
+	wantLastValueMetric(t, "alloydbconn/open_connections", spy.Data())
+	wantDistributionMetric(t, "alloydbconn/dial_latency", spy.Data())
+	wantCountMetric(t, "alloydbconn/refresh_success_count", spy.Data())
 
 	// failure metrics from dialing bogus instance
-	wantCountMetric(t, "/alloydbconn/dial_failure_count", spy.Data())
-	wantCountMetric(t, "/alloydbconn/refresh_failure_count", spy.Data())
+	wantCountMetric(t, "alloydbconn/dial_failure_count", spy.Data())
+	wantCountMetric(t, "alloydbconn/refresh_failure_count", spy.Data())
 }

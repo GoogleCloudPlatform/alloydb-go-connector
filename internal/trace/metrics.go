@@ -33,33 +33,33 @@ var (
 	keyErrorCode, _ = tag.NewKey("alloydb_error_code")
 
 	mLatencyMS = stats.Int64(
-		"/alloydbconn/latency",
+		"alloydbconn/latency",
 		"The latency in milliseconds per Dial",
 		stats.UnitMilliseconds,
 	)
 	mConnections = stats.Int64(
-		"/alloydbconn/connection",
+		"alloydbconn/connection",
 		"A connect or disconnect event to an AlloyDB instance",
 		stats.UnitDimensionless,
 	)
 	mDialError = stats.Int64(
-		"/alloydbconn/dial_failure",
+		"alloydbconn/dial_failure",
 		"A failure to dial an AlloyDB instance",
 		stats.UnitDimensionless,
 	)
 	mSuccessfulRefresh = stats.Int64(
-		"/alloydbconn/refresh_success",
+		"alloydbconn/refresh_success",
 		"A successful certificate refresh operation",
 		stats.UnitDimensionless,
 	)
 	mFailedRefresh = stats.Int64(
-		"/alloydbconn/refresh_failure",
+		"alloydbconn/refresh_failure",
 		"A failed certificate refresh operation",
 		stats.UnitDimensionless,
 	)
 
 	latencyView = &view.View{
-		Name:        "/alloydbconn/dial_latency",
+		Name:        "alloydbconn/dial_latency",
 		Measure:     mLatencyMS,
 		Description: "The distribution of dialer latencies (ms)",
 		// Latency in buckets, e.g., >=0ms, >=100ms, etc.
@@ -67,28 +67,28 @@ var (
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 	connectionsView = &view.View{
-		Name:        "/alloydbconn/open_connections",
+		Name:        "alloydbconn/open_connections",
 		Measure:     mConnections,
 		Description: "The current number of open AlloyDB connections",
 		Aggregation: view.LastValue(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 	dialFailureView = &view.View{
-		Name:        "/alloydbconn/dial_failure_count",
+		Name:        "alloydbconn/dial_failure_count",
 		Measure:     mDialError,
 		Description: "The number of failed dial attempts",
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 	refreshCountView = &view.View{
-		Name:        "/alloydbconn/refresh_success_count",
+		Name:        "alloydbconn/refresh_success_count",
 		Measure:     mSuccessfulRefresh,
 		Description: "The number of successful certificate refresh operations",
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 	failedRefreshCountView = &view.View{
-		Name:        "/alloydbconn/refresh_failure_count",
+		Name:        "alloydbconn/refresh_failure_count",
 		Measure:     mFailedRefresh,
 		Description: "The number of failed certificate refresh operations",
 		Aggregation: view.Count(),
