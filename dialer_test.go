@@ -15,20 +15,21 @@
 package alloydbconn
 
 import (
-	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
-	"cloud.google.com/go/alloydbconn/errtype"
-	"cloud.google.com/go/alloydbconn/internal/alloydb"
-	"cloud.google.com/go/alloydbconn/internal/mock"
 	"context"
 	"errors"
-	"golang.org/x/oauth2"
-	"google.golang.org/api/option"
 	"io"
 	"net"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
+	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/internal/alloydb"
+	"cloud.google.com/go/alloydbconn/internal/mock"
+	"golang.org/x/oauth2"
+	"google.golang.org/api/option"
 )
 
 type stubTokenSource struct{}
