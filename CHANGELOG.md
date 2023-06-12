@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.3.0...v1.3.1) (2023-06-12)
+
+
+### Bug Fixes
+
+* remove leading slash from metric names ([#313](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/313)) ([3a6b675](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/3a6b675abd8e2520a65e93b172972430290fba23)), closes [#311](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/311)
+* stop background refresh for bad instances ([#308](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/308)) ([8965aa5](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/8965aa5aee7c623d6bea171015f4909e292ad716))
+
 ## [1.3.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.2.2...v1.3.0) (2023-05-09)
 
 
