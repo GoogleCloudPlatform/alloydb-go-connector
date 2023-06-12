@@ -174,6 +174,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	addr, tlsCfg, err := i.ConnectInfo(ctx)
 	if err != nil {
+		d.removeInstance(i)
 		endInfo(err)
 		return nil, err
 	}
@@ -230,7 +231,7 @@ type instrumentedConn struct {
 	closeFunc func()
 }
 
-// Close delegates to the underylying net.Conn interface and reports the close
+// Close delegates to the underlying net.Conn interface and reports the close
 // to the provided closeFunc only when Close returns no error.
 func (i *instrumentedConn) Close() error {
 	err := i.Conn.Close()
@@ -275,4 +276,12 @@ func (d *Dialer) instance(instance alloydb.InstanceURI) (*alloydb.Instance, erro
 		d.lock.Unlock()
 	}
 	return i, nil
+}
+
+func (d *Dialer) removeInstance(i *alloydb.Instance) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	// Stop all background refreshes
+	i.Close()
+	delete(d.instances, i.InstanceURI)
 }
