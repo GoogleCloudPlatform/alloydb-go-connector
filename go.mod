@@ -8,7 +8,7 @@ require (
 	github.com/jackc/pgx/v4 v4.18.1
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.12.0
-	golang.org/x/oauth2 v0.9.0
+	golang.org/x/oauth2 v0.10.0
 	golang.org/x/time v0.3.0
 	google.golang.org/api v0.130.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230629202037-9506855d4529
@@ -17,8 +17,8 @@ require (
 )
 
 require (
-	cloud.google.com/go v0.110.0 // indirect
-	cloud.google.com/go/compute v1.19.3 // indirect
+	cloud.google.com/go v0.110.2 // indirect
+	cloud.google.com/go/compute v1.20.1 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
 	cloud.google.com/go/longrunning v0.4.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
