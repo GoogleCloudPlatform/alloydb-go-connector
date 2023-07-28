@@ -92,7 +92,7 @@ if err != nil {
 }
 defer d.Close()
 
-// Tell the driver to use the Cloud SQL Go Connector to create connections
+// Tell the driver to use the AlloyDB Go Connector to create connections
 config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string) (net.Conn, error) {
     return d.Dial(ctx, "projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>")
 }
