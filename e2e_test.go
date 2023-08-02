@@ -18,11 +18,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"os"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/alloydbconn"
 	"cloud.google.com/go/alloydbconn/driver/pgxv4"
+	"github.com/jackc/pgx/v4"
 )
 
 var (
@@ -48,6 +51,8 @@ func requireAlloyDBVars(t *testing.T) {
 		t.Fatal("'ALLOYDB_INSTANCE_NAME' env var not set")
 	case alloydbUser:
 		t.Fatal("'ALLOYDB_USER' env var not set")
+	case alloydbIAMUser:
+		t.Fatal("'ALLOYDB_IAM_USER' env var not set")
 	case alloydbPass:
 		t.Fatal("'ALLOYDB_PASS' env var not set")
 	case alloydbDB:
@@ -75,6 +80,13 @@ func TestPgxConnect(t *testing.T) {
 		// best effort
 		_ = cleanup()
 	}()
+
+	var now time.Time
+	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+	if err != nil {
+		t.Fatalf("QueryRow failed: %s", err)
+	}
+	t.Log(now)
 }
 
 // TestDatabaseSQLConnect uses the latest pgx driver under the hood
@@ -174,6 +186,43 @@ func TestDirectPGXAutoIAMAuthN(t *testing.T) {
 
 	var tt time.Time
 	if err := db.QueryRow(context.Background(), "SELECT NOW()").Scan(&tt); err != nil {
+		t.Fatal(err)
+	}
+	t.Log(tt)
+}
+
+func TestAutoIAMAuthN(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+
+	d, err := alloydbconn.NewDialer(ctx, alloydbconn.WithIAMAuthN())
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+
+	dsn := fmt.Sprintf(
+		"user=%s dbname=%s sslmode=disable",
+		alloydbIAMUser, alloydbDB,
+	)
+	config, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("failed to parse pgx config: %v", err)
+	}
+
+	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
+		return d.Dial(ctx, alloydbInstanceName)
+	}
+
+	conn, connErr := pgx.ConnectConfig(ctx, config)
+	if connErr != nil {
+		t.Fatalf("failed to connect: %s", connErr)
+	}
+	defer conn.Close(ctx)
+
+	var tt time.Time
+	if err := conn.QueryRow(context.Background(), "SELECT NOW()").Scan(&tt); err != nil {
 		t.Fatal(err)
 	}
 	t.Log(tt)

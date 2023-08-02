@@ -17,6 +17,7 @@ package alloydbconn
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -35,7 +36,7 @@ import (
 type stubTokenSource struct{}
 
 func (stubTokenSource) Token() (*oauth2.Token, error) {
-	return nil, nil
+	return &oauth2.Token{}, nil
 }
 
 func TestDialerCanConnectToInstance(t *testing.T) {
@@ -54,7 +55,8 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -65,19 +67,25 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	}
 	d.client = c
 
-	conn, err := d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
-	if err != nil {
-		t.Fatalf("expected Dial to succeed, but got error: %v", err)
+	// Run several tests to ensure the underlying shared buffer is properly
+	// reset between connections.
+	for i := 0; i < 10; i++ {
+		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			conn, err := d.Dial(ctx, "projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
+			if err != nil {
+				t.Fatalf("expected Dial to succeed, but got error: %v", err)
+			}
+			defer conn.Close()
+			data, err := io.ReadAll(conn)
+			if err != nil {
+				t.Fatalf("expected ReadAll to succeed, got error %v", err)
+			}
+			if string(data) != "my-instance" {
+				t.Fatalf("expected known response from the server, but got %v", string(data))
+			}
+		})
 	}
-	defer conn.Close()
 
-	data, err := io.ReadAll(conn)
-	if err != nil {
-		t.Fatalf("expected ReadAll to succeed, got error %v", err)
-	}
-	if string(data) != "my-instance" {
-		t.Fatalf("expected known response from the server, but got %v", string(data))
-	}
 }
 
 func TestDialWithAdminAPIErrors(t *testing.T) {
