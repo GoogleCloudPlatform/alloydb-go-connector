@@ -12,7 +12,7 @@ require (
 	golang.org/x/time v0.3.0
 	google.golang.org/api v0.130.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230710151506-e685fd7b542b
-	google.golang.org/grpc v1.56.2
+	google.golang.org/grpc v1.57.0
 	google.golang.org/protobuf v1.31.0
 )
 
@@ -36,6 +36,7 @@ require (
 	github.com/jackc/pgtype v1.14.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	golang.org/x/crypto v0.11.0 // indirect
+	golang.org/x/sync v0.3.0 // indirect
 	golang.org/x/sys v0.10.0 // indirect
 	golang.org/x/text v0.11.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
