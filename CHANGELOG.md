@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.3.2...v1.3.3) (2023-08-08)
+
+
+### Bug Fixes
+
+* avoid holding lock over IO ([#333](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/333)) ([888e735](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/888e735492d25b1c42194213038f4458e4b96aaf))
+
 ## [1.3.2](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.3.1...v1.3.2) (2023-07-11)
 
 
