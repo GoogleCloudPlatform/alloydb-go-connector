@@ -37,10 +37,6 @@ jobs:
       id-token: 'write'
       issues: write
       pull-requests: write
-    strategy:
-      matrix:
-        go-version: ["1.17", "1.18", "1.19", "1.20"]
-      fail-fast: false
     steps:
       - name: Remove PR label
         if: "${{ github.event.action == 'labeled' && github.event.label.name == 'tests: run' }}"
@@ -59,10 +55,10 @@ jobs:
               console.log('Failed to remove label. Another job may have already removed it!');
             }
 
-      - name: Setup Go ${{ matrix.go-version }}
+      - name: Setup Go
         uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
         with:
-          go-version:  ${{ matrix.go-version }}
+          go-version: "1.20"
 
       - name: Checkout code
         uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
@@ -98,7 +94,7 @@ jobs:
         shell: bash
         run: |
           go test -v -race -cover ./e2e_test.go | tee test_results.txt
-      
+
       - name: Convert test output to XML
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() }}
         run: |
@@ -122,7 +118,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
         goarch: ["", "386"]
-        go-version: ["1.17", "1.18", "1.19", "1.20"]
+        go-version: ["1.17", "1.20"]
         exclude:
           - os: macos-latest
             goarch: "386"
@@ -183,7 +179,7 @@ jobs:
         if: matrix.goarch == '386'
         run: |
           go test -v -cover -short ./...
-      
+
       - name: Convert test output to XML
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() && matrix.goarch == '' }}
         run: |
