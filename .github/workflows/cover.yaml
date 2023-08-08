@@ -54,7 +54,7 @@ jobs:
       - name: Checkout base branch
         uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
         with:
-          ref: ${{ github.base_re }}
+          ref: ${{ github.base_ref }}
       - name: Calculate base code coverage
         run: |
           go test -short -coverprofile current_cover.out ./... || true
