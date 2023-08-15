@@ -205,8 +205,6 @@ func (i *Instance) ForceRefresh() {
 	if i.next.cancel() {
 		i.next = i.scheduleRefresh(0)
 	}
-	// block all sequential connection attempts on the next refresh result
-	i.cur = i.next
 }
 
 // result returns the most recent refresh result (waiting for it to complete if
