@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.4](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.3.3...v1.3.4) (2023-08-16)
+
+
+### Bug Fixes
+
+* re-use current connection info during force refresh ([#356](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/356)) ([6dfadff](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/6dfadfff1de5c96127a7a55c179f406a4117410a))
+
 ## [1.3.3](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.3.2...v1.3.3) (2023-08-08)
 
 
