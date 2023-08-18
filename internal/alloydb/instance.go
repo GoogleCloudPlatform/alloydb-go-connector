@@ -197,13 +197,18 @@ func (i *Instance) ConnectInfo(ctx context.Context) (string, *tls.Config, error)
 }
 
 // ForceRefresh triggers an immediate refresh operation to be scheduled and
-// used for future connection attempts.
+// used for future connection attempts if valid.
 func (i *Instance) ForceRefresh() {
 	i.resultGuard.Lock()
 	defer i.resultGuard.Unlock()
 	// If the next refresh hasn't started yet, we can cancel it and start an immediate one
 	if i.next.cancel() {
 		i.next = i.scheduleRefresh(0)
+	}
+	// block all sequential connection attempts on the next refresh operation
+	// if current is invalid
+	if !i.cur.isValid() {
+		i.cur = i.next
 	}
 }
 
