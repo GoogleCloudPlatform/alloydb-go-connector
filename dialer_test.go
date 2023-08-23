@@ -241,3 +241,52 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 		t.Fatal("bad instance was not removed from the cache")
 	}
 }
+
+func TestDialerSupportsOneOffDialFunction(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+	)
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	stop := mock.StartServerProxy(t, inst)
+	defer func() {
+		stop()
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+
+	d, err := NewDialer(ctx,
+		WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return nil, errors.New("sentinel error")
+		}),
+		WithTokenSource(stubTokenSource{}),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+	defer func() {
+		if err := d.Close(); err != nil {
+			t.Log(err)
+		}
+		_ = cleanup()
+	}()
+
+	sentinelErr := errors.New("dial func was called")
+	f := func(context.Context, string, string) (net.Conn, error) {
+		return nil, sentinelErr
+	}
+
+	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance", WithOneOffDialFunc(f))
+	if !errors.Is(err, sentinelErr) {
+		t.Fatal("one-off dial func was not called")
+	}
+}
