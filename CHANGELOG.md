@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.3.4...v1.4.0) (2023-08-28)
+
+
+### Features
+
+* add support for WithOneOffDialFunc ([#364](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/364)) ([a54b649](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/a54b64931e9bd0527f0162d187a008aea59563f2))
+
+
+### Bug Fixes
+
+* update ForceRefresh to block if invalid ([#360](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/360)) ([b0c9ffa](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/b0c9ffa9c2a781a7b7b10eb7e1a3ff3a1b99f59e))
+
 ## [1.3.4](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.3.3...v1.3.4) (2023-08-16)
 
 
