@@ -40,7 +40,7 @@ import (
 func connectDatabaseSQL(
 	instURI, user, pass, dbname string,
 ) (*sql.DB, func() error, error) {
-	// First, register the AlloyDB driver. Note, the driver's name is abitrary
+	// First, register the AlloyDB driver. Note, the driver's name is arbitrary
 	// and must only match what you use below in sql.Open. Also,
 	// pgxv4.RegisterDriver accepts options to configure credentials, timeouts,
 	// etc.
