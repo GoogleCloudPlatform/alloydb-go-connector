@@ -35,9 +35,9 @@ var (
 )
 
 func TestDirectDriver(t *testing.T) {
-    if testing.Short() {
-        t.Skip("skipping integration test")
-    }
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 	dsn := fmt.Sprintf("postgres://%v:%v@%v/%v",
 		alloydbUser, alloydbPass, "10.60.0.21", alloydbDB,
 	)
