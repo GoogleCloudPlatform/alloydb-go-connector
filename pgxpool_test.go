@@ -24,7 +24,8 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
-// connectPgx establishes a connection to your database using pgxpool.
+// connectPgx establishes a connection to your database using pgxpool and the
+// AlloyDB Go Connector (aka alloydbconn.Dialer)
 //
 // The function takes an instance URI, a username, a password, and a database
 // name. Usage looks like this:
