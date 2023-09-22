@@ -28,7 +28,7 @@ import (
 // connection. This enables Auto IAM AuthN on the direct path without using
 // a connector.
 //
-// The function takes the revelent instance IP, a username, and a database
+// The function takes the relevant instance IP, a username, and a database
 // name. Usage looks like this:
 //
 //	db, err := connectDirectPGXPoolAutoIAMAuthN(
