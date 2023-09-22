@@ -23,7 +23,8 @@ import (
 )
 
 // connectDatabaseSQL establishes a connection to your database using the Go
-// standard library's database/sql package.
+// standard library's database/sql package and using the AlloyDB Go Connector
+// (aka alloydbconn.Dialer)
 //
 // The function takes an instance URI, a username, a password, and a database
 // name. Usage looks like this:

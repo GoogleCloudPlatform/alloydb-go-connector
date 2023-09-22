@@ -18,14 +18,19 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 )
 
 var (
-	// AlloyDB instance URI, in the form of
-	// /projects/PROJECT_ID/locations/REGION_ID/clusters/CLUSTER_ID/instances/INSTANCE_ID
-	alloydbURI = os.Getenv("ALLOYDB_URI")
+	// AlloyDB instance name, in the form of
+	// projects/PROJECT_ID/locations/REGION_ID/clusters/CLUSTER_ID/instances/INSTANCE_ID
+	alloydbInstanceName = os.Getenv("ALLOYDB_INSTANCE_NAME")
 	// Name of database user.
 	alloydbUser = os.Getenv("ALLOYDB_USER")
+	// Name of database IAM user.
+	alloydbIAMUser = os.Getenv("ALLOYDB_IAM_USER")
+	// IP address of the instance
+	alloydbInstanceIP = os.Getenv("ALLOYDB_INSTANCE_IP")
 	// Password for the database user; be careful when entering a password on the
 	// command line (it may go into your terminal's history).
 	alloydbPass = os.Getenv("ALLOYDB_PASS")
@@ -35,8 +40,8 @@ var (
 
 func requireAlloyDBVars(t *testing.T) {
 	switch "" {
-	case alloydbURI:
-		t.Fatal("'ALLOYDB_URI' env var not set")
+	case alloydbInstanceName:
+		t.Fatal("'ALLOYDB_INSTANCE_NAME' env var not set")
 	case alloydbUser:
 		t.Fatal("'ALLOYDB_USER' env var not set")
 	case alloydbPass:
@@ -54,7 +59,9 @@ func TestPgxConnect(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pool, cleanup, err := connectPgx(ctx, alloydbURI, alloydbUser, alloydbPass, alloydbDB)
+	pool, cleanup, err := connectPgx(
+		ctx, alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
+	)
 	if err != nil {
 		_ = cleanup()
 		t.Fatal(err)
@@ -71,7 +78,9 @@ func TestDatabaseSQLConnect(t *testing.T) {
 		t.Skip("skipping integration tests")
 	}
 
-	pool, cleanup, err := connectDatabaseSQL(alloydbURI, alloydbUser, alloydbPass, alloydbDB)
+	pool, cleanup, err := connectDatabaseSQL(
+		alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
+	)
 	if err != nil {
 		_ = cleanup()
 		t.Fatal(err)
@@ -81,4 +90,43 @@ func TestDatabaseSQLConnect(t *testing.T) {
 		// best effort
 		_ = cleanup()
 	}()
+}
+
+func TestDirectDatabaseSQLAutoIAMAuthN(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	db, err := connectDirectDatabaseSQLAutoIAMAuthN(
+		alloydbInstanceIP, alloydbIAMUser, alloydbDB,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var tt time.Time
+	if err := db.QueryRow("SELECT NOW()").Scan(&tt); err != nil {
+		t.Fatal(err)
+	}
+	t.Log(tt)
+}
+
+func TestDirectPGXAutoIAMAuthN(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	db, err := connectDirectPGXPoolAutoIAMAuthN(
+		context.Background(),
+		alloydbInstanceIP, alloydbIAMUser, alloydbDB,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var tt time.Time
+	if err := db.QueryRow(context.Background(), "SELECT NOW()").Scan(&tt); err != nil {
+		t.Fatal(err)
+	}
+	t.Log(tt)
 }
