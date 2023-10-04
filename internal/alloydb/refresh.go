@@ -17,11 +17,9 @@ package alloydb
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -84,24 +82,9 @@ func fetchEphemeralCert(
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchEphemeralCert")
 	defer func() { end(err) }()
 
-	subj := pkix.Name{
-		CommonName:         "alloydb-proxy",
-		Country:            []string{"US"},
-		Province:           []string{"CA"},
-		Locality:           []string{"Sunnyvale"},
-		Organization:       []string{"Google LLC"},
-		OrganizationalUnit: []string{"Cloud"},
-	}
-	tmpl := x509.CertificateRequest{
-		Subject:            subj,
-		SignatureAlgorithm: x509.SHA256WithRSA,
-	}
-	csrBytes, err := x509.CreateCertificateRequest(rand.Reader, &tmpl, key)
-	if err != nil {
-		return nil, err
-	}
 	buf := &bytes.Buffer{}
-	err = pem.Encode(buf, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
+	k := x509.MarshalPKCS1PublicKey(&key.PublicKey)
+	err = pem.Encode(buf, &pem.Block{Type: "RSA PUBLIC KEY", Bytes: k})
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +92,7 @@ func fetchEphemeralCert(
 		Parent: fmt.Sprintf(
 			"projects/%s/locations/%s/clusters/%s", inst.project, inst.region, inst.cluster,
 		),
-		PemCsr:       buf.String(),
+		PublicKey:    buf.String(),
 		CertDuration: durationpb.New(time.Second * 3600),
 	}
 	resp, err := cl.GenerateClientCertificate(ctx, req)
