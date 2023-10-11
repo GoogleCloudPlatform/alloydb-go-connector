@@ -10,7 +10,7 @@ require (
 	golang.org/x/net v0.15.0
 	golang.org/x/oauth2 v0.12.0
 	golang.org/x/time v0.3.0
-	google.golang.org/api v0.140.0
+	google.golang.org/api v0.146.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231009173412-8bfb1ae86b6c
 	google.golang.org/grpc v1.58.3
 	google.golang.org/protobuf v1.31.0
@@ -25,7 +25,7 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/s2a-go v0.1.7 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.2.5 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.1 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.0 // indirect
 	github.com/jackc/chunkreader/v2 v2.0.1 // indirect
 	github.com/jackc/pgconn v1.14.0 // indirect
