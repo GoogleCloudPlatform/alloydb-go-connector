@@ -74,22 +74,35 @@ func TestPgxConnect(t *testing.T) {
 }
 
 func TestDatabaseSQLConnect(t *testing.T) {
+	tests := []struct {
+		version string
+	}{
+		{
+			version: "v4",
+		},
+		{
+			version, "v5",
+		},
+	}
+
 	if testing.Short() {
 		t.Skip("skipping integration tests")
 	}
 
-	pool, cleanup, err := connectDatabaseSQL(
-		alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB, "v5",
-	)
-	if err != nil {
-		_ = cleanup()
-		t.Fatal(err)
+	for _, tc := range tests {
+		pool, cleanup, err := connectDatabaseSQL(
+			alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB, tc.version,
+		)
+		if err != nil {
+			_ = cleanup()
+			t.Fatal(err)
+		}
+		defer func() {
+			pool.Close()
+			// best effort
+			_ = cleanup()
+		}()
 	}
-	defer func() {
-		pool.Close()
-		// best effort
-		_ = cleanup()
-	}()
 }
 
 func TestDirectDatabaseSQLAutoIAMAuthN(t *testing.T) {
