@@ -19,7 +19,6 @@ import (
 	"database/sql"
 	"fmt"
 
-	"cloud.google.com/go/alloydbconn/driver/pgxv4"
 	"cloud.google.com/go/alloydbconn/driver/pgxv5"
 )
 
@@ -40,7 +39,7 @@ import (
 // In addition to a *db.SQL type, the function returns a cleanup function that
 // should be called when you're done with the database connection.
 func connectDatabaseSQL(
-	instURI, user, pass, dbname string, version string,
+	instURI, user, pass, dbname string,
 ) (*sql.DB, func() error, error) {
 	// First, register the AlloyDB driver. Note, the driver's name is arbitrary
 	// and must only match what you use below in sql.Open. Also,
@@ -53,22 +52,13 @@ func connectDatabaseSQL(
 	// The cleanup function will stop the dialer's background refresh
 	// goroutines. Call it when you're done with your database connection to
 	// avoid a goroutine leak.
-	var cleanup func() error
-	var err error
-	switch version {
-	case "v4":
-		cleanup, err = pgxv4.RegisterDriver("alloydb-v4")
-	case "v5":
-		cleanup, err = pgxv5.RegisterDriver("alloydb-v5")
-	default:
-		return nil, cleanup, fmt.Errorf("missing valid postgres driver version")
-	}
+	cleanup, err := pgxv5.RegisterDriver("alloydb")
 	if err != nil {
 		return nil, cleanup, err
 	}
 
 	db, err := sql.Open(
-		fmt.Sprintf("alloydb-%s", version),
+		"alloydb",
 		fmt.Sprintf(
 			// sslmode is disabled, because the Dialer will handle the SSL
 			// connection instead.
