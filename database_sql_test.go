@@ -39,8 +39,8 @@ import (
 //
 // In addition to a *db.SQL type, the function returns a cleanup function that
 // should be called when you're done with the database connection.
-func connectDatabaseSQLV4(
-	instURI, user, pass, dbname string,
+func connectDatabaseSQL(
+	instURI, user, pass, dbname string, version string,
 ) (*sql.DB, func() error, error) {
 	// First, register the AlloyDB driver. Note, the driver's name is arbitrary
 	// and must only match what you use below in sql.Open. Also,
@@ -53,38 +53,11 @@ func connectDatabaseSQLV4(
 	// The cleanup function will stop the dialer's background refresh
 	// goroutines. Call it when you're done with your database connection to
 	// avoid a goroutine leak.
-	cleanup, err := pgxv4.RegisterDriver("alloydb")
-	if err != nil {
-		return nil, cleanup, err
+	if version == "v4" {
+		cleanup, err := pgxv4.RegisterDriver("alloydb")
+	} else {
+		cleanup, err := pgxv5.RegisterDriver("alloydb")
 	}
-
-	db, err := sql.Open(
-		"alloydb",
-		fmt.Sprintf(
-			// sslmode is disabled, because the Dialer will handle the SSL
-			// connection instead.
-			"host=%s user=%s password=%s dbname=%s sslmode=disable",
-			instURI, user, pass, dbname,
-		),
-	)
-	return db, cleanup, err
-}
-
-func connectDatabaseSQLV5(
-	instURI, user, pass, dbname string,
-) (*sql.DB, func() error, error) {
-	// First, register the AlloyDB driver. Note, the driver's name is arbitrary
-	// and must only match what you use below in sql.Open. Also,
-	// pgxv5.RegisterDriver accepts options to configure credentials, timeouts,
-	// etc.
-	//
-	// For details, see:
-	// https://pkg.go.dev/cloud.google.com/go/alloydbconn#Option
-	//
-	// The cleanup function will stop the dialer's background refresh
-	// goroutines. Call it when you're done with your database connection to
-	// avoid a goroutine leak.
-	cleanup, err := pgxv5.RegisterDriver("alloydb")
 	if err != nil {
 		return nil, cleanup, err
 	}

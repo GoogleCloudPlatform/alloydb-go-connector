@@ -79,7 +79,7 @@ func TestDatabaseSQLConnect(t *testing.T) {
 	}
 
 	pool, cleanup, err := connectDatabaseSQL(
-		alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
+		alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB, "v5",
 	)
 	if err != nil {
 		_ = cleanup()
