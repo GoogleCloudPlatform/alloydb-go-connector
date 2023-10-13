@@ -55,16 +55,11 @@ func connectDatabaseSQL(
 	// avoid a goroutine leak.
 	var cleanup func() error
 	var err error
-	defer func() {
-		if err := recover(); err != nil {
-			t.Log("AlloyDB-postgres register panic occurred:", err)
-		}
-	}()
 	switch version {
 	case "v4":
-		cleanup, err = pgxv4.RegisterDriver("alloydb")
+		cleanup, err = pgxv4.RegisterDriver("alloydb-v4")
 	case "v5":
-		cleanup, err = pgxv5.RegisterDriver("alloydb")
+		cleanup, err = pgxv5.RegisterDriver("alloydb-v5")
 	default:
 		return nil, cleanup, fmt.Errorf("missing valid postgres driver version")
 	}
@@ -73,7 +68,7 @@ func connectDatabaseSQL(
 	}
 
 	db, err := sql.Open(
-		"alloydb",
+		fmt.Srintf("alloydb-", version),
 		fmt.Sprintf(
 			// sslmode is disabled, because the Dialer will handle the SSL
 			// connection instead.
