@@ -81,7 +81,7 @@ func TestDatabaseSQLConnect(t *testing.T) {
 			version: "v4",
 		},
 		{
-			version, "v5",
+			version: "v5",
 		},
 	}
 
