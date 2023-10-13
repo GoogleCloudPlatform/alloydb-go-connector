@@ -68,7 +68,7 @@ func connectDatabaseSQL(
 	}
 
 	db, err := sql.Open(
-		fmt.Srintf("alloydb-", version),
+		fmt.Sprintf("alloydb-", version),
 		fmt.Sprintf(
 			// sslmode is disabled, because the Dialer will handle the SSL
 			// connection instead.
