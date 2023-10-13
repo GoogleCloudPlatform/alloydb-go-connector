@@ -16,9 +16,13 @@ package alloydbconn_test
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"os"
 	"testing"
 	"time"
+
+	"cloud.google.com/go/alloydbconn/driver/pgxv4"
 )
 
 var (
@@ -73,12 +77,14 @@ func TestPgxConnect(t *testing.T) {
 	}()
 }
 
+// TestDatabaseSQLConnect uses the latest pgx driver under the hood
+// We verify older versions separately below.
 func TestDatabaseSQLConnect(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration tests")
 	}
 
-	pool, cleanup, err := connectDatabaseSQL(
+	db, cleanup, err := connectDatabaseSQL(
 		alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
 	)
 	if err != nil {
@@ -86,10 +92,52 @@ func TestDatabaseSQLConnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		pool.Close()
+		db.Close()
 		// best effort
 		_ = cleanup()
 	}()
+
+	var tt time.Time
+	if err := db.QueryRow("SELECT NOW()").Scan(&tt); err != nil {
+		t.Fatal(err)
+	}
+	t.Log(tt)
+}
+
+func TestDatabaseSQLConnectPGXV4(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration tests")
+	}
+
+	cleanup, err := pgxv4.RegisterDriver("alloydb-v4")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := sql.Open(
+		"alloydb-v4",
+		fmt.Sprintf(
+			// sslmode is disabled, because the Dialer will handle the SSL
+			// connection instead.
+			"host=%s user=%s password=%s dbname=%s sslmode=disable",
+			alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
+		),
+	)
+	if err != nil {
+		_ = cleanup()
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		// best effort
+		_ = cleanup()
+	}()
+
+	var tt time.Time
+	if err := db.QueryRow("SELECT NOW()").Scan(&tt); err != nil {
+		t.Fatal(err)
+	}
+	t.Log(tt)
 }
 
 func TestDirectDatabaseSQLAutoIAMAuthN(t *testing.T) {

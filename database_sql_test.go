@@ -19,7 +19,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"cloud.google.com/go/alloydbconn/driver/pgxv4"
+	"cloud.google.com/go/alloydbconn/driver/pgxv5"
 )
 
 // connectDatabaseSQL establishes a connection to your database using the Go
@@ -52,7 +52,7 @@ func connectDatabaseSQL(
 	// The cleanup function will stop the dialer's background refresh
 	// goroutines. Call it when you're done with your database connection to
 	// avoid a goroutine leak.
-	cleanup, err := pgxv4.RegisterDriver("alloydb")
+	cleanup, err := pgxv5.RegisterDriver("alloydb")
 	if err != nil {
 		return nil, cleanup, err
 	}
