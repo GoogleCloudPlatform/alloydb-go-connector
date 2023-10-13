@@ -53,11 +53,13 @@ func connectDatabaseSQL(
 	// The cleanup function will stop the dialer's background refresh
 	// goroutines. Call it when you're done with your database connection to
 	// avoid a goroutine leak.
+	var cleanup func() error
+	var err error
 	switch version {
 	case "v4":
-		cleanup, err := pgxv4.RegisterDriver("alloydb")
+		cleanup, err = pgxv4.RegisterDriver("alloydb")
 	case "v5":
-		cleanup, err := pgxv5.RegisterDriver("alloydb")
+		cleanup, err = pgxv5.RegisterDriver("alloydb")
 	default:
 		return nil, cleanup, fmt.Errorf("missing valid postgres driver version")
 	}
