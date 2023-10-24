@@ -101,29 +101,25 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 				http.Error(resp, fmt.Errorf("invalid or unexpected json: %w", err).Error(), http.StatusBadRequest)
 				return
 			}
-			bl, _ := pem.Decode([]byte(rreq.PemCsr))
+			bl, _ := pem.Decode([]byte(rreq.PublicKey))
 			if bl == nil {
 				http.Error(resp, fmt.Errorf("unable to decode CSR: %w", err).Error(), http.StatusBadRequest)
 				return
 			}
-			csr, err := x509.ParseCertificateRequest(bl.Bytes)
+			pub, err := x509.ParsePKCS1PublicKey(bl.Bytes)
 			if err != nil {
 				http.Error(resp, fmt.Errorf("unable to decode CSR: %w", err).Error(), http.StatusBadRequest)
 				return
 			}
 
 			template := &x509.Certificate{
-				Signature:          csr.Signature,
-				SignatureAlgorithm: csr.SignatureAlgorithm,
-				PublicKeyAlgorithm: csr.PublicKeyAlgorithm,
-				PublicKey:          csr.PublicKey,
-				SerialNumber:       &big.Int{},
-				Issuer:             i.intermedCert.Subject,
-				Subject:            csr.Subject,
-				NotBefore:          time.Now(),
-				NotAfter:           i.certExpiry,
-				KeyUsage:           x509.KeyUsageDigitalSignature,
-				ExtKeyUsage:        []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+				PublicKey:    pub,
+				SerialNumber: &big.Int{},
+				Issuer:       i.intermedCert.Subject,
+				NotBefore:    time.Now(),
+				NotAfter:     i.certExpiry,
+				KeyUsage:     x509.KeyUsageDigitalSignature,
+				ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 			}
 
 			cert, err := x509.CreateCertificate(
@@ -143,8 +139,7 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 			pem.Encode(caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: i.rootCACert.Raw})
 
 			rresp := alloydbpb.GenerateClientCertificateResponse{
-				PemCertificate:      certPEM.String(),
-				PemCertificateChain: []string{instancePEM.String(), caPEM.String()},
+				PemCertificateChain: []string{certPEM.String(), instancePEM.String(), caPEM.String()},
 			}
 			if err := json.NewEncoder(resp).Encode(&rresp); err != nil {
 				http.Error(resp, fmt.Errorf("unable to encode response: %w", err).Error(), http.StatusBadRequest)
