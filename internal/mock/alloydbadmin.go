@@ -139,6 +139,7 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 			pem.Encode(caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: i.rootCACert.Raw})
 
 			rresp := alloydbpb.GenerateClientCertificateResponse{
+				CaCert:              caPEM.String(),
 				PemCertificateChain: []string{certPEM.String(), instancePEM.String(), caPEM.String()},
 			}
 			if err := json.NewEncoder(resp).Encode(&rresp); err != nil {
