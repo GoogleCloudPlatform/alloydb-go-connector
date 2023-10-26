@@ -119,7 +119,7 @@ func fetchEphemeralCert(
 		)
 	}
 
-	caCertPEMBlock, _ := pem.Decode([]byte(resp.PemCertificateChain[2]))
+	caCertPEMBlock, _ := pem.Decode([]byte(resp.CaCert))
 	if caCertPEMBlock == nil {
 		return nil, errtype.NewRefreshError(
 			"create ephemeral cert failed",
