@@ -92,8 +92,9 @@ func fetchEphemeralCert(
 		Parent: fmt.Sprintf(
 			"projects/%s/locations/%s/clusters/%s", inst.project, inst.region, inst.cluster,
 		),
-		PublicKey:    buf.String(),
-		CertDuration: durationpb.New(time.Second * 3600),
+		PublicKey:           buf.String(),
+		CertDuration:        durationpb.New(time.Second * 3600),
+		UseMetadataExchange: true,
 	}
 	resp, err := cl.GenerateClientCertificate(ctx, req)
 	if err != nil {

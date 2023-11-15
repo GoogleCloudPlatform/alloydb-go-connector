@@ -41,7 +41,8 @@ type dialerConfig struct {
 	dialFunc       func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout time.Duration
 	tokenSource    oauth2.TokenSource
-	useragents     []string
+	userAgents     []string
+	useIAMAuthN    bool
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -88,7 +89,7 @@ func WithCredentialsJSON(b []byte) Option {
 // WithUserAgent returns an Option that sets the User-Agent.
 func WithUserAgent(ua string) Option {
 	return func(d *dialerConfig) {
-		d.useragents = append(d.useragents, ua)
+		d.userAgents = append(d.userAgents, ua)
 	}
 }
 
@@ -148,6 +149,16 @@ func WithAdminAPIEndpoint(url string) Option {
 func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn, error)) Option {
 	return func(d *dialerConfig) {
 		d.dialFunc = dial
+	}
+}
+
+// WithIAMAuthN enables automatic IAM Authentication. If no token source has
+// been configured (such as with WithTokenSource, WithCredentialsFile, etc), the
+// dialer will use the default token source as defined by
+// https://pkg.go.dev/golang.org/x/oauth2/google#FindDefaultCredentialsWithParams.
+func WithIAMAuthN() Option {
+	return func(d *dialerConfig) {
+		d.useIAMAuthN = true
 	}
 }
 
