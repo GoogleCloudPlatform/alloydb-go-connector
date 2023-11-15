@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.4.1...v1.5.0) (2023-11-15)
+
+
+### Features
+
+* add pgx v5 support ([#395](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/395)) ([#413](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/413)) ([c07799c](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/c07799cbd194d003e558be136961511b37481f4f))
+* add support for Auto IAM AuthN ([#358](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/358)) ([e50dd25](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/e50dd25503ba29125023b8dc3084f4876079c48b))
+
+
+### Bug Fixes
+
+* use HandshakeContext by default ([#417](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/417)) ([81bd2d6](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/81bd2d651db7adf91f9e404f278354364ffea73d))
+
 ## [1.4.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.4.0...v1.4.1) (2023-10-11)
 
 
