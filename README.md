@@ -48,7 +48,9 @@ Please see [Configuring AlloyDB Connectivity][alloydb-connectivity] for more det
 This package requires the following to connect successfully:
 
 - IAM principal (user, service account, etc.) with the [AlloyDB
-  Client][client-role] role or equivalent. [Credentials](#credentials) for the IAM principal are used to authorize connections to an AlloyDB instance.
+  Client and Service Usage Consumer][client-role] roles or equivalent
+  permissions. [Credentials](#credentials) for the IAM principal are
+  used to authorize connections to an AlloyDB instance.
 
 - The [AlloyDB Admin API][admin-api] to be enabled within your Google Cloud
   Project. By default, the API will be called in the project associated with the
