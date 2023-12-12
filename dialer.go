@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -72,13 +73,20 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 	return defaultKey, defaultKeyErr
 }
 
+type connectionInfoCache interface {
+	OpenConns() *uint64
+	ConnectInfo(context.Context) (string, *tls.Config, error)
+	ForceRefresh()
+	io.Closer
+}
+
 // A Dialer is used to create connections to AlloyDB instance.
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
 	lock sync.RWMutex
 	// instances map instance URIs to *alloydb.Instance types
-	instances      map[alloydb.InstanceURI]*alloydb.Instance
+	instances      map[alloydb.InstanceURI]connectionInfoCache
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
 
@@ -158,7 +166,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, err
 	}
 	d := &Dialer{
-		instances:      make(map[alloydb.InstanceURI]*alloydb.Instance),
+		instances:      make(map[alloydb.InstanceURI]connectionInfoCache),
 		key:            cfg.rsaKey,
 		refreshTimeout: cfg.refreshTimeout,
 		client:         client,
@@ -205,7 +213,11 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	addr, tlsCfg, err := i.ConnectInfo(ctx)
 	if err != nil {
-		d.removeInstance(i)
+		d.lock.Lock()
+		defer d.lock.Unlock()
+		// Stop all background refreshes
+		i.Close()
+		delete(d.instances, inst)
 		endInfo(err)
 		return nil, err
 	}
@@ -223,14 +235,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if err != nil {
 		// refresh the instance info in case it caused the connection failure
 		i.ForceRefresh()
-		return nil, errtype.NewDialError("failed to dial", i.String(), err)
+		return nil, errtype.NewDialError("failed to dial", inst.String(), err)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
-			return nil, errtype.NewDialError("failed to set keep-alive", i.String(), err)
+			return nil, errtype.NewDialError("failed to set keep-alive", inst.String(), err)
 		}
 		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
-			return nil, errtype.NewDialError("failed to set keep-alive period", i.String(), err)
+			return nil, errtype.NewDialError("failed to set keep-alive period", inst.String(), err)
 		}
 	}
 
@@ -239,7 +251,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		// refresh the instance info in case it caused the handshake failure
 		i.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
-		return nil, errtype.NewDialError("handshake failed", i.String(), err)
+		return nil, errtype.NewDialError("handshake failed", inst.String(), err)
 	}
 
 	// The metadata exchange must occur after the TLS connection is established
@@ -252,14 +264,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
-		n := atomic.AddUint64(&i.OpenConns, 1)
-		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, i.String())
+		n := atomic.AddUint64(i.OpenConns(), 1)
+		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
 		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
 
 	return newInstrumentedConn(tlsConn, func() {
-		n := atomic.AddUint64(&i.OpenConns, ^uint64(0))
-		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, i.String())
+		n := atomic.AddUint64(i.OpenConns(), ^uint64(0))
+		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
 	}), nil
 }
 
@@ -417,7 +429,7 @@ func (d *Dialer) Close() error {
 	return nil
 }
 
-func (d *Dialer) instance(instance alloydb.InstanceURI) (*alloydb.Instance, error) {
+func (d *Dialer) instance(instance alloydb.InstanceURI) (connectionInfoCache, error) {
 	// Check instance cache
 	d.lock.RLock()
 	i, ok := d.instances[instance]
@@ -439,12 +451,4 @@ func (d *Dialer) instance(instance alloydb.InstanceURI) (*alloydb.Instance, erro
 		d.lock.Unlock()
 	}
 	return i, nil
-}
-
-func (d *Dialer) removeInstance(i *alloydb.Instance) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	// Stop all background refreshes
-	i.Close()
-	delete(d.instances, i.InstanceURI)
 }
