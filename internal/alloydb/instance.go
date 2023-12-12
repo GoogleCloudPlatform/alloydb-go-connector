@@ -128,10 +128,10 @@ func (r *refreshOperation) isValid() bool {
 // expires (every ~56 minutes).
 type Instance struct {
 	// OpenConns is the number of open connections to the instance.
-	OpenConns uint64
+	openConns uint64
 
-	InstanceURI
-	key *rsa.PrivateKey
+	instanceURI InstanceURI
+	key         *rsa.PrivateKey
 	// refreshTimeout sets the maximum duration a refresh cycle can run
 	// for.
 	refreshTimeout time.Duration
@@ -164,7 +164,7 @@ func NewInstance(
 ) *Instance {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &Instance{
-		InstanceURI:    instance,
+		instanceURI:    instance,
 		key:            key,
 		l:              rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
 		r:              newRefresher(client, dialerID),
@@ -181,10 +181,16 @@ func NewInstance(
 	return i
 }
 
+// OpenConns reports the number of open connections.
+func (i *Instance) OpenConns() *uint64 {
+	return &i.openConns
+}
+
 // Close closes the instance; it stops the refresh cycle and prevents it from
 // making additional calls to the AlloyDB Admin API.
-func (i *Instance) Close() {
+func (i *Instance) Close() error {
 	i.cancel()
+	return nil
 }
 
 // ConnectInfo returns an IP address of the AlloyDB instance.
@@ -261,11 +267,11 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		if err != nil {
 			r.err = errtype.NewDialError(
 				"context was canceled or expired before refresh completed",
-				i.InstanceURI.String(),
+				i.instanceURI.String(),
 				nil,
 			)
 		} else {
-			r.result, r.err = i.r.performRefresh(i.ctx, i.InstanceURI, i.key)
+			r.result, r.err = i.r.performRefresh(i.ctx, i.instanceURI, i.key)
 		}
 
 		close(r.ready)
@@ -301,9 +307,4 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		i.next = i.scheduleRefresh(t)
 	})
 	return r
-}
-
-// String returns the instance's URI.
-func (i *Instance) String() string {
-	return i.InstanceURI.String()
 }
