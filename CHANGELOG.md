@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.5.0...v1.5.1) (2023-12-13)
+
+
+### Bug Fixes
+
+* ensure cert refresh recovers from computer sleep ([#456](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/456)) ([79fcbc8](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/79fcbc8d6b2c926e0e16eb5806b61aae90860780))
+
 ## [1.5.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.4.1...v1.5.0) (2023-11-15)
 
 
