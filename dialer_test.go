@@ -16,12 +16,14 @@ package alloydbconn
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -213,14 +215,6 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 	// non-existent instance, it should delete the instance from
 	// the cache and ensure no background refresh happens (which would be
 	// wasted cycles).
-	ctx := context.Background()
-	mc, url, cleanup := mock.HTTPClient()
-	defer func() { _ = cleanup() }()
-	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx,
-		option.WithHTTPClient(mc),
-		option.WithEndpoint(url),
-	)
-
 	d, err := NewDialer(context.Background(),
 		WithTokenSource(stubTokenSource{}),
 		WithRefreshTimeout(time.Second),
@@ -228,7 +222,6 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
-	d.client = c
 	defer func(d *Dialer) {
 		err := d.Close()
 		if err != nil {
@@ -236,18 +229,62 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 		}
 	}(d)
 
+	// Populate instance map with connection info cache that will always fail.
+	// This allows the test to verify the error case path invoking close.
 	badInstanceName := "/projects/bad/locations/bad/clusters/bad/instances/bad"
 	_, _ = d.Dial(context.Background(), badInstanceName)
-
 	// The internal cache is not revealed publicly, so check the internal cache
 	// to confirm the instance is no longer present.
-	badCN, _ := alloydb.ParseInstURI(badInstanceName)
+	badInst, _ := alloydb.ParseInstURI(badInstanceName)
+
+	spy := &spyConnectionInfoCache{
+		connectInfoError: errors.New("connect info failed"),
+	}
+	d.instances[badInst] = spy
+
+	_, err = d.Dial(context.Background(), badInstanceName)
+	if err == nil {
+		t.Fatal("expected Dial to return error")
+	}
+	// Verify that the connection info cache was closed (to prevent
+	// further failed refresh operations)
+	if got, want := spy.CloseWasCalled(), true; got != want {
+		t.Fatal("Close was not called")
+	}
+
+	// Now verify that bad connection name has been deleted from map.
 	d.lock.RLock()
-	_, ok := d.instances[badCN]
+	_, ok := d.instances[badInst]
 	d.lock.RUnlock()
 	if ok {
 		t.Fatal("bad instance was not removed from the cache")
 	}
+}
+
+type spyConnectionInfoCache struct {
+	connectInfoError error
+
+	mu             sync.Mutex
+	closeWasCalled bool
+	// embed interface to avoid having to implement irrelevant methods
+	connectionInfoCache
+}
+
+func (s *spyConnectionInfoCache) ConnectInfo(_ context.Context) (string, *tls.Config, error) {
+	return "", nil, s.connectInfoError
+}
+
+func (s *spyConnectionInfoCache) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closeWasCalled = true
+	return nil
+}
+
+func (s *spyConnectionInfoCache) CloseWasCalled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closeWasCalled
 }
 
 func TestDialerSupportsOneOffDialFunction(t *testing.T) {
