@@ -17,6 +17,7 @@ package alloydbconn
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -238,7 +239,12 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 	badInst, _ := alloydb.ParseInstURI(badInstanceName)
 
 	spy := &spyConnectionInfoCache{
-		connectInfoError: errors.New("connect info failed"),
+		connectInfoCalls: []struct {
+			tls *tls.Config
+			err error
+		}{{
+			err: errors.New("connect info failed"),
+		}},
 	}
 	d.instances[badInst] = spy
 
@@ -261,17 +267,92 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 	}
 }
 
-type spyConnectionInfoCache struct {
-	connectInfoError error
+func TestDialRefreshesExpiredCertificates(t *testing.T) {
+	d, err := NewDialer(
+		context.Background(),
+		WithTokenSource(stubTokenSource{}),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
 
-	mu             sync.Mutex
-	closeWasCalled bool
+	sentinel := errors.New("connect info failed")
+	inst := "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
+	cn, _ := alloydb.ParseInstURI(inst)
+	spy := &spyConnectionInfoCache{
+		connectInfoCalls: []struct {
+			tls *tls.Config
+			err error
+		}{
+			// First call returns expired certificate
+			{
+				tls: &tls.Config{
+					Certificates: []tls.Certificate{{
+						Leaf: &x509.Certificate{
+							// Certificate expired 10 hours ago.
+							NotAfter: time.Now().Add(-10 * time.Hour),
+						},
+					}},
+				},
+			},
+			// Second call errors to validate error path
+			{
+				err: sentinel,
+			},
+		},
+	}
+	d.instances[cn] = spy
+
+	_, err = d.Dial(context.Background(), inst)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected Dial to return sentinel error, instead got = %v", err)
+	}
+
+	// Verify that the cache was refreshed
+	if got, want := spy.ForceRefreshWasCalled(), true; got != want {
+		t.Fatal("ForceRefresh was not called")
+	}
+
+	// Verify that the connection info cache was closed (to prevent
+	// further failed refresh operations)
+	if got, want := spy.CloseWasCalled(), true; got != want {
+		t.Fatal("Close was not called")
+	}
+
+	// Now verify that bad connection name has been deleted from map.
+	d.lock.RLock()
+	_, ok := d.instances[cn]
+	d.lock.RUnlock()
+	if ok {
+		t.Fatal("bad instance was not removed from the cache")
+	}
+}
+
+type spyConnectionInfoCache struct {
+	mu               sync.Mutex
+	connectInfoIndex int
+	connectInfoCalls []struct {
+		tls *tls.Config
+		err error
+	}
+	closeWasCalled        bool
+	forceRefreshWasCalled bool
 	// embed interface to avoid having to implement irrelevant methods
 	connectionInfoCache
 }
 
 func (s *spyConnectionInfoCache) ConnectInfo(_ context.Context) (string, *tls.Config, error) {
-	return "", nil, s.connectInfoError
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res := s.connectInfoCalls[s.connectInfoIndex]
+	s.connectInfoIndex++
+	return "unused", res.tls, res.err
+}
+
+func (s *spyConnectionInfoCache) ForceRefresh() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.forceRefreshWasCalled = true
 }
 
 func (s *spyConnectionInfoCache) Close() error {
@@ -285,6 +366,12 @@ func (s *spyConnectionInfoCache) CloseWasCalled() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closeWasCalled
+}
+
+func (s *spyConnectionInfoCache) ForceRefreshWasCalled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.forceRefreshWasCalled
 }
 
 func TestDialerSupportsOneOffDialFunction(t *testing.T) {

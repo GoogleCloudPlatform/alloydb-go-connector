@@ -223,6 +223,25 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	endInfo(err)
 
+	// If the client certificate has expired (as when the computer goes to
+	// sleep, and the refresh cycle cannot run), force a refresh immediately.
+	// The TLS handshake will not fail on an expired client certificate. It's
+	// not until the first read where the client cert error will be surfaced.
+	// So check that the certificate is valid before proceeding.
+	if invalidClientCert(tlsCfg) {
+		i.ForceRefresh()
+		// Block on refreshed connection info
+		addr, tlsCfg, err = i.ConnectInfo(ctx)
+		if err != nil {
+			d.lock.Lock()
+			defer d.lock.Unlock()
+			// Stop all background refreshes
+			i.Close()
+			delete(d.instances, inst)
+			return nil, err
+		}
+	}
+
 	var connectEnd trace.EndSpanFunc
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.Connect")
 	defer func() { connectEnd(err) }()
@@ -273,6 +292,19 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		n := atomic.AddUint64(i.OpenConns(), ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
 	}), nil
+}
+
+func invalidClientCert(c *tls.Config) bool {
+	// The following conditions should be impossible (no certs, nil leaf), but
+	// just in case there's an unknown edge case, check assumptions before
+	// proceeding.
+	if len(c.Certificates) == 0 {
+		return true
+	}
+	if c.Certificates[0].Leaf == nil {
+		return true
+	}
+	return time.Now().After(c.Certificates[0].Leaf.NotAfter)
 }
 
 // metadataExchange sends metadata about the connection prior to the database
