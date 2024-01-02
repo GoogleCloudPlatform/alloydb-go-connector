@@ -21,6 +21,11 @@ language. Using an AlloyDB connector provides the following benefits:
 * **Convenience:** removes the requirement to use and distribute SSL
   certificates, as well as manage firewalls or source/destination IP addresses.
 
+* (optionally) **IAM DB Authentication:** provides support for
+  [AlloyDB’s automatic IAM DB AuthN][iam-db-authn] feature.
+
+[iam-db-authn]: https://cloud.google.com/alloydb/docs/manage-iam-authn
+
 ## Installation
 
 You can install this repo with `go get`:
@@ -187,6 +192,38 @@ func Connect() {
     // ... etc
 }
 ```
+
+### Automatic IAM Database Authentication
+
+The Go Connector supports [Automatic IAM database authentication][].
+
+Make sure to [configure your AlloyDB Instance to allow IAM authentication][configure-iam-authn]
+and [add an IAM database user][add-iam-user].
+
+A `Dialer` can be configured to connect to an AlloyDB instance using
+automatic IAM database authentication with the `WithIAMAuthN` Option.
+
+```go
+d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithIAMAuthN())
+```
+
+When configuring the DSN for IAM authentication, the `password` field can be
+omitted and the `user` field should be formatted as follows:
+
+- For an IAM user account, this is the user's email address.
+- For a service account, it is the service account's email without the
+`.gserviceaccount.com` domain suffix.
+
+For example, to connect using the `test-sa@test-project.iam.gserviceaccount.com`
+service account, the DSN would look like:
+
+```go
+dsn := "user=test-sa@test-project.iam dbname=mydb sslmode=disable"
+```
+
+[Automatic IAM database authentication]: https://cloud.google.com/alloydb/docs/manage-iam-authn
+[configure-iam-authn]: https://cloud.google.com/alloydb/docs/manage-iam-authn#enable
+[add-iam-user]: https://cloud.google.com/alloydb/docs/manage-iam-authn#create-user
 
 ### Enabling Metrics and Tracing
 
