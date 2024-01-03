@@ -204,7 +204,7 @@ A `Dialer` can be configured to connect to an AlloyDB instance using
 automatic IAM database authentication with the `WithIAMAuthN` Option.
 
 ```go
-d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithIAMAuthN())
+d, err := alloydbconn.NewDialer(ctx, alloydbconn.WithIAMAuthN())
 ```
 
 When configuring the DSN for IAM authentication, the `password` field can be
