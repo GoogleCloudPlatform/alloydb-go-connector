@@ -33,12 +33,16 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
+const (
+	// PublicIP is the value for public IP connections.
+	PublicIP = "PUBLIC"
+	// PrivateIP is the value for private IP connections.
+	PrivateIP = "PRIVATE"
+)
+
 type connectInfo struct {
-	// ipAddr is the instance's IP addresses
-	ipAddr string
-	// publicIpAddress is the instance's public IP address. Will be an empty
-	// string if instance does not have public IP configured.
-	publicIpAddress string
+	// ipAddrs is the instance's IP addresses
+	ipAddrs map[string]string
 	// uid is the instance UID
 	uid string
 }
@@ -59,7 +63,23 @@ func fetchMetadata(ctx context.Context, cl *alloydbadmin.AlloyDBAdminClient, ins
 	if err != nil {
 		return connectInfo{}, errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
-	return connectInfo{ipAddr: resp.IpAddress, publicIpAddress: resp.GetPublicIpAddress(), uid: resp.InstanceUid}, nil
+
+	// parse any ip addresses that might be used to connect
+	ipAddrs := make(map[string]string)
+	if resp.GetIpAddress() != "" {
+		ipAddrs[PrivateIP] = resp.GetIpAddress()
+	}
+	if resp.GetPublicIpAddress() != "" {
+		ipAddrs[PublicIP] = resp.GetPublicIpAddress()
+	}
+
+	if len(ipAddrs) == 0 {
+		return connectInfo{}, errtype.NewConfigError(
+			"cannot connect to instance - it has no supported IP addresses",
+			inst.String(),
+		)
+	}
+	return connectInfo{ipAddrs: ipAddrs, uid: resp.InstanceUid}, nil
 }
 
 var errInvalidPEM = errors.New("certificate is not a valid PEM")
@@ -187,9 +207,9 @@ type refresher struct {
 }
 
 type refreshResult struct {
-	instanceIPAddr string
-	conf           *tls.Config
-	expiry         time.Time
+	ipAddrs map[string]string
+	conf    *tls.Config
+	expiry  time.Time
 }
 
 type certs struct {
@@ -257,9 +277,9 @@ func (r refresher) performRefresh(ctx context.Context, cn InstanceURI, k *rsa.Pr
 	c := &tls.Config{
 		Certificates: []tls.Certificate{cc.certChain},
 		RootCAs:      caCerts,
-		ServerName:   info.ipAddr,
+		ServerName:   info.ipAddrs[PrivateIP],
 		MinVersion:   tls.VersionTLS13,
 	}
 
-	return refreshResult{instanceIPAddr: info.ipAddr, conf: c, expiry: cc.expiry}, nil
+	return refreshResult{ipAddrs: info.ipAddrs, conf: c, expiry: cc.expiry}, nil
 }

@@ -193,13 +193,22 @@ func (i *Instance) Close() error {
 	return nil
 }
 
-// ConnectInfo returns an IP address of the AlloyDB instance.
-func (i *Instance) ConnectInfo(ctx context.Context) (string, *tls.Config, error) {
+// ConnectInfo returns an IP address specified by ipType (i.e., public or 
+// private) of the AlloyDB instance.
+func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls.Config, error) {
 	res, err := i.result(ctx)
 	if err != nil {
 		return "", nil, err
 	}
-	return res.result.instanceIPAddr, res.result.conf, nil
+	addr, ok = res.result.ipAddrs[ipType]
+	if !ok {
+		err := errtype.NewConfigError(
+			fmt.Sprintf("instance does not have IP of type %q", ipType),
+			i.instanceURI.String(),
+		)
+		return "", nil, err
+	}
+	return addr, res.result.conf, nil
 }
 
 // ForceRefresh triggers an immediate refresh operation to be scheduled and

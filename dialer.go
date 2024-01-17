@@ -75,7 +75,7 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 
 type connectionInfoCache interface {
 	OpenConns() *uint64
-	ConnectInfo(context.Context) (string, *tls.Config, error)
+	ConnectInfo(context.Context, string) (string, *tls.Config, error)
 	ForceRefresh()
 	io.Closer
 }
@@ -156,6 +156,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 
 	dialCfg := dialCfg{
+		ipType: alloydb.PrivateIP,
 		tcpKeepAlive: defaultTCPKeepAlive,
 	}
 	for _, opt := range cfg.dialOpts {
@@ -211,7 +212,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		endInfo(err)
 		return nil, err
 	}
-	addr, tlsCfg, err := i.ConnectInfo(ctx)
+	addr, tlsCfg, err := i.ConnectInfo(ctx, cfg.ipType)
 	if err != nil {
 		d.lock.Lock()
 		defer d.lock.Unlock()
@@ -231,7 +232,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if invalidClientCert(tlsCfg) {
 		i.ForceRefresh()
 		// Block on refreshed connection info
-		addr, tlsCfg, err = i.ConnectInfo(ctx)
+		addr, tlsCfg, err = i.ConnectInfo(ctx, cfg.ipType)
 		if err != nil {
 			d.lock.Lock()
 			defer d.lock.Unlock()
