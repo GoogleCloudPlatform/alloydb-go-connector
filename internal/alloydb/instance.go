@@ -193,7 +193,7 @@ func (i *Instance) Close() error {
 	return nil
 }
 
-// ConnectInfo returns an IP address specified by ipType (i.e., public or 
+// ConnectInfo returns an IP address specified by ipType (i.e., public or
 // private) of the AlloyDB instance.
 func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls.Config, error) {
 	res, err := i.result(ctx)

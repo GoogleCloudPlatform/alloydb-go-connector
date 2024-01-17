@@ -67,7 +67,7 @@ func (r *Request) matches(hR *http.Request) bool {
 func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
 	p := fmt.Sprintf("/v1beta/projects/%s/locations/%s/clusters/%s/instances/%s/connectionInfo",
 		i.project, i.region, i.cluster, i.name)
-	
+
 	res := map[string]string{}
 	for ipType, addr := range i.ipAddrs {
 		if ipType == "PRIVATE" {
