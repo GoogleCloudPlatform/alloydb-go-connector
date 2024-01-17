@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"golang.org/x/oauth2"

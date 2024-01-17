@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"go.opencensus.io/stats/view"
 	"google.golang.org/api/option"

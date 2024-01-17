@@ -167,6 +167,7 @@ type DialOption func(d *dialCfg)
 
 type dialCfg struct {
 	dialFunc     func(ctx context.Context, network, addr string) (net.Conn, error)
+	ipType       string
 	tcpKeepAlive time.Duration
 }
 

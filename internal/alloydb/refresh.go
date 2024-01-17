@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
-	"cloud.google.com/go/alloydb/apiv1beta/alloydbpb"
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
+	"cloud.google.com/go/alloydb/apiv1alpha/alloydbpb"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/trace"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -36,6 +36,9 @@ import (
 type connectInfo struct {
 	// ipAddr is the instance's IP addresses
 	ipAddr string
+	// publicIpAddress is the instance's public IP address. Will be an empty
+	// string if instance does not have public IP configured.
+	publicIpAddress string
 	// uid is the instance UID
 	uid string
 }
@@ -56,7 +59,7 @@ func fetchMetadata(ctx context.Context, cl *alloydbadmin.AlloyDBAdminClient, ins
 	if err != nil {
 		return connectInfo{}, errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
-	return connectInfo{ipAddr: resp.IpAddress, uid: resp.InstanceUid}, nil
+	return connectInfo{ipAddr: resp.IpAddress, publicIpAddress: resp.GetPublicIpAddress(), uid: resp.InstanceUid}, nil
 }
 
 var errInvalidPEM = errors.New("certificate is not a valid PEM")

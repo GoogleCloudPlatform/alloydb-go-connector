@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"golang.org/x/time/rate"
 )
