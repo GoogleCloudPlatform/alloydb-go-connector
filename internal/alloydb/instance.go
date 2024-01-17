@@ -200,6 +200,10 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 	if err != nil {
 		return "", nil, err
 	}
+	var (
+		addr string
+		ok   bool
+	)
 	addr, ok = res.result.ipAddrs[ipType]
 	if !ok {
 		err := errtype.NewConfigError(
