@@ -75,7 +75,7 @@ func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
 			continue
 		}
 		if ipType == "PUBLIC" {
-			res["PublicIpAddress"] = addr
+			res["publicIpAddress"] = addr
 		}
 	}
 	res["instanceUid"] = i.uid
