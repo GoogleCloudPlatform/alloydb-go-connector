@@ -156,7 +156,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 
 	dialCfg := dialCfg{
-		ipType: alloydb.PrivateIP,
+		ipType:       alloydb.PrivateIP,
 		tcpKeepAlive: defaultTCPKeepAlive,
 	}
 	for _, opt := range cfg.dialOpts {

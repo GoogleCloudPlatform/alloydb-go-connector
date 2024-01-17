@@ -128,7 +128,7 @@ func TestConnectInfo(t *testing.T) {
 	wantAddr := "0.0.0.0"
 	inst := mock.NewFakeInstance(
 		"my-project", "my-region", "my-cluster", "my-instance",
-		mock.WithIPAddr(wantAddr),
+		mock.WithPrivateIP(wantAddr),
 	)
 	mc, url, cleanup := mock.HTTPClient(
 		mock.InstanceGetSuccess(inst, 1),
@@ -157,7 +157,7 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("failed to create mock instance: %v", err)
 	}
 
-	gotAddr, _, err := i.ConnectInfo(ctx)
+	gotAddr, _, err := i.ConnectInfo(ctx, PrivateIP)
 	if err != nil {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
@@ -191,10 +191,16 @@ func TestConnectInfoErrors(t *testing.T) {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 
-	_, _, err = i.ConnectInfo(ctx)
+	_, _, err = i.ConnectInfo(ctx, PrivateIP)
 	var wantErr *errtype.DialError
 	if !errors.As(err, &wantErr) {
 		t.Fatalf("when connect info fails, want = %T, got = %v", wantErr, err)
+	}
+
+	// when client asks for wrong IP address type
+	gotAddr, _, err := i.ConnectInfo(ctx, PublicIP)
+	if err == nil {
+		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", gotAddr)
 	}
 }
 
@@ -215,7 +221,7 @@ func TestClose(t *testing.T) {
 	}
 	i.Close()
 
-	_, _, err = i.ConnectInfo(ctx)
+	_, _, err = i.ConnectInfo(ctx, PrivateIP)
 	if !strings.Contains(err.Error(), "context was canceled or expired") {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}

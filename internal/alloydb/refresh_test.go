@@ -28,7 +28,8 @@ import (
 const testDialerID = "some-dialer-id"
 
 func TestRefresh(t *testing.T) {
-	wantIP := "10.0.0.1"
+	wantPrivateIP := "10.0.0.1"
+	wantPublicIP := "127.0.0.1"
 	wantExpiry := time.Now().Add(time.Hour).UTC().Round(time.Second)
 	wantInstURI := "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
 	cn, err := ParseInstURI(wantInstURI)
@@ -37,7 +38,8 @@ func TestRefresh(t *testing.T) {
 	}
 	inst := mock.NewFakeInstance(
 		"my-project", "my-region", "my-cluster", "my-instance",
-		mock.WithIPAddr(wantIP),
+		mock.WithPrivateIP(wantPrivateIP),
+		mock.WithPublicIP(wantPublicIP),
 		mock.WithCertExpiry(wantExpiry),
 	)
 	mc, url, cleanup := mock.HTTPClient(
@@ -64,8 +66,19 @@ func TestRefresh(t *testing.T) {
 		t.Fatalf("performRefresh unexpectedly failed with error: %v", err)
 	}
 
-	if got := res.instanceIPAddr; wantIP != got {
-		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantIP, got)
+	gotIP, ok := res.ipAddrs[PrivateIP]
+	if !ok {
+		t.Fatal("metadata IP addresses did not include private address")
+	}
+	if wantPrivateIP != gotIP {
+		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPrivateIP, gotIP)
+	}
+	gotIP, ok = res.ipAddrs[PublicIP]
+	if !ok {
+		t.Fatal("metadata IP addresses did not include public address")
+	}
+	if wantPublicIP != gotIP {
+		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPublicIP, gotIP)
 	}
 	if got := res.expiry; wantExpiry != got {
 		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, got)

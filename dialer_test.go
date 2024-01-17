@@ -341,7 +341,7 @@ type spyConnectionInfoCache struct {
 	connectionInfoCache
 }
 
-func (s *spyConnectionInfoCache) ConnectInfo(_ context.Context) (string, *tls.Config, error) {
+func (s *spyConnectionInfoCache) ConnectInfo(_ context.Context, _ string) (string, *tls.Config, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	res := s.connectInfoCalls[s.connectInfoIndex]

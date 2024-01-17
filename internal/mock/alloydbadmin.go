@@ -67,13 +67,29 @@ func (r *Request) matches(hR *http.Request) bool {
 func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
 	p := fmt.Sprintf("/v1beta/projects/%s/locations/%s/clusters/%s/instances/%s/connectionInfo",
 		i.project, i.region, i.cluster, i.name)
+	
+	res := map[string]string{}
+	for ipType, addr := range i.ipAddrs {
+		if ipType == "PRIVATE" {
+			res["ipAddress"] = addr
+			continue
+		}
+		if ipType == "PUBLIC" {
+			res["publicIpAddress"] = addr
+		}
+	}
+	res["instanceUid"] = i.uid
+	jsonString, err := json.Marshal(res)
+	if err != nil {
+		panic(err)
+	}
 	return &Request{
 		reqMethod: http.MethodGet,
 		reqPath:   p,
 		reqCt:     ct,
 		handle: func(resp http.ResponseWriter, req *http.Request) {
 			resp.WriteHeader(http.StatusOK)
-			resp.Write([]byte(fmt.Sprintf(`{"ipAddress":"%s","instanceUid":"%s"}`, i.ipAddr, i.uid)))
+			resp.Write(jsonString)
 		},
 	}
 }
