@@ -48,6 +48,7 @@ func WithPrivateIP(addr string) Option {
 		f.ipAddrs["PRIVATE"] = addr
 	}
 }
+
 // WithServerName sets the name that server uses to identify itself in the TLS
 // handshake.
 func WithServerName(name string) Option {
