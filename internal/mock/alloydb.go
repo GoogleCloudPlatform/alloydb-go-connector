@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/alloydb/connectors/apiv1beta/connectorspb"
+	"cloud.google.com/go/alloydb/connectors/apiv1alpha/connectorspb"
 	"google.golang.org/protobuf/proto"
 )
 

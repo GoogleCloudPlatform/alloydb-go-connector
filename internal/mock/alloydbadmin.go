@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"cloud.google.com/go/alloydb/apiv1beta/alloydbpb"
+	"cloud.google.com/go/alloydb/apiv1alpha/alloydbpb"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 

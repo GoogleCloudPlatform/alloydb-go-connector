@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
-	"cloud.google.com/go/alloydb/apiv1beta/alloydbpb"
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
+	"cloud.google.com/go/alloydb/apiv1alpha/alloydbpb"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/trace"
 	"google.golang.org/protobuf/types/known/durationpb"

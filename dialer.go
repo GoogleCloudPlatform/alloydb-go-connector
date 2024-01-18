@@ -30,8 +30,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
-	"cloud.google.com/go/alloydb/connectors/apiv1beta/connectorspb"
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
+	"cloud.google.com/go/alloydb/connectors/apiv1alpha/connectorspb"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
 	"cloud.google.com/go/alloydbconn/internal/trace"
