@@ -227,3 +227,41 @@ func TestAutoIAMAuthN(t *testing.T) {
 	}
 	t.Log(tt)
 }
+
+
+func TestPublicIP(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+
+	d, err := alloydbconn.NewDialer(ctx)
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+
+	dsn := fmt.Sprintf(
+		"user=%s password=%s dbname=%s sslmode=disable",
+		alloydbUser, alloydbPass, alloydbDB,
+	)
+	config, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("failed to parse pgx config: %v", err)
+	}
+
+	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
+		return d.Dial(ctx, alloydbInstanceName, alloydbconn.WithPublicIP())
+	}
+
+	conn, connErr := pgx.ConnectConfig(ctx, config)
+	if connErr != nil {
+		t.Fatalf("failed to connect: %s", connErr)
+	}
+	defer conn.Close(ctx)
+
+	var tt time.Time
+	if err := conn.QueryRow(context.Background(), "SELECT NOW()").Scan(&tt); err != nil {
+		t.Fatal(err)
+	}
+	t.Log(tt)
+}
