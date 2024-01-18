@@ -228,7 +228,6 @@ func TestAutoIAMAuthN(t *testing.T) {
 	t.Log(tt)
 }
 
-
 func TestPublicIP(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
