@@ -29,6 +29,7 @@ language. Using an AlloyDB connector provides the following benefits:
 ## Installation
 
 You can install this repo with `go get`:
+
 ```sh
 go get cloud.google.com/go/alloydbconn
 ```
@@ -39,9 +40,11 @@ This package provides several functions for authorizing and encrypting
 connections. These functions can be used with your database driver to connect to
 your AlloyDB instance.
 
-AlloyDB supports network connectivity through private, internal IP addresses only. 
-This package must be run in an environment that is connected to the
-[VPC Network][vpc] that hosts your AlloyDB private IP address.
+AlloyDB supports network connectivity through public IP addresses and private,
+internal IP addresses. By default this package will attempt to connect over a
+private IP connection. When doing so, this package must be run in an
+environment that is connected to the [VPC Network][vpc] that hosts your
+AlloyDB private IP address.
 
 Please see [Configuring AlloyDB Connectivity][alloydb-connectivity] for more details.
 
@@ -52,12 +55,12 @@ Please see [Configuring AlloyDB Connectivity][alloydb-connectivity] for more det
 
 This package requires the following to connect successfully:
 
-- IAM principal (user, service account, etc.) with the [AlloyDB
+* IAM principal (user, service account, etc.) with the [AlloyDB
   Client and Service Usage Consumer][client-role] roles or equivalent
   permissions. [Credentials](#credentials) for the IAM principal are
   used to authorize connections to an AlloyDB instance.
 
-- The [AlloyDB Admin API][admin-api] to be enabled within your Google Cloud
+* The [AlloyDB Admin API][admin-api] to be enabled within your Google Cloud
   Project. By default, the API will be called in the project associated with the
   IAM principal.
 
@@ -136,14 +139,14 @@ For a full list of customizable behavior, see alloydbconn.Option.
 
 ### Using DialOptions
 
-If you want to customize things about how the connection is created, use
-`DialOption`:
+If you want to customize things about how the connection is created, such as
+connecting to AlloyDB over a public IP, use a `DialOption`:
 
 ```go
 conn, err := d.Dial(
     ctx,
     "projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
-    alloydbconn.WithTCPKeepAlive(30*time.Second),
+    alloydbconn.WithPublicIP(),
 )
 ```
 
@@ -154,7 +157,7 @@ be used by default:
 d, err := alloydbconn.NewDialer(
     ctx,
     alloydbconn.WithDefaultDialOptions(
-        alloydbconn.WithTCPKeepAlive(30*time.Second),
+        alloydbconn.WithPublicIP(),
     ),
 )
 ```
