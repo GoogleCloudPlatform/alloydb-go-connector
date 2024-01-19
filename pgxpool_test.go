@@ -21,7 +21,7 @@ import (
 	"net"
 
 	"cloud.google.com/go/alloydbconn"
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // connectPgx establishes a connection to your database using pgxpool and the
@@ -79,7 +79,7 @@ func connectPgx(
 	}
 
 	// Establish the connection.
-	pool, connErr := pgxpool.ConnectConfig(ctx, config)
+	pool, connErr := pgxpool.NewWithConfig(ctx, config)
 	if connErr != nil {
 		return nil, cleanup, fmt.Errorf("failed to connect: %s", connErr)
 	}
