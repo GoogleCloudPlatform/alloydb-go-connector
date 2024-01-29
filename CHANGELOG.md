@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.5.2...v1.6.0) (2024-01-29)
+
+
+### Features
+
+* add support for public IP ([#474](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/474)) ([e51ef9b](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/e51ef9b873111f142f1e6d70f006eee35456c4aa))
+
+
+### Bug Fixes
+
+* avoid scheduling an instance refresh if the context is done ([#491](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/491)) ([42c8ae3](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/42c8ae3456d88957138abfd95d90bab8c6448f72)), closes [#493](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/493)
+
 ## [1.5.2](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.5.1...v1.5.2) (2024-01-17)
 
 
