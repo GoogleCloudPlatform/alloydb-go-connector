@@ -26,6 +26,7 @@ import (
 	"cloud.google.com/go/alloydbconn"
 	"cloud.google.com/go/alloydbconn/driver/pgxv4"
 	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
@@ -46,6 +47,7 @@ var (
 )
 
 func requireAlloyDBVars(t *testing.T) {
+	t.Helper()
 	switch "" {
 	case alloydbInstanceName:
 		t.Fatal("'ALLOYDB_INSTANCE_NAME' env var not set")
@@ -66,27 +68,48 @@ func TestPgxConnect(t *testing.T) {
 	}
 	requireAlloyDBVars(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pool, cleanup, err := connectPgx(
-		ctx, alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
-	)
-	if err != nil {
-		_ = cleanup()
-		t.Fatal(err)
+	tcs := []struct {
+		desc string
+		f    func(
+			ctx context.Context, instURI, user, pass, dbname string,
+		) (*pgxpool.Pool, func() error, error)
+	}{
+		{
+			desc: "private IP",
+			f:    connectPgx,
+		},
+		{
+			desc: "public IP",
+			f:    connectPgxWithPublicIP,
+		},
 	}
-	defer func() {
-		pool.Close()
-		// best effort
-		_ = cleanup()
-	}()
 
-	var now time.Time
-	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
-	if err != nil {
-		t.Fatalf("QueryRow failed: %s", err)
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			pool, cleanup, err := connectPgx(
+				ctx, alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
+			)
+			if err != nil {
+				_ = cleanup()
+				t.Fatal(err)
+			}
+			defer func() {
+				pool.Close()
+				// best effort
+				_ = cleanup()
+			}()
+
+			var now time.Time
+			err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+			if err != nil {
+				t.Fatalf("QueryRow failed: %s", err)
+			}
+			t.Log(now)
+		})
 	}
-	t.Log(now)
+
 }
 
 // TestDatabaseSQLConnect uses the latest pgx driver under the hood
@@ -95,25 +118,44 @@ func TestDatabaseSQLConnect(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration tests")
 	}
+	requireAlloyDBVars(t)
 
-	db, cleanup, err := connectDatabaseSQL(
-		alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
-	)
-	if err != nil {
-		_ = cleanup()
-		t.Fatal(err)
+	tcs := []struct {
+		desc string
+		f    func(instURI, user, pass, dbname string) (*sql.DB, func() error, error)
+	}{
+		{
+			desc: "private IP",
+			f:    connectDatabaseSQL,
+		},
+		{
+			desc: "public IP",
+			f:    connectDatabaseSQLWithPublicIP,
+		},
 	}
-	defer func() {
-		db.Close()
-		// best effort
-		_ = cleanup()
-	}()
 
-	var tt time.Time
-	if err := db.QueryRow("SELECT NOW()").Scan(&tt); err != nil {
-		t.Fatal(err)
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			db, cleanup, err := tc.f(
+				alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
+			)
+			if err != nil {
+				_ = cleanup()
+				t.Fatal(err)
+			}
+			defer func() {
+				db.Close()
+				// best effort
+				_ = cleanup()
+			}()
+
+			var tt time.Time
+			if err := db.QueryRow("SELECT NOW()").Scan(&tt); err != nil {
+				t.Fatal(err)
+			}
+			t.Log(tt)
+		})
 	}
-	t.Log(tt)
 }
 
 func TestDatabaseSQLConnectPGXV4(t *testing.T) {

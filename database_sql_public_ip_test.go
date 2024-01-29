@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,22 +14,23 @@
 
 package alloydbconn_test
 
-// [START alloydb_databasesql_connect_connector]
+// [START alloydb_databasesql_connect_connector_public_ip]
 import (
 	"database/sql"
 	"fmt"
 
+	"cloud.google.com/go/alloydbconn"
 	"cloud.google.com/go/alloydbconn/driver/pgxv5"
 )
 
-// connectDatabaseSQL establishes a connection to your database using the Go
-// standard library's database/sql package and using the AlloyDB Go Connector
-// (aka alloydbconn.Dialer)
+// connectDatabaseSQLWithPublicIP establishes a connection to your database
+// using the Go standard library's database/sql package and using the AlloyDB
+// Go Connector (aka alloydbconn.Dialer)
 //
 // The function takes an instance URI, a username, a password, and a database
 // name. Usage looks like this:
 //
-//	db, cleanup, err := connectDatabaseSQL(
+//	db, cleanup, err := connectDatabaseSQLWithPublicIP(
 //	  "projects/myproject/locations/us-central1/clusters/mycluster/instances/myinstance",
 //	  "postgres",
 //	  "secretpassword",
@@ -38,7 +39,7 @@ import (
 //
 // In addition to a *db.SQL type, the function returns a cleanup function that
 // should be called when you're done with the database connection.
-func connectDatabaseSQL(
+func connectDatabaseSQLWithPublicIP(
 	instURI, user, pass, dbname string,
 ) (*sql.DB, func() error, error) {
 	// First, register the AlloyDB driver. Note, the driver's name is arbitrary
@@ -52,7 +53,11 @@ func connectDatabaseSQL(
 	// The cleanup function will stop the dialer's background refresh
 	// goroutines. Call it when you're done with your database connection to
 	// avoid a goroutine leak.
-	cleanup, err := pgxv5.RegisterDriver("alloydb")
+	cleanup, err := pgxv5.RegisterDriver(
+		"alloydb-public", alloydbconn.WithDefaultDialOptions(
+			alloydbconn.WithPublicIP(),
+		),
+	)
 	if err != nil {
 		return nil, cleanup, err
 	}
@@ -69,4 +74,4 @@ func connectDatabaseSQL(
 	return db, cleanup, err
 }
 
-// [END alloydb_databasesql_connect_connector]
+// [END alloydb_databasesql_connect_connector_public_ip]
