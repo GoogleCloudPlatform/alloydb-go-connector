@@ -19,7 +19,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -222,7 +221,7 @@ func TestClose(t *testing.T) {
 	i.Close()
 
 	_, _, err = i.ConnectInfo(ctx, PrivateIP)
-	if !strings.Contains(err.Error(), "context was canceled or expired") {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
 }
