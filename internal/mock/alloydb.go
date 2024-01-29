@@ -28,17 +28,24 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/alloydb/connectors/apiv1beta/connectorspb"
+	"cloud.google.com/go/alloydb/connectors/apiv1alpha/connectorspb"
 	"google.golang.org/protobuf/proto"
 )
 
 // Option configures a FakeAlloyDBInstance
 type Option func(*FakeAlloyDBInstance)
 
-// WithIPAddr sets the IP address of the instance.
-func WithIPAddr(addr string) Option {
+// WithPublicIP sets the public IP address to addr.
+func WithPublicIP(addr string) Option {
 	return func(f *FakeAlloyDBInstance) {
-		f.ipAddr = addr
+		f.ipAddrs["PUBLIC"] = addr
+	}
+}
+
+// WithPrivateIP sets the private IP address to addr.
+func WithPrivateIP(addr string) Option {
+	return func(f *FakeAlloyDBInstance) {
+		f.ipAddrs["PRIVATE"] = addr
 	}
 }
 
@@ -63,8 +70,8 @@ type FakeAlloyDBInstance struct {
 	region  string
 	cluster string
 	name    string
-
-	ipAddr     string
+	// ipAddrs is a map of IP type (PUBLIC or PRIVATE) to IP address.
+	ipAddrs    map[string]string
 	uid        string
 	serverName string
 	certExpiry time.Time
@@ -100,7 +107,7 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 		region:     reg,
 		cluster:    clust,
 		name:       name,
-		ipAddr:     "127.0.0.1",
+		ipAddrs:    map[string]string{"PRIVATE": "127.0.0.1"},
 		uid:        "00000000-0000-0000-0000-000000000000",
 		serverName: "00000000-0000-0000-0000-000000000000.server.alloydb",
 		certExpiry: time.Now().Add(24 * time.Hour),

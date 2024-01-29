@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/internal/alloydb"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	apiopt "google.golang.org/api/option"
@@ -167,6 +168,7 @@ type DialOption func(d *dialCfg)
 
 type dialCfg struct {
 	dialFunc     func(ctx context.Context, network, addr string) (net.Conn, error)
+	ipType       string
 	tcpKeepAlive time.Duration
 }
 
@@ -192,5 +194,19 @@ func WithOneOffDialFunc(dial func(ctx context.Context, network, addr string) (ne
 func WithTCPKeepAlive(d time.Duration) DialOption {
 	return func(cfg *dialCfg) {
 		cfg.tcpKeepAlive = d
+	}
+}
+
+// WithPublicIP returns a DialOption that specifies a public IP will be used to connect.
+func WithPublicIP() DialOption {
+	return func(cfg *dialCfg) {
+		cfg.ipType = alloydb.PublicIP
+	}
+}
+
+// WithPrivateIP returns a DialOption that specifies a private IP (VPC) will be used to connect.
+func WithPrivateIP() DialOption {
+	return func(cfg *dialCfg) {
+		cfg.ipType = alloydb.PrivateIP
 	}
 }

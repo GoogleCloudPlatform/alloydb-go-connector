@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	alloydbadmin "cloud.google.com/go/alloydb/apiv1beta"
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
 	"cloud.google.com/go/alloydbconn/internal/mock"
@@ -341,7 +341,7 @@ type spyConnectionInfoCache struct {
 	connectionInfoCache
 }
 
-func (s *spyConnectionInfoCache) ConnectInfo(_ context.Context) (string, *tls.Config, error) {
+func (s *spyConnectionInfoCache) ConnectInfo(_ context.Context, _ string) (string, *tls.Config, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	res := s.connectInfoCalls[s.connectInfoIndex]
