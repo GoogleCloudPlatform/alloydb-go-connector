@@ -253,7 +253,7 @@ func TestAutoIAMAuthN(t *testing.T) {
 		t.Fatalf("failed to parse pgx config: %v", err)
 	}
 
-	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
+	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return d.Dial(ctx, alloydbInstanceName)
 	}
 
@@ -290,7 +290,7 @@ func TestPublicIP(t *testing.T) {
 		t.Fatalf("failed to parse pgx config: %v", err)
 	}
 
-	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
+	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return d.Dial(ctx, alloydbInstanceName, alloydbconn.WithPublicIP())
 	}
 

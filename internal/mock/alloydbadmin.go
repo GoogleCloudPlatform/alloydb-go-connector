@@ -87,7 +87,7 @@ func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
 		reqMethod: http.MethodGet,
 		reqPath:   p,
 		reqCt:     ct,
-		handle: func(resp http.ResponseWriter, req *http.Request) {
+		handle: func(resp http.ResponseWriter, _ *http.Request) {
 			resp.WriteHeader(http.StatusOK)
 			resp.Write(jsonString)
 		},
