@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.6.0...v1.7.0) (2024-02-13)
+
+
+### Features
+
+* add support for Go 1.22 ([#504](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/504)) ([a944afb](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/a944afb862324b6b987cfe357957621d4065d9f5))
+
 ## [1.6.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.5.2...v1.6.0) (2024-01-29)
 
 
