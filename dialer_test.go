@@ -183,7 +183,7 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 	}
 
 	d, err := NewDialer(ctx,
-		WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		WithDialFunc(func(_ context.Context, _, _ string) (net.Conn, error) {
 			return nil, errors.New("sentinel error")
 		}),
 		WithTokenSource(stubTokenSource{}),
@@ -396,7 +396,7 @@ func TestDialerSupportsOneOffDialFunction(t *testing.T) {
 	}
 
 	d, err := NewDialer(ctx,
-		WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		WithDialFunc(func(_ context.Context, _, _ string) (net.Conn, error) {
 			return nil, errors.New("sentinel error")
 		}),
 		WithTokenSource(stubTokenSource{}),

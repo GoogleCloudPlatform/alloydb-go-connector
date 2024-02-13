@@ -62,7 +62,7 @@ func connectDirectPGXPoolAutoIAMAuthN(
 		return nil, err
 	}
 	// This function is called before every connection
-	config.BeforeConnect = func(ctx context.Context, c *pgx.ConnConfig) error {
+	config.BeforeConnect = func(_ context.Context, c *pgx.ConnConfig) error {
 		tok, err := ts.Token()
 		if err != nil {
 			return err
