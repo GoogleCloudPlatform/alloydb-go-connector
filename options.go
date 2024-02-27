@@ -1,11 +1,11 @@
 // Copyright 2020 Google LLC
-
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-
+//
 //     https://www.apache.org/licenses/LICENSE-2.0
-
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -111,7 +111,8 @@ func WithTokenSource(s oauth2.TokenSource) Option {
 	}
 }
 
-// WithRSAKey returns an Option that specifies a rsa.PrivateKey used to represent the client.
+// WithRSAKey returns an Option that specifies a rsa.PrivateKey used to
+// represent the client.
 func WithRSAKey(k *rsa.PrivateKey) Option {
 	return func(d *dialerConfig) {
 		d.rsaKey = k
@@ -154,8 +155,8 @@ func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn
 }
 
 // WithIAMAuthN enables automatic IAM Authentication. If no token source has
-// been configured (such as with WithTokenSource, WithCredentialsFile, etc), the
-// dialer will use the default token source as defined by
+// been configured (such as with WithTokenSource, WithCredentialsFile, etc),
+// the dialer will use the default token source as defined by
 // https://pkg.go.dev/golang.org/x/oauth2/google#FindDefaultCredentialsWithParams.
 func WithIAMAuthN() Option {
 	return func(d *dialerConfig) {
@@ -163,7 +164,8 @@ func WithIAMAuthN() Option {
 	}
 }
 
-// A DialOption is an option for configuring how a Dialer's Dial call is executed.
+// DialOption is an option for configuring how a Dialer's Dial call is
+// executed.
 type DialOption func(d *dialCfg)
 
 type dialCfg struct {
@@ -190,23 +192,34 @@ func WithOneOffDialFunc(dial func(ctx context.Context, network, addr string) (ne
 	}
 }
 
-// WithTCPKeepAlive returns a DialOption that specifies the tcp keep alive period for the connection returned by Dial.
+// WithTCPKeepAlive returns a DialOption that specifies the tcp keep alive
+// period for the connection returned by Dial.
 func WithTCPKeepAlive(d time.Duration) DialOption {
 	return func(cfg *dialCfg) {
 		cfg.tcpKeepAlive = d
 	}
 }
 
-// WithPublicIP returns a DialOption that specifies a public IP will be used to connect.
+// WithPublicIP returns a DialOption that specifies a public IP will be used to
+// connect.
 func WithPublicIP() DialOption {
 	return func(cfg *dialCfg) {
 		cfg.ipType = alloydb.PublicIP
 	}
 }
 
-// WithPrivateIP returns a DialOption that specifies a private IP (VPC) will be used to connect.
+// WithPrivateIP returns a DialOption that specifies a private IP (VPC) will be
+// used to connect.
 func WithPrivateIP() DialOption {
 	return func(cfg *dialCfg) {
 		cfg.ipType = alloydb.PrivateIP
+	}
+}
+
+// WithPSC returns a DialOption that specifies a PSC endpoint will be used to
+// connect.
+func WithPSC() DialOption {
+	return func(cfg *dialCfg) {
+		cfg.ipType = alloydb.PSC
 	}
 }
