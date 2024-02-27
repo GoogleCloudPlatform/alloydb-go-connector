@@ -84,7 +84,7 @@ func TestRefresh(t *testing.T) {
 	}
 	gotPSC, ok := res.ipAddrs[PSC]
 	if !ok {
-		t.Fatal("metadata IP addresses did not include public address")
+		t.Fatal("metadata IP addresses did not include PSC address")
 	}
 	if wantPSC != gotPSC {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPSC, gotPSC)
