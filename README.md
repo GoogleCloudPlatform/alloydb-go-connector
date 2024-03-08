@@ -1,3 +1,9 @@
+<p align="center">
+    <a href="https://cloud.google.com/alloydb/docs/connect-language-connectors#go-pgx">
+        <img src="docs/images/alloydb-go-connector.png" alt="alloydb-go-connector image">
+    </a>
+</p>
+
 # AlloyDB Go Connector
 
 [![CI][ci-badge]][ci-build]
