@@ -295,6 +295,39 @@ func main() {
 [Cloud Monitoring]: https://cloud.google.com/monitoring
 [Cloud Trace]: https://cloud.google.com/trace
 
+### Debug Logging
+
+The Go Connector supports optional debug logging to help diagnose problems with
+the background certificate refresh. To enable it, provide a logger that
+implements the `debug.Logger` interface when initializing the Dialer.
+
+For example:
+
+``` go
+import (
+    "context"
+    "net"
+
+    "cloud.google.com/go/alloydbconn"
+)
+
+type myLogger struct{}
+
+func (l *myLogger) Debugf(format string, args ...interface{}) {
+    // Log as you like here
+}
+
+func connect() {
+    l := &myLogger{}
+
+    d, err := NewDialer(
+        context.Background(),
+        alloydbconn.WithDebugLogger(l),
+    )
+    // use dialer as usual...
+}
+```
+
 ## Support policy
 
 ### Major version lifecycle
