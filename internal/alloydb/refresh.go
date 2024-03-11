@@ -160,7 +160,7 @@ func fetchEphemeralCert(
 		)
 	}
 
-	// Extract expiry
+	// Extract expiry from client certificate.
 	clientCertPEMBlock, _ := pem.Decode([]byte(resp.PemCertificateChain[0]))
 	if clientCertPEMBlock == nil {
 		return nil, errtype.NewRefreshError(
@@ -177,6 +177,9 @@ func fetchEphemeralCert(
 			err,
 		)
 	}
+	// Save the parsed certificate as the leaf certificate, to avoid additional
+	// parsing costs as part of the TLS connection.
+	cert.Leaf = clientCert
 
 	return &certs{
 		certChain: cert,
