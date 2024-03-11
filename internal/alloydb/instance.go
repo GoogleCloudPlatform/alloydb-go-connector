@@ -24,6 +24,7 @@ import (
 	"time"
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
+	"cloud.google.com/go/alloydbconn/debug"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"golang.org/x/time/rate"
 )
@@ -131,6 +132,7 @@ type Instance struct {
 	openConns uint64
 
 	instanceURI InstanceURI
+	logger      debug.Logger
 	key         *rsa.PrivateKey
 	// refreshTimeout sets the maximum duration a refresh cycle can run
 	// for.
@@ -157,6 +159,7 @@ type Instance struct {
 // NewInstance initializes a new Instance given an instance URI
 func NewInstance(
 	instance InstanceURI,
+	l debug.Logger,
 	client *alloydbadmin.AlloyDBAdminClient,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
@@ -165,6 +168,7 @@ func NewInstance(
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &Instance{
 		instanceURI:    instance,
+		logger:         l,
 		key:            key,
 		l:              rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
 		r:              newRefresher(client, dialerID),
@@ -281,10 +285,18 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 	r.timer = time.AfterFunc(d, func() {
 		// instance has been closed, don't schedule anything
 		if err := i.ctx.Err(); err != nil {
+			i.logger.Debugf(
+				"[%v] Instance is closed, stopping refresh operations",
+				i.instanceURI.String(),
+			)
 			r.err = err
 			close(r.ready)
 			return
 		}
+		i.logger.Debugf(
+			"[%v] Connection info refresh operation started",
+			i.instanceURI.String(),
+		)
 
 		ctx, cancel := context.WithTimeout(i.ctx, i.refreshTimeout)
 		defer cancel()
@@ -296,8 +308,22 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 				i.instanceURI.String(),
 				nil,
 			)
+			i.logger.Debugf(
+				"[%v] Connection info refresh operation failed, err = %v",
+				i.instanceURI.String(),
+				r.err,
+			)
 		} else {
 			r.result, r.err = i.r.performRefresh(i.ctx, i.instanceURI, i.key)
+			i.logger.Debugf(
+				"[%v] Connection info refresh operation complete",
+				i.instanceURI.String(),
+			)
+			i.logger.Debugf(
+				"[%v] Current certificate expiration = %v",
+				i.instanceURI.String(),
+				r.result.expiry.UTC().Format(time.RFC3339),
+			)
 		}
 
 		close(r.ready)
@@ -309,6 +335,10 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 
 		// if failed, scheduled the next refresh immediately
 		if r.err != nil {
+			i.logger.Debugf(
+				"[%v] Connection info refresh operation scheduled immediately",
+				i.instanceURI.String(),
+			)
 			i.next = i.scheduleRefresh(0)
 			// If the latest result is bad, avoid replacing the
 			// used result while it's still valid and potentially
@@ -325,6 +355,12 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		// the future
 		i.cur = r
 		t := refreshDuration(time.Now(), i.cur.result.expiry)
+		i.logger.Debugf(
+			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
+			i.instanceURI.String(),
+			time.Now().Add(t).UTC().Format(time.RFC3339),
+			t.Round(time.Minute),
+		)
 		i.next = i.scheduleRefresh(t)
 	})
 	return r

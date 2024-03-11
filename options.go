@@ -22,6 +22,7 @@ import (
 	"os"
 	"time"
 
+	"cloud.google.com/go/alloydbconn/debug"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
 	"golang.org/x/oauth2"
@@ -44,6 +45,7 @@ type dialerConfig struct {
 	tokenSource    oauth2.TokenSource
 	userAgents     []string
 	useIAMAuthN    bool
+	logger         debug.Logger
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -160,6 +162,14 @@ func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn
 func WithIAMAuthN() Option {
 	return func(d *dialerConfig) {
 		d.useIAMAuthN = true
+	}
+}
+
+// WithDebugLogger configures a debug logger for reporting on internal
+// operations. By default the debug logger is disabled.
+func WithDebugLogger(l debug.Logger) Option {
+	return func(d *dialerConfig) {
+		d.logger = l
 	}
 }
 
