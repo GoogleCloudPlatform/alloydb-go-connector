@@ -299,12 +299,6 @@ func invalidClientCert(c *tls.Config) bool {
 	// The following conditions should be impossible (no certs, nil leaf), but
 	// just in case there's an unknown edge case, check assumptions before
 	// proceeding.
-	if len(c.Certificates) == 0 {
-		return true
-	}
-	if c.Certificates[0].Leaf == nil {
-		return true
-	}
 	return time.Now().After(c.Certificates[0].Leaf.NotAfter)
 }
 

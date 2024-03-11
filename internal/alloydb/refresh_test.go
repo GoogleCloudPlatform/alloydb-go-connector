@@ -83,6 +83,12 @@ func TestRefresh(t *testing.T) {
 	if got := res.expiry; wantExpiry != got {
 		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, got)
 	}
+	if got, want := len(res.conf.Certificates), 1; got != want {
+		t.Fatalf("certificates should have length %v, got %v", want, got)
+	}
+	if got := res.conf.Certificates[0].Leaf; got == nil {
+		t.Fatal("leaf certificate should not be nil")
+	}
 }
 
 func TestRefreshFailsFast(t *testing.T) {
