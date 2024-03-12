@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.8.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.7.0...v1.8.0) (2024-03-12)
+
+
+### Features
+
+* add support for debug logging ([#523](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/523)) ([a9b8557](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/a9b8557ffb4ea046cf19961a8f7fed86548e6ac8)), closes [#506](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/506)
+* add support for PSC ([#513](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/513)) ([614dbd3](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/614dbd3382fc9fca137eb234a8133572fa1ad3a7))
+
+
+### Bug Fixes
+
+* remove duplicate refresh for all connections ([#526](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/526)) ([e9f63a3](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/e9f63a3ffd5d75b7c961913097d64c70e2c23320))
+
 ## [1.7.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.6.0...v1.7.0) (2024-02-13)
 
 
