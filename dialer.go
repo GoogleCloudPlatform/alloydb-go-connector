@@ -76,7 +76,7 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 
 type connectionInfoCache interface {
 	OpenConns() *uint64
-	ConnectInfo(context.Context, string) (string, *tls.Config, error)
+	ConnectionInfo(context.Context) (alloydb.ConnectionInfo, error)
 	ForceRefresh()
 	io.Closer
 }
@@ -220,7 +220,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		endInfo(err)
 		return nil, err
 	}
-	addr, tlsCfg, err := i.ConnectInfo(ctx, cfg.ipType)
+	ci, err := i.ConnectionInfo(ctx)
 	if err != nil {
 		d.lock.Lock()
 		defer d.lock.Unlock()
@@ -242,11 +242,11 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	// The TLS handshake will not fail on an expired client certificate. It's
 	// not until the first read where the client cert error will be surfaced.
 	// So check that the certificate is valid before proceeding.
-	if invalidClientCert(inst, d.logger, tlsCfg) {
+	if invalidClientCert(inst, d.logger, ci.Expiration) {
 		d.logger.Debugf("[%v] Refreshing certificate now", inst.String())
 		i.ForceRefresh()
 		// Block on refreshed connection info
-		addr, tlsCfg, err = i.ConnectInfo(ctx, cfg.ipType)
+		ci, err = i.ConnectionInfo(ctx)
 		if err != nil {
 			d.lock.Lock()
 			defer d.lock.Unlock()
@@ -260,6 +260,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 			delete(d.instances, inst)
 			return nil, err
 		}
+	}
+	addr, ok := ci.IPAddrs[cfg.ipType]
+	if !ok {
+		err := errtype.NewConfigError(
+			fmt.Sprintf("instance does not have IP of type %q", cfg.ipType),
+			inst.String(),
+		)
+		return nil, err
 	}
 
 	var connectEnd trace.EndSpanFunc
@@ -287,7 +295,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		}
 	}
 
-	tlsConn := tls.Client(conn, tlsCfg)
+	c := &tls.Config{
+		Certificates: []tls.Certificate{ci.ClientCert},
+		RootCAs:      ci.RootCAs,
+		// TODO: adjust this for public IP
+		ServerName: ci.IPAddrs[alloydb.PrivateIP],
+		MinVersion: tls.VersionTLS13,
+	}
+	tlsConn := tls.Client(conn, c)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		d.logger.Debugf("[%v] TLS handshake failed: %v", inst.String(), err)
 		// refresh the instance info in case it caused the handshake failure
@@ -318,10 +333,10 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 }
 
 func invalidClientCert(
-	inst alloydb.InstanceURI, l debug.Logger, c *tls.Config,
+	inst alloydb.InstanceURI, l debug.Logger, expiration time.Time,
 ) bool {
 	now := time.Now().UTC()
-	notAfter := c.Certificates[0].Leaf.NotAfter.UTC()
+	notAfter := expiration.UTC()
 	invalid := now.After(notAfter)
 	l.Debugf(
 		"[%v] Now = %v, Current cert expiration = %v",
@@ -497,7 +512,7 @@ func (d *Dialer) instance(instance alloydb.InstanceURI) (connectionInfoCache, er
 		// Recheck to ensure instance wasn't created between locks
 		i, ok = d.instances[instance]
 		if !ok {
-			i = alloydb.NewInstance(
+			i = alloydb.NewRefreshAheadCache(
 				instance,
 				d.logger,
 				d.client, d.key,

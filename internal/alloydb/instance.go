@@ -17,7 +17,6 @@ package alloydb
 import (
 	"context"
 	"crypto/rsa"
-	"crypto/tls"
 	"fmt"
 	"regexp"
 	"sync"
@@ -92,7 +91,7 @@ func ParseInstURI(cn string) (InstanceURI, error) {
 // connect securely. It should only be initialized by the Instance struct as
 // part of a refresh cycle.
 type refreshOperation struct {
-	result refreshResult
+	result ConnectionInfo
 	err    error
 
 	// timer that triggers refresh, can be used to cancel.
@@ -116,18 +115,18 @@ func (r *refreshOperation) isValid() bool {
 	default:
 		return false
 	case <-r.ready:
-		if r.err != nil || time.Now().After(r.result.expiry) {
+		if r.err != nil || time.Now().After(r.result.Expiration) {
 			return false
 		}
 		return true
 	}
 }
 
-// Instance manages the information used to connect to the AlloyDB instance by
+// RefreshAheadCache manages the information used to connect to the AlloyDB instance by
 // periodically calling the AlloyDB Admin API. It automatically refreshes the
 // required information approximately 4 minutes before the previous certificate
 // expires (every ~56 minutes).
-type Instance struct {
+type RefreshAheadCache struct {
 	// OpenConns is the number of open connections to the instance.
 	openConns uint64
 
@@ -156,17 +155,18 @@ type Instance struct {
 	cancel context.CancelFunc
 }
 
-// NewInstance initializes a new Instance given an instance URI
-func NewInstance(
+// NewRefreshAheadCache initializes a new cache that proactively refreshes the
+// caches connection info.
+func NewRefreshAheadCache(
 	instance InstanceURI,
 	l debug.Logger,
 	client *alloydbadmin.AlloyDBAdminClient,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
 	dialerID string,
-) *Instance {
+) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
-	i := &Instance{
+	i := &RefreshAheadCache{
 		instanceURI:    instance,
 		logger:         l,
 		key:            key,
@@ -186,13 +186,13 @@ func NewInstance(
 }
 
 // OpenConns reports the number of open connections.
-func (i *Instance) OpenConns() *uint64 {
+func (i *RefreshAheadCache) OpenConns() *uint64 {
 	return &i.openConns
 }
 
 // Close closes the instance; it stops the refresh cycle and prevents it from
 // making additional calls to the AlloyDB Admin API.
-func (i *Instance) Close() error {
+func (i *RefreshAheadCache) Close() error {
 	i.resultGuard.Lock()
 	defer i.resultGuard.Unlock()
 	i.cancel()
@@ -201,31 +201,30 @@ func (i *Instance) Close() error {
 	return nil
 }
 
-// ConnectInfo returns an IP address specified by ipType (i.e., public or
+// ConnectionInfo returns an IP address specified by ipType (i.e., public or
 // private) of the AlloyDB instance.
-func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls.Config, error) {
-	res, err := i.result(ctx)
+func (i *RefreshAheadCache) ConnectionInfo(ctx context.Context) (ConnectionInfo, error) {
+	i.resultGuard.RLock()
+	refresh := i.cur
+	i.resultGuard.RUnlock()
+	var err error
+	select {
+	case <-refresh.ready:
+		err = refresh.err
+	case <-ctx.Done():
+		err = ctx.Err()
+	case <-i.ctx.Done():
+		err = i.ctx.Err()
+	}
 	if err != nil {
-		return "", nil, err
+		return ConnectionInfo{}, err
 	}
-	var (
-		addr string
-		ok   bool
-	)
-	addr, ok = res.result.ipAddrs[ipType]
-	if !ok {
-		err := errtype.NewConfigError(
-			fmt.Sprintf("instance does not have IP of type %q", ipType),
-			i.instanceURI.String(),
-		)
-		return "", nil, err
-	}
-	return addr, res.result.conf, nil
+	return refresh.result, nil
 }
 
 // ForceRefresh triggers an immediate refresh operation to be scheduled and
 // used for future connection attempts if valid.
-func (i *Instance) ForceRefresh() {
+func (i *RefreshAheadCache) ForceRefresh() {
 	i.resultGuard.Lock()
 	defer i.resultGuard.Unlock()
 	// If the next refresh hasn't started yet, we can cancel it and start an immediate one
@@ -237,27 +236,6 @@ func (i *Instance) ForceRefresh() {
 	if !i.cur.isValid() {
 		i.cur = i.next
 	}
-}
-
-// result returns the most recent refresh result (waiting for it to complete if
-// necessary)
-func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
-	i.resultGuard.RLock()
-	res := i.cur
-	i.resultGuard.RUnlock()
-	var err error
-	select {
-	case <-res.ready:
-		err = res.err
-	case <-ctx.Done():
-		err = ctx.Err()
-	case <-i.ctx.Done():
-		err = i.ctx.Err()
-	}
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
 }
 
 // refreshDuration returns the duration to wait before starting the next
@@ -279,7 +257,7 @@ func refreshDuration(now, certExpiry time.Time) time.Duration {
 // scheduleRefresh schedules a refresh operation to be triggered after a given
 // duration. The returned refreshOperation can be used to either Cancel or Wait
 // for the operation's result.
-func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
+func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 	r := &refreshOperation{}
 	r.ready = make(chan struct{})
 	r.timer = time.AfterFunc(d, func() {
@@ -322,7 +300,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			i.logger.Debugf(
 				"[%v] Current certificate expiration = %v",
 				i.instanceURI.String(),
-				r.result.expiry.UTC().Format(time.RFC3339),
+				r.result.Expiration.UTC().Format(time.RFC3339),
 			)
 		}
 
@@ -354,7 +332,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		// Update the current results, and schedule the next refresh in
 		// the future
 		i.cur = r
-		t := refreshDuration(time.Now(), i.cur.result.expiry)
+		t := refreshDuration(time.Now(), i.cur.result.Expiration)
 		i.logger.Debugf(
 			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
 			i.instanceURI.String(),

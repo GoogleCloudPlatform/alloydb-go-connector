@@ -66,27 +66,24 @@ func TestRefresh(t *testing.T) {
 		t.Fatalf("performRefresh unexpectedly failed with error: %v", err)
 	}
 
-	gotIP, ok := res.ipAddrs[PrivateIP]
+	gotIP, ok := res.IPAddrs[PrivateIP]
 	if !ok {
 		t.Fatal("metadata IP addresses did not include private address")
 	}
 	if wantPrivateIP != gotIP {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPrivateIP, gotIP)
 	}
-	gotIP, ok = res.ipAddrs[PublicIP]
+	gotIP, ok = res.IPAddrs[PublicIP]
 	if !ok {
 		t.Fatal("metadata IP addresses did not include public address")
 	}
 	if wantPublicIP != gotIP {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPublicIP, gotIP)
 	}
-	if got := res.expiry; wantExpiry != got {
+	if got := res.Expiration; wantExpiry != got {
 		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, got)
 	}
-	if got, want := len(res.conf.Certificates), 1; got != want {
-		t.Fatalf("certificates should have length %v, got %v", want, got)
-	}
-	if got := res.conf.Certificates[0].Leaf; got == nil {
+	if got := res.ClientCert.Leaf; got == nil {
 		t.Fatal("leaf certificate should not be nil")
 	}
 }
