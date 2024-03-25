@@ -16,8 +16,6 @@ package alloydbconn
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -240,8 +238,8 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 
 	spy := &spyConnectionInfoCache{
 		connectInfoCalls: []struct {
-			tls *tls.Config
-			err error
+			info alloydb.ConnectionInfo
+			err  error
 		}{{
 			err: errors.New("connect info failed"),
 		}},
@@ -281,18 +279,13 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 	cn, _ := alloydb.ParseInstURI(inst)
 	spy := &spyConnectionInfoCache{
 		connectInfoCalls: []struct {
-			tls *tls.Config
-			err error
+			info alloydb.ConnectionInfo
+			err  error
 		}{
 			// First call returns expired certificate
 			{
-				tls: &tls.Config{
-					Certificates: []tls.Certificate{{
-						Leaf: &x509.Certificate{
-							// Certificate expired 10 hours ago.
-							NotAfter: time.Now().Add(-10 * time.Hour),
-						},
-					}},
+				info: alloydb.ConnectionInfo{
+					Expiration: time.Now().Add(-10 * time.Hour),
 				},
 			},
 			// Second call errors to validate error path
@@ -332,8 +325,8 @@ type spyConnectionInfoCache struct {
 	mu               sync.Mutex
 	connectInfoIndex int
 	connectInfoCalls []struct {
-		tls *tls.Config
-		err error
+		info alloydb.ConnectionInfo
+		err  error
 	}
 	closeWasCalled        bool
 	forceRefreshWasCalled bool
@@ -341,12 +334,12 @@ type spyConnectionInfoCache struct {
 	connectionInfoCache
 }
 
-func (s *spyConnectionInfoCache) ConnectInfo(_ context.Context, _ string) (string, *tls.Config, error) {
+func (s *spyConnectionInfoCache) ConnectionInfo(context.Context) (alloydb.ConnectionInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	res := s.connectInfoCalls[s.connectInfoIndex]
 	s.connectInfoIndex++
-	return "unused", res.tls, res.err
+	return res.info, res.err
 }
 
 func (s *spyConnectionInfoCache) ForceRefresh() {

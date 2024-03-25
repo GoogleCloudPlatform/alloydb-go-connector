@@ -40,28 +40,33 @@ const (
 	PrivateIP = "PRIVATE"
 )
 
-type connectInfo struct {
+type instanceInfo struct {
 	// ipAddrs is the instance's IP addresses
 	ipAddrs map[string]string
 	// uid is the instance UID
 	uid string
 }
 
-// fetchMetadata uses the AlloyDB Admin APIs get method to retrieve the
+// fetchInstanceInfo uses the AlloyDB Admin APIs get method to retrieve the
 // information about an AlloyDB instance that is used to create secure
 // connections.
-func fetchMetadata(ctx context.Context, cl *alloydbadmin.AlloyDBAdminClient, inst InstanceURI) (i connectInfo, err error) {
+func fetchInstanceInfo(
+	ctx context.Context, cl *alloydbadmin.AlloyDBAdminClient, inst InstanceURI,
+) (i instanceInfo, err error) {
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
 	defer func() { end(err) }()
 	req := &alloydbpb.GetConnectionInfoRequest{
 		Parent: fmt.Sprintf(
-			"projects/%s/locations/%s/clusters/%s/instances/%s", inst.project, inst.region, inst.cluster, inst.name,
+			"projects/%s/locations/%s/clusters/%s/instances/%s",
+			inst.project, inst.region, inst.cluster, inst.name,
 		),
 	}
 	resp, err := cl.GetConnectionInfo(ctx, req)
 	if err != nil {
-		return connectInfo{}, errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
+		return instanceInfo{}, errtype.NewRefreshError(
+			"failed to get instance metadata", inst.String(), err,
+		)
 	}
 
 	// parse any ip addresses that might be used to connect
@@ -74,12 +79,12 @@ func fetchMetadata(ctx context.Context, cl *alloydbadmin.AlloyDBAdminClient, ins
 	}
 
 	if len(ipAddrs) == 0 {
-		return connectInfo{}, errtype.NewConfigError(
+		return instanceInfo{}, errtype.NewConfigError(
 			"cannot connect to instance - it has no supported IP addresses",
 			inst.String(),
 		)
 	}
-	return connectInfo{ipAddrs: ipAddrs, uid: resp.InstanceUid}, nil
+	return instanceInfo{ipAddrs: ipAddrs, uid: resp.InstanceUid}, nil
 }
 
 var errInvalidPEM = errors.New("certificate is not a valid PEM")
@@ -92,15 +97,26 @@ func parseCert(cert string) (*x509.Certificate, error) {
 	return x509.ParseCertificate(b.Bytes)
 }
 
-// fetchEphemeralCert uses the AlloyDB Admin API's generateClientCertificate
-// method to create a signed TLS certificate that authorized to connect via the
-// AlloyDB instance's serverside proxy. The cert is valid for one hour.
-func fetchEphemeralCert(
+type clientCertificate struct {
+	// certChain is the client certificate chained with the intermediate
+	// cert(s) and CA cert.
+	certChain tls.Certificate
+	// ca cert is the CA certificate of the cluster
+	caCert *x509.Certificate
+	// expiry is the expiration of the client certificate.
+	expiry time.Time
+}
+
+// fetchClientCertificate uses the AlloyDB Admin API's
+// generateClientCertificate method to create a signed TLS certificate that
+// authorized to connect via the AlloyDB instance's serverside proxy. The cert
+// is valid for one hour.
+func fetchClientCertificate(
 	ctx context.Context,
 	cl *alloydbadmin.AlloyDBAdminClient,
 	inst InstanceURI,
 	key *rsa.PrivateKey,
-) (cc *certs, err error) {
+) (cc *clientCertificate, err error) {
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchEphemeralCert")
 	defer func() { end(err) }()
@@ -181,7 +197,7 @@ func fetchEphemeralCert(
 	// parsing costs as part of the TLS connection.
 	cert.Leaf = clientCert
 
-	return &certs{
+	return &clientCertificate{
 		certChain: cert,
 		caCert:    caCert,
 		expiry:    clientCert.NotAfter,
@@ -209,80 +225,83 @@ type refresher struct {
 	dialerID string
 }
 
-type refreshResult struct {
-	ipAddrs map[string]string
-	conf    *tls.Config
-	expiry  time.Time
+// ConnectionInfo holds all the data necessary to connect to an instance.
+type ConnectionInfo struct {
+	IPAddrs    map[string]string
+	ClientCert tls.Certificate
+	RootCAs    *x509.CertPool
+	Expiration time.Time
 }
 
-type certs struct {
-	certChain tls.Certificate   // TLS client certificate
-	caCert    *x509.Certificate // CA certificate
-	expiry    time.Time
-}
-
-func (r refresher) performRefresh(ctx context.Context, cn InstanceURI, k *rsa.PrivateKey) (res refreshResult, err error) {
+func (r refresher) performRefresh(
+	ctx context.Context, cn InstanceURI, k *rsa.PrivateKey,
+) (res ConnectionInfo, err error) {
 	var refreshEnd trace.EndSpanFunc
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.RefreshConnection",
 		trace.AddInstanceName(cn.String()),
 	)
 	defer func() {
-		go trace.RecordRefreshResult(context.Background(), cn.String(), r.dialerID, err)
+		go trace.RecordRefreshResult(
+			context.Background(), cn.String(), r.dialerID, err,
+		)
 		refreshEnd(err)
 	}()
 
 	type mdRes struct {
-		info connectInfo
+		info instanceInfo
 		err  error
 	}
 	mdCh := make(chan mdRes, 1)
 	go func() {
 		defer close(mdCh)
-		c, err := fetchMetadata(ctx, r.client, cn)
+		c, err := fetchInstanceInfo(ctx, r.client, cn)
 		mdCh <- mdRes{info: c, err: err}
 	}()
 
 	type certRes struct {
-		cc  *certs
+		cc  *clientCertificate
 		err error
 	}
 	certCh := make(chan certRes, 1)
 	go func() {
 		defer close(certCh)
-		cc, err := fetchEphemeralCert(ctx, r.client, cn, k)
+		cc, err := fetchClientCertificate(ctx, r.client, cn, k)
 		certCh <- certRes{cc: cc, err: err}
 	}()
 
-	var info connectInfo
+	var info instanceInfo
 	select {
 	case r := <-mdCh:
 		if r.err != nil {
-			return refreshResult{}, fmt.Errorf("failed to get instance IP address: %w", r.err)
+			return ConnectionInfo{}, fmt.Errorf(
+				"failed to get instance IP address: %w", r.err,
+			)
 		}
 		info = r.info
 	case <-ctx.Done():
-		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
+		return ConnectionInfo{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
-	var cc *certs
+	var cc *clientCertificate
 	select {
 	case r := <-certCh:
 		if r.err != nil {
-			return refreshResult{}, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
+			return ConnectionInfo{}, fmt.Errorf(
+				"fetch ephemeral cert failed: %w", r.err,
+			)
 		}
 		cc = r.cc
 	case <-ctx.Done():
-		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
+		return ConnectionInfo{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
 	caCerts := x509.NewCertPool()
 	caCerts.AddCert(cc.caCert)
-	c := &tls.Config{
-		Certificates: []tls.Certificate{cc.certChain},
-		RootCAs:      caCerts,
-		ServerName:   info.ipAddrs[PrivateIP],
-		MinVersion:   tls.VersionTLS13,
+	ci := ConnectionInfo{
+		IPAddrs:    info.ipAddrs,
+		ClientCert: cc.certChain,
+		RootCAs:    caCerts,
+		Expiration: cc.expiry,
 	}
-
-	return refreshResult{ipAddrs: info.ipAddrs, conf: c, expiry: cc.expiry}, nil
+	return ci, nil
 }

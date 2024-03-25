@@ -125,7 +125,7 @@ func (stubTokenSource) Token() (*oauth2.Token, error) {
 	return nil, nil
 }
 
-func TestConnectInfo(t *testing.T) {
+func TestConnectionInfo(t *testing.T) {
 	ctx := context.Background()
 
 	wantAddr := "0.0.0.0"
@@ -152,7 +152,7 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
 
-	i := NewInstance(
+	i := NewRefreshAheadCache(
 		testInstanceURI(),
 		nullLogger{},
 		c, RSAKey, 30*time.Second, "dialer-id",
@@ -161,11 +161,12 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("failed to create mock instance: %v", err)
 	}
 
-	gotAddr, _, err := i.ConnectInfo(ctx, PrivateIP)
+	ci, err := i.ConnectionInfo(ctx)
 	if err != nil {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
 
+	gotAddr := ci.IPAddrs[PrivateIP]
 	if gotAddr != wantAddr {
 		t.Fatalf(
 			"ConnectInfo returned unexpected IP address, want = %v, got = %v",
@@ -187,7 +188,7 @@ func TestConnectInfoErrors(t *testing.T) {
 	}
 
 	// Use a timeout that should fail instantly
-	i := NewInstance(
+	i := NewRefreshAheadCache(
 		testInstanceURI(),
 		nullLogger{},
 		c, RSAKey, 0, "dialer-id",
@@ -196,16 +197,10 @@ func TestConnectInfoErrors(t *testing.T) {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 
-	_, _, err = i.ConnectInfo(ctx, PrivateIP)
+	_, err = i.ConnectionInfo(ctx)
 	var wantErr *errtype.DialError
 	if !errors.As(err, &wantErr) {
 		t.Fatalf("when connect info fails, want = %T, got = %v", wantErr, err)
-	}
-
-	// when client asks for wrong IP address type
-	gotAddr, _, err := i.ConnectInfo(ctx, PublicIP)
-	if err == nil {
-		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", gotAddr)
 	}
 }
 
@@ -217,7 +212,7 @@ func TestClose(t *testing.T) {
 	}
 
 	// Set up an instance and then close it immediately
-	i := NewInstance(
+	i := NewRefreshAheadCache(
 		testInstanceURI(),
 		nullLogger{},
 		c, RSAKey, 30, "dialer-ider",
@@ -227,7 +222,7 @@ func TestClose(t *testing.T) {
 	}
 	i.Close()
 
-	_, _, err = i.ConnectInfo(ctx, PrivateIP)
+	_, err = i.ConnectionInfo(ctx)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
