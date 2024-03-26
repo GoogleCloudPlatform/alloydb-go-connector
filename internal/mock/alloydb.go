@@ -49,6 +49,13 @@ func WithPrivateIP(addr string) Option {
 	}
 }
 
+// WithPSC sets the PSC address to addr.
+func WithPSC(addr string) Option {
+	return func(f *FakeAlloyDBInstance) {
+		f.ipAddrs["PSC"] = addr
+	}
+}
+
 // WithServerName sets the name that server uses to identify itself in the TLS
 // handshake.
 func WithServerName(name string) Option {

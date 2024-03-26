@@ -129,9 +129,11 @@ func TestConnectionInfo(t *testing.T) {
 	ctx := context.Background()
 
 	wantAddr := "0.0.0.0"
+	wantPSC := "x.y.alloydb.goog"
 	inst := mock.NewFakeInstance(
 		"my-project", "my-region", "my-cluster", "my-instance",
 		mock.WithPrivateIP(wantAddr),
+		mock.WithPSC(wantPSC),
 	)
 	mc, url, cleanup := mock.HTTPClient(
 		mock.InstanceGetSuccess(inst, 1),
@@ -173,6 +175,20 @@ func TestConnectionInfo(t *testing.T) {
 			wantAddr, gotAddr,
 		)
 	}
+
+	ci, err = i.ConnectionInfo(ctx)
+	if err != nil {
+		t.Fatalf("failed to retrieve connect info: %v", err)
+	}
+
+	gotAddr = ci.IPAddrs[PSC]
+	if gotAddr != wantPSC {
+		t.Fatalf(
+			"ConnectInfo returned unexpected IP address, want = %v, got = %v",
+			wantPSC, gotAddr,
+		)
+	}
+
 }
 
 func testInstanceURI() InstanceURI {
