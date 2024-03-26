@@ -273,15 +273,15 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	var connectEnd trace.EndSpanFunc
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.Connect")
 	defer func() { connectEnd(err) }()
-	addr = net.JoinHostPort(addr, serverProxyPort)
+	hostPort := net.JoinHostPort(addr, serverProxyPort)
 	f := d.dialFunc
 	if cfg.dialFunc != nil {
 		f = cfg.dialFunc
 	}
-	d.logger.Debugf("[%v] Dialing %v", inst.String(), addr)
-	conn, err = f(ctx, "tcp", addr)
+	d.logger.Debugf("[%v] Dialing %v", inst.String(), hostPort)
+	conn, err = f(ctx, "tcp", hostPort)
 	if err != nil {
-		d.logger.Debugf("[%v] Dialing %v failed: %v", inst.String(), addr, err)
+		d.logger.Debugf("[%v] Dialing %v failed: %v", inst.String(), hostPort, err)
 		// refresh the instance info in case it caused the connection failure
 		i.ForceRefresh()
 		return nil, errtype.NewDialError("failed to dial", inst.String(), err)
@@ -295,11 +295,25 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		}
 	}
 
+	// TODO: use the correct addr as server name once PSC DNS is populated
+	// in all existing clusters. When that happens, delete this if statement.
+	serverName := addr
+	if cfg.ipType == alloydb.PSC {
+		serverName, ok = ci.IPAddrs[alloydb.PrivateIP]
+		if !ok {
+			// This shouldn't happen, but be prudent regardless.
+			return nil, errtype.NewDialError(
+				"failed to lookup server name", inst.String(), nil,
+			)
+		}
+	}
 	c := &tls.Config{
 		Certificates: []tls.Certificate{ci.ClientCert},
 		RootCAs:      ci.RootCAs,
-		// TODO: adjust this for public IP
-		ServerName: ci.IPAddrs[alloydb.PrivateIP],
+		// The PSC, private, and public IP all appear in the certificate as
+		// SAN. Use the server name that corresponds to the requested
+		// connection path.
+		ServerName: serverName,
 		MinVersion: tls.VersionTLS13,
 	}
 	tlsConn := tls.Client(conn, c)

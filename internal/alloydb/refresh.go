@@ -38,6 +38,8 @@ const (
 	PublicIP = "PUBLIC"
 	// PrivateIP is the value for private IP connections.
 	PrivateIP = "PRIVATE"
+	// PSC designates PSC-based connections.
+	PSC = "PSC"
 )
 
 type instanceInfo struct {
@@ -71,11 +73,14 @@ func fetchInstanceInfo(
 
 	// parse any ip addresses that might be used to connect
 	ipAddrs := make(map[string]string)
-	if resp.GetIpAddress() != "" {
-		ipAddrs[PrivateIP] = resp.GetIpAddress()
+	if addr := resp.GetIpAddress(); addr != "" {
+		ipAddrs[PrivateIP] = addr
 	}
-	if resp.GetPublicIpAddress() != "" {
-		ipAddrs[PublicIP] = resp.GetPublicIpAddress()
+	if addr := resp.GetPublicIpAddress(); addr != "" {
+		ipAddrs[PublicIP] = addr
+	}
+	if addr := resp.GetPscDnsName(); addr != "" {
+		ipAddrs[PSC] = addr
 	}
 
 	if len(ipAddrs) == 0 {

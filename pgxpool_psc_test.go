@@ -23,13 +23,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// connectPgxWithPublicIP establishes a connection to your database using
-// pgxpool and the AlloyDB Go Connector (aka alloydbconn.Dialer)
+// connectPgxWithPSC establishes a connection to your database using pgxpool
+// and the AlloyDB Go Connector (aka alloydbconn.Dialer)
 //
 // The function takes an instance URI, a username, a password, and a database
 // name. Usage looks like this:
 //
-//	pool, cleanup, err := connectPgxWithPublicIP(
+//	pool, cleanup, err := connectPgxWithPSC(
 //	  context.Background(),
 //	  "projects/myproject/locations/us-central1/clusters/mycluster/instances/myinstance",
 //	  "postgres",
@@ -39,7 +39,7 @@ import (
 //
 // In addition to a *pgxpool.Pool type, the function returns a cleanup function
 // that should be called when you're done with the database connection.
-func connectPgxWithPublicIP(
+func connectPgxWithPSC(
 	ctx context.Context, instURI, user, pass, dbname string,
 ) (*pgxpool.Pool, func() error, error) {
 	// First initialize the dialer. alloydbconn.NewDialer accepts additional
@@ -74,7 +74,7 @@ func connectPgxWithPublicIP(
 
 	// Tell pgx to use alloydbconn.Dialer to connect to the instance.
 	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
-		return d.Dial(ctx, instURI, alloydbconn.WithPublicIP())
+		return d.Dial(ctx, instURI, alloydbconn.WithPSC())
 	}
 
 	// Establish the connection.
