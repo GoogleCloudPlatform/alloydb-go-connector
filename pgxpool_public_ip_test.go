@@ -14,7 +14,6 @@
 
 package alloydbconn_test
 
-// [START alloydb_pgxpool_connect_connector_public_ip]
 import (
 	"context"
 	"fmt"
@@ -86,5 +85,3 @@ func connectPgxWithPublicIP(
 
 	return pool, cleanup, nil
 }
-
-// [END alloydb_pgxpool_connect_connector_public_ip]

@@ -85,5 +85,3 @@ func connectPgxWithPSC(
 
 	return pool, cleanup, nil
 }
-
-// [END alloydb_pgxpool_connect_connector_public_ip]
