@@ -14,7 +14,6 @@
 
 package alloydbconn_test
 
-// [START alloydb_databasesql_connect_connector_public_ip]
 import (
 	"database/sql"
 	"fmt"
@@ -73,5 +72,3 @@ func connectDatabaseSQLWithPublicIP(
 	)
 	return db, cleanup, err
 }
-
-// [END alloydb_databasesql_connect_connector_public_ip]

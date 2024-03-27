@@ -33,6 +33,10 @@ var (
 	// AlloyDB instance name, in the form of
 	// projects/PROJECT_ID/locations/REGION_ID/clusters/CLUSTER_ID/instances/INSTANCE_ID
 	alloydbInstanceName = os.Getenv("ALLOYDB_INSTANCE_NAME")
+	// alloydbPSCInstanceName is the name of an instance configured to use PSC.
+	// It is a separate instance because PSC does not currently allow PSA
+	// attachments in the same cluster.
+	alloydbPSCInstanceName = os.Getenv("ALLOYDB_PSC_INSTANCE_URI")
 	// Name of database user.
 	alloydbUser = os.Getenv("ALLOYDB_USER")
 	// Name of database IAM user.
@@ -51,6 +55,8 @@ func requireAlloyDBVars(t *testing.T) {
 	switch "" {
 	case alloydbInstanceName:
 		t.Fatal("'ALLOYDB_INSTANCE_NAME' env var not set")
+	case alloydbPSCInstanceName:
+		t.Fatal("'ALLOYDB_PSC_INSTANCE_URI' env var not set")
 	case alloydbUser:
 		t.Fatal("'ALLOYDB_USER' env var not set")
 	case alloydbIAMUser:
@@ -70,17 +76,34 @@ func TestPgxConnect(t *testing.T) {
 
 	tcs := []struct {
 		desc string
-		f    func(
-			ctx context.Context, instURI, user, pass, dbname string,
-		) (*pgxpool.Pool, func() error, error)
+		f    func(ctx context.Context) (*pgxpool.Pool, func() error, error)
 	}{
 		{
 			desc: "private IP",
-			f:    connectPgx,
+			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
+				return connectPgx(
+					ctx, alloydbInstanceName,
+					alloydbUser, alloydbPass, alloydbDB,
+				)
+			},
 		},
 		{
 			desc: "public IP",
-			f:    connectPgxWithPublicIP,
+			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
+				return connectPgxWithPublicIP(
+					ctx, alloydbInstanceName,
+					alloydbUser, alloydbPass, alloydbDB,
+				)
+			},
+		},
+		{
+			desc: "PSC",
+			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
+				return connectPgxWithPSC(
+					ctx, alloydbPSCInstanceName,
+					alloydbUser, alloydbPass, alloydbDB,
+				)
+			},
 		},
 	}
 
@@ -88,9 +111,7 @@ func TestPgxConnect(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			pool, cleanup, err := connectPgx(
-				ctx, alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
-			)
+			pool, cleanup, err := tc.f(ctx)
 			if err != nil {
 				_ = cleanup()
 				t.Fatal(err)
@@ -255,43 +276,6 @@ func TestAutoIAMAuthN(t *testing.T) {
 
 	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return d.Dial(ctx, alloydbInstanceName)
-	}
-
-	conn, connErr := pgx.ConnectConfig(ctx, config)
-	if connErr != nil {
-		t.Fatalf("failed to connect: %s", connErr)
-	}
-	defer conn.Close(ctx)
-
-	var tt time.Time
-	if err := conn.QueryRow(context.Background(), "SELECT NOW()").Scan(&tt); err != nil {
-		t.Fatal(err)
-	}
-	t.Log(tt)
-}
-
-func TestPublicIP(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	ctx := context.Background()
-
-	d, err := alloydbconn.NewDialer(ctx)
-	if err != nil {
-		t.Fatalf("failed to init Dialer: %v", err)
-	}
-
-	dsn := fmt.Sprintf(
-		"user=%s password=%s dbname=%s sslmode=disable",
-		alloydbUser, alloydbPass, alloydbDB,
-	)
-	config, err := pgx.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("failed to parse pgx config: %v", err)
-	}
-
-	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return d.Dial(ctx, alloydbInstanceName, alloydbconn.WithPublicIP())
 	}
 
 	conn, connErr := pgx.ConnectConfig(ctx, config)
