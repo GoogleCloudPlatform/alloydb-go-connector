@@ -224,7 +224,7 @@ func StartServerProxy(t *testing.T, inst FakeAlloyDBInstance) func() {
 						Leaf:        inst.serverCert,
 					},
 				},
-				ServerName: "FIXME", // FIXME: this will become the instance UID
+				ServerName: "127.0.0.1",
 				ClientAuth: tls.RequireAndVerifyClientCert,
 				ClientCAs:  pool,
 			})
