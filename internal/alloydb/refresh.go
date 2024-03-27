@@ -80,7 +80,7 @@ func fetchInstanceInfo(
 		ipAddrs[PublicIP] = addr
 	}
 	if addr := resp.GetPscDnsName(); addr != "" {
-		ipAddrs[PSC] = addr
+		ipAddrs[PSC] = strings.TrimRight(addr, ".")
 	}
 
 	if len(ipAddrs) == 0 {

@@ -41,7 +41,7 @@ func TestRefresh(t *testing.T) {
 		"my-project", "my-region", "my-cluster", "my-instance",
 		mock.WithPrivateIP(wantPrivateIP),
 		mock.WithPublicIP(wantPublicIP),
-		mock.WithPSC(wantPSC),
+		mock.WithPSC(wantPSC+"."), // match server response with trailing dot
 		mock.WithCertExpiry(wantExpiry),
 	)
 	mc, url, cleanup := mock.HTTPClient(
