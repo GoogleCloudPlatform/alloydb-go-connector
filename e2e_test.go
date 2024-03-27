@@ -97,7 +97,7 @@ func TestPgxConnect(t *testing.T) {
 			},
 		},
 		{
-			desc: "PSCC",
+			desc: "PSC",
 			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
 				return connectPgxWithPSC(
 					ctx, alloydbPSCInstanceName,
