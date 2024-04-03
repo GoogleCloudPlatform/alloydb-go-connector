@@ -106,6 +106,8 @@ d, err := alloydbconn.NewDialer(ctx)
 if err != nil {
     log.Fatalf("failed to initialize dialer: %v", err)
 }
+// Don't close the dialer until you're done with the database connection
+// e.g. at the end of your main function
 defer d.Close()
 
 // Tell the driver to use the AlloyDB Go Connector to create connections
