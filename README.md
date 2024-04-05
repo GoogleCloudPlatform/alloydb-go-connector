@@ -145,14 +145,25 @@ For a full list of customizable behavior, see alloydbconn.Option.
 
 ### Using DialOptions
 
-If you want to customize things about how the connection is created, such as
-connecting to AlloyDB over a public IP, use a `DialOption`:
+If you want to customize how the connection is created, use a DialOption.
+
+For example, to connect over public IP, use:
 
 ```go
 conn, err := d.Dial(
     ctx,
     "projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
     alloydbconn.WithPublicIP(),
+)
+```
+
+Or to use PSC, use:
+
+``` go
+conn, err := d.Dial(
+    ctx,
+    "projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
+    alloydbconn.WithPSC(),
 )
 ```
 
@@ -184,11 +195,11 @@ import (
     "database/sql"
 
     "cloud.google.com/go/alloydbconn"
-    "cloud.google.com/go/alloydbconn/driver/pgxv4"
+    "cloud.google.com/go/alloydbconn/driver/pgxv5"
 )
 
 func Connect() {
-    cleanup, err := pgxv4.RegisterDriver("alloydb")
+    cleanup, err := pgxv5.RegisterDriver("alloydb", alloydbconn.WithPublicIP())
     if err != nil {
         // ... handle error
     }

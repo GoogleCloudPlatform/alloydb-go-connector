@@ -49,6 +49,13 @@ func WithPrivateIP(addr string) Option {
 	}
 }
 
+// WithPSC sets the PSC address to addr.
+func WithPSC(addr string) Option {
+	return func(f *FakeAlloyDBInstance) {
+		f.ipAddrs["PSC"] = addr
+	}
+}
+
 // WithServerName sets the name that server uses to identify itself in the TLS
 // handshake.
 func WithServerName(name string) Option {
@@ -217,7 +224,7 @@ func StartServerProxy(t *testing.T, inst FakeAlloyDBInstance) func() {
 						Leaf:        inst.serverCert,
 					},
 				},
-				ServerName: "FIXME", // FIXME: this will become the instance UID
+				ServerName: "127.0.0.1",
 				ClientAuth: tls.RequireAndVerifyClientCert,
 				ClientCAs:  pool,
 			})
