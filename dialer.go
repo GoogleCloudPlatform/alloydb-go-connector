@@ -56,6 +56,9 @@ const (
 )
 
 var (
+	// ErrDialerClosed is used when a caller invokes Dial after closing the
+	// Dialer.
+	ErrDialerClosed = errors.New("alloydbconn: dialer is closed")
 	// versionString indicates the version of this library.
 	//go:embed version.txt
 	versionString string
@@ -90,6 +93,8 @@ type Dialer struct {
 	instances      map[alloydb.InstanceURI]connectionInfoCache
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
+	// closed reports if the dialer has been closed.
+	closed chan struct{}
 
 	client *alloydbadmin.AlloyDBAdminClient
 	logger debug.Logger
@@ -174,6 +179,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, err
 	}
 	d := &Dialer{
+		closed:         make(chan struct{}),
 		instances:      make(map[alloydb.InstanceURI]connectionInfoCache),
 		key:            cfg.rsaKey,
 		refreshTimeout: cfg.refreshTimeout,
@@ -194,6 +200,11 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 // instance argument must be the instance's URI, which is in the format
 // projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
+	select {
+	case <-d.closed:
+		return nil, ErrDialerClosed
+	default:
+	}
 	startTime := time.Now()
 	var endDial trace.EndSpanFunc
 	ctx, endDial = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn.Dial",
@@ -508,6 +519,14 @@ func (i *instrumentedConn) Close() error {
 // needed to connect. Additional dial operations may succeed until the information
 // expires.
 func (d *Dialer) Close() error {
+	// Check if Close has already been called.
+	select {
+	case <-d.closed:
+		return nil
+	default:
+	}
+	close(d.closed)
+
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	for _, i := range d.instances {

@@ -62,7 +62,7 @@ func connectDatabaseSQLWithPublicIP(
 	}
 
 	db, err := sql.Open(
-		"alloydb",
+		"alloydb-public",
 		fmt.Sprintf(
 			// sslmode is disabled, because the Dialer will handle the SSL
 			// connection instead.

@@ -34,6 +34,9 @@ import (
 	"google.golang.org/api/option"
 )
 
+const testInstanceURI = "projects/my-project/locations/my-region/" +
+	"clusters/my-cluster/instances/my-instance"
+
 type stubTokenSource struct{}
 
 func (stubTokenSource) Token() (*oauth2.Token, error) {
@@ -72,7 +75,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	// reset between connections.
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-			conn, err := d.Dial(ctx, "projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
+			conn, err := d.Dial(ctx, testInstanceURI)
 			if err != nil {
 				t.Fatalf("expected Dial to succeed, but got error: %v", err)
 			}
@@ -116,12 +119,12 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
 
-	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
+	_, err = d.Dial(ctx, testInstanceURI)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("when context is canceled, want = %T, got = %v", context.Canceled, err)
 	}
 
-	_, err = d.Dial(context.Background(), "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
+	_, err = d.Dial(context.Background(), testInstanceURI)
 	var wantErr2 *errtype.RefreshError
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when API call fails, want = %T, got = %v", wantErr2, err)
@@ -152,7 +155,7 @@ func TestDialWithUnavailableServerErrors(t *testing.T) {
 	}
 	d.client = c
 
-	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
+	_, err = d.Dial(ctx, testInstanceURI)
 	var wantErr2 *errtype.DialError
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when server proxy socket is unavailable, want = %T, got = %v", wantErr2, err)
@@ -191,7 +194,7 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 	}
 	d.client = c
 
-	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
+	_, err = d.Dial(ctx, testInstanceURI)
 	if !strings.Contains(err.Error(), "sentinel error") {
 		t.Fatalf("want = sentinel error, got = %v", err)
 	}
@@ -275,7 +278,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 	}
 
 	sentinel := errors.New("connect info failed")
-	inst := "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
+	inst := testInstanceURI
 	cn, _ := alloydb.ParseInstURI(inst)
 	spy := &spyConnectionInfoCache{
 		connectInfoCalls: []struct {
@@ -410,8 +413,32 @@ func TestDialerSupportsOneOffDialFunction(t *testing.T) {
 		return nil, sentinelErr
 	}
 
-	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance", WithOneOffDialFunc(f))
+	_, err = d.Dial(ctx, testInstanceURI, WithOneOffDialFunc(f))
 	if !errors.Is(err, sentinelErr) {
 		t.Fatal("one-off dial func was not called")
+	}
+}
+
+func TestDialerCloseReportsFriendlyError(t *testing.T) {
+	d, err := NewDialer(
+		context.Background(),
+		WithTokenSource(stubTokenSource{}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Close()
+
+	_, err = d.Dial(context.Background(), testInstanceURI)
+	if !errors.Is(err, ErrDialerClosed) {
+		t.Fatalf("want = %v, got = %v", ErrDialerClosed, err)
+	}
+
+	// Ensure multiple calls to close don't panic
+	_ = d.Close()
+
+	_, err = d.Dial(context.Background(), testInstanceURI)
+	if !errors.Is(err, ErrDialerClosed) {
+		t.Fatalf("want = %v, got = %v", ErrDialerClosed, err)
 	}
 }
