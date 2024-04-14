@@ -186,7 +186,7 @@ d, err := alloydbconn.NewDialer(
 Using the dialer directly will expose more configuration options. However, it is
 possible to use the dialer with the `database/sql` package.
 
-To use `database/sql`, use `pgxv4.RegisterDriver` with any necessary Dialer
+To use `database/sql`, use `pgxv5.RegisterDriver` with any necessary Dialer
 configuration. Note: the connection string must use the keyword/value format
 with host set to the instance connection name.
 
