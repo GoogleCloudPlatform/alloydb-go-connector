@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.9.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.8.0...v1.9.0) (2024-04-16)
+
+
+### Features
+
+* add support for PSC ([#537](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/537)) ([7b79b32](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/7b79b32b0d0dfb3a8302155c0571a093fe3583bf))
+
+
+### Bug Fixes
+
+* return a friendly error if the dialer is closed ([#538](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/538)) ([66d7bd0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/66d7bd0ce7f5a3a66eacacb594b9eb743fbbce86)), closes [#522](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/522)
+
 ## [1.8.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.7.0...v1.8.0) (2024-03-12)
 
 
