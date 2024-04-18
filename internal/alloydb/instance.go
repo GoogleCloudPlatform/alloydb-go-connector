@@ -127,9 +127,6 @@ func (r *refreshOperation) isValid() bool {
 // required information approximately 4 minutes before the previous certificate
 // expires (every ~56 minutes).
 type RefreshAheadCache struct {
-	// OpenConns is the number of open connections to the instance.
-	openConns uint64
-
 	instanceURI InstanceURI
 	logger      debug.Logger
 	key         *rsa.PrivateKey
@@ -183,11 +180,6 @@ func NewRefreshAheadCache(
 	i.next = i.cur
 	i.resultGuard.Unlock()
 	return i
-}
-
-// OpenConns reports the number of open connections.
-func (i *RefreshAheadCache) OpenConns() *uint64 {
-	return &i.openConns
 }
 
 // Close closes the instance; it stops the refresh cycle and prevents it from
