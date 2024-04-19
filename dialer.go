@@ -238,16 +238,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	ci, err := cache.ConnectionInfo(ctx)
 	if err != nil {
-		d.lock.Lock()
-		defer d.lock.Unlock()
-		d.logger.Debugf(
-			"[%v] Removing connection info from cache: %v",
-			inst.String(),
-			err,
-		)
-		// Stop all background refreshes
-		cache.Close()
-		delete(d.cache, inst)
+		d.removeCached(inst, cache, err)
 		endInfo(err)
 		return nil, err
 	}
@@ -264,21 +255,13 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		// Block on refreshed connection info
 		ci, err = cache.ConnectionInfo(ctx)
 		if err != nil {
-			d.lock.Lock()
-			defer d.lock.Unlock()
-			d.logger.Debugf(
-				"[%v] Removing connection info from cache: %v",
-				inst.String(),
-				err,
-			)
-			// Stop all background refreshes
-			cache.Close()
-			delete(d.cache, inst)
+			d.removeCached(inst, cache, err)
 			return nil, err
 		}
 	}
 	addr, ok := ci.IPAddrs[cfg.ipType]
 	if !ok {
+		d.removeCached(inst, cache, err)
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", cfg.ipType),
 			inst.String(),
@@ -360,6 +343,22 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		n := atomic.AddUint64(&cache.openConns, ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
 	}), nil
+}
+
+// removeCached stops all background refreshes and deletes the connection
+// info cache from the map of caches.
+func (d *Dialer) removeCached(
+	i alloydb.InstanceURI, c connectionInfoCache, err error,
+) {
+	d.logger.Debugf(
+		"[%v] Removing connection info from cache: %v",
+		i.String(),
+		err,
+	)
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	c.Close()
+	delete(d.cache, i)
 }
 
 func invalidClientCert(
