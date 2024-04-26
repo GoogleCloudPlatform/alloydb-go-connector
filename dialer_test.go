@@ -233,41 +233,67 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 
 	// Populate instance map with connection info cache that will always fail.
 	// This allows the test to verify the error case path invoking close.
-	badInstanceName := "/projects/bad/locations/bad/clusters/bad/instances/bad"
-	_, _ = d.Dial(context.Background(), badInstanceName)
-	// The internal cache is not revealed publicly, so check the internal cache
-	// to confirm the instance is no longer present.
-	badInst, _ := alloydb.ParseInstURI(badInstanceName)
+	badInstanceName := "projects/bad/locations/bad/clusters/bad/instances/bad"
+	tcs := []struct {
+		desc string
+		uri  string
+		resp connectionInfoResp
+		opts []DialOption
+	}{
+		{
+			desc: "dialing a bad instance URI",
+			uri:  badInstanceName,
+			resp: connectionInfoResp{
+				err: errors.New("connect info failed"),
+			},
+		},
+		{
+			desc: "specifying an invalid IP type",
+			uri:  testInstanceURI,
+			resp: connectionInfoResp{
+				info: alloydb.ConnectionInfo{
+					IPAddrs: map[string]string{
+						// no public IP
+						alloydb.PrivateIP: "10.0.0.1",
+					},
+					Expiration: time.Now().Add(time.Hour),
+				},
+			},
+			opts: []DialOption{WithPublicIP()},
+		},
+	}
 
-	spy := &spyConnectionInfoCache{
-		connectInfoCalls: []struct {
-			info alloydb.ConnectionInfo
-			err  error
-		}{{
-			err: errors.New("connect info failed"),
-		}},
-	}
-	d.cache[badInst] = monitoredCache{
-		connectionInfoCache: spy,
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			// Manually populate the internal cache with a spy
+			inst, _ := alloydb.ParseInstURI(tc.uri)
+			spy := &spyConnectionInfoCache{
+				connectInfoCalls: []connectionInfoResp{tc.resp},
+			}
+			d.cache[inst] = monitoredCache{
+				connectionInfoCache: spy,
+			}
+
+			_, err = d.Dial(context.Background(), tc.uri, tc.opts...)
+			if err == nil {
+				t.Fatal("expected Dial to return error")
+			}
+			// Verify that the connection info cache was closed (to prevent
+			// further failed refresh operations)
+			if got, want := spy.CloseWasCalled(), true; got != want {
+				t.Fatal("Close was not called")
+			}
+
+			// Now verify that bad connection name has been deleted from map.
+			d.lock.RLock()
+			_, ok := d.cache[inst]
+			d.lock.RUnlock()
+			if ok {
+				t.Fatal("connection info was not removed from cache")
+			}
+		})
 	}
 
-	_, err = d.Dial(context.Background(), badInstanceName)
-	if err == nil {
-		t.Fatal("expected Dial to return error")
-	}
-	// Verify that the connection info cache was closed (to prevent
-	// further failed refresh operations)
-	if got, want := spy.CloseWasCalled(), true; got != want {
-		t.Fatal("Close was not called")
-	}
-
-	// Now verify that bad connection name has been deleted from map.
-	d.lock.RLock()
-	_, ok := d.cache[badInst]
-	d.lock.RUnlock()
-	if ok {
-		t.Fatal("bad instance was not removed from the cache")
-	}
 }
 
 func TestDialRefreshesExpiredCertificates(t *testing.T) {
@@ -283,10 +309,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 	inst := testInstanceURI
 	cn, _ := alloydb.ParseInstURI(inst)
 	spy := &spyConnectionInfoCache{
-		connectInfoCalls: []struct {
-			info alloydb.ConnectionInfo
-			err  error
-		}{
+		connectInfoCalls: []connectionInfoResp{
 			// First call returns expired certificate
 			{
 				info: alloydb.ConnectionInfo{
@@ -328,14 +351,16 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 	}
 }
 
+type connectionInfoResp struct {
+	info alloydb.ConnectionInfo
+	err  error
+}
+
 type spyConnectionInfoCache struct {
-	mu               sync.Mutex
-	connectInfoIndex int
-	connectInfoCalls []struct {
-		info alloydb.ConnectionInfo
-		err  error
-	}
-	closeWasCalled        bool
+	mu                    sync.Mutex
+	connectInfoIndex      int
+	connectInfoCalls      []connectionInfoResp
+	closed                bool
 	forceRefreshWasCalled bool
 	// embed interface to avoid having to implement irrelevant methods
 	connectionInfoCache
@@ -358,14 +383,14 @@ func (s *spyConnectionInfoCache) ForceRefresh() {
 func (s *spyConnectionInfoCache) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.closeWasCalled = true
+	s.closed = true
 	return nil
 }
 
 func (s *spyConnectionInfoCache) CloseWasCalled() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.closeWasCalled
+	return s.closed
 }
 
 func (s *spyConnectionInfoCache) ForceRefreshWasCalled() bool {
