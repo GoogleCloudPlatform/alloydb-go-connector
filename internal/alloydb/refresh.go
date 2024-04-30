@@ -232,6 +232,7 @@ type refresher struct {
 
 // ConnectionInfo holds all the data necessary to connect to an instance.
 type ConnectionInfo struct {
+	Instance   InstanceURI
 	IPAddrs    map[string]string
 	ClientCert tls.Certificate
 	RootCAs    *x509.CertPool
@@ -239,15 +240,15 @@ type ConnectionInfo struct {
 }
 
 func (r refresher) performRefresh(
-	ctx context.Context, cn InstanceURI, k *rsa.PrivateKey,
+	ctx context.Context, i InstanceURI, k *rsa.PrivateKey,
 ) (res ConnectionInfo, err error) {
 	var refreshEnd trace.EndSpanFunc
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.RefreshConnection",
-		trace.AddInstanceName(cn.String()),
+		trace.AddInstanceName(i.String()),
 	)
 	defer func() {
 		go trace.RecordRefreshResult(
-			context.Background(), cn.String(), r.dialerID, err,
+			context.Background(), i.String(), r.dialerID, err,
 		)
 		refreshEnd(err)
 	}()
@@ -259,7 +260,7 @@ func (r refresher) performRefresh(
 	mdCh := make(chan mdRes, 1)
 	go func() {
 		defer close(mdCh)
-		c, err := fetchInstanceInfo(ctx, r.client, cn)
+		c, err := fetchInstanceInfo(ctx, r.client, i)
 		mdCh <- mdRes{info: c, err: err}
 	}()
 
@@ -270,7 +271,7 @@ func (r refresher) performRefresh(
 	certCh := make(chan certRes, 1)
 	go func() {
 		defer close(certCh)
-		cc, err := fetchClientCertificate(ctx, r.client, cn, k)
+		cc, err := fetchClientCertificate(ctx, r.client, i, k)
 		certCh <- certRes{cc: cc, err: err}
 	}()
 
@@ -303,6 +304,7 @@ func (r refresher) performRefresh(
 	caCerts := x509.NewCertPool()
 	caCerts.AddCert(cc.caCert)
 	ci := ConnectionInfo{
+		Instance:   i,
 		IPAddrs:    info.ipAddrs,
 		ClientCert: cc.certChain,
 		RootCAs:    caCerts,
