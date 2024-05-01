@@ -101,6 +101,13 @@ type Dialer struct {
 	// closed reports if the dialer has been closed.
 	closed chan struct{}
 
+	// lazyRefresh determines what kind of caching is used for ephemeral
+	// certificates. When lazyRefresh is true, the dialer will use a lazy
+	// cache, refresh certificates only when a connection attempt needs a fresh
+	// certificate. Otherwise, a refresh ahead cache will be used. The refresh
+	// ahead cache assumes a background goroutine may run consistently.
+	lazyRefresh bool
+
 	client *alloydbadmin.AlloyDBAdminClient
 	logger debug.Logger
 
@@ -186,6 +193,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	d := &Dialer{
 		closed:         make(chan struct{}),
 		cache:          make(map[alloydb.InstanceURI]monitoredCache),
+		lazyRefresh:    cfg.lazyRefresh,
 		key:            cfg.rsaKey,
 		refreshTimeout: cfg.refreshTimeout,
 		client:         client,
@@ -551,18 +559,27 @@ func (d *Dialer) connectionInfoCache(
 		// Recheck to ensure instance wasn't created between locks
 		c, ok = d.cache[uri]
 		if !ok {
-			c = monitoredCache{
-				connectionInfoCache: alloydb.NewRefreshAheadCache(
-					uri,
-					d.logger,
-					d.client, d.key,
-					d.refreshTimeout, d.dialerID,
-				),
-			}
 			d.logger.Debugf(
 				"[%v] Connection info added to cache",
 				uri.String(),
 			)
+			var cache connectionInfoCache
+			if d.lazyRefresh {
+				cache = alloydb.NewLazyRefreshCache(
+					uri,
+					d.logger,
+					d.client, d.key,
+					d.refreshTimeout, d.dialerID,
+				)
+			} else {
+				cache = alloydb.NewRefreshAheadCache(
+					uri,
+					d.logger,
+					d.client, d.key,
+					d.refreshTimeout, d.dialerID,
+				)
+			}
+			c = monitoredCache{connectionInfoCache: cache}
 			d.cache[uri] = c
 		}
 	}
