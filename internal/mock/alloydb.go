@@ -95,6 +95,17 @@ type FakeAlloyDBInstance struct {
 	serverKey  *rsa.PrivateKey
 }
 
+// String returns the URI of the instance.
+func (f FakeAlloyDBInstance) String() string {
+	return fmt.Sprintf(
+		"projects/%v/locations/%v/clusters/%v/instances/%v",
+		f.project,
+		f.region,
+		f.cluster,
+		f.name,
+	)
+}
+
 func mustGenerateKey() *rsa.PrivateKey {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -205,22 +216,24 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 	return f
 }
 
-func (i *FakeAlloyDBInstance) GeneratePEMCertificateChain(
+// GeneratePEMCertificateChain produces the certificate chain including an
+// ephemeral client certificate.
+func (f *FakeAlloyDBInstance) GeneratePEMCertificateChain(
 	pub *rsa.PublicKey,
 ) ([]string, error) {
 	template := &x509.Certificate{
 		PublicKey:    pub,
 		SerialNumber: &big.Int{},
-		Issuer:       i.intermedCert.Subject,
+		Issuer:       f.intermedCert.Subject,
 		NotBefore:    time.Now(),
-		NotAfter:     i.certExpiry,
+		NotAfter:     f.certExpiry,
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}
 
 	cert, err := x509.CreateCertificate(
-		rand.Reader, template, i.intermedCert,
-		template.PublicKey, i.intermedKey,
+		rand.Reader, template, f.intermedCert,
+		template.PublicKey, f.intermedKey,
 	)
 	if err != nil {
 		return nil, err
@@ -231,11 +244,11 @@ func (i *FakeAlloyDBInstance) GeneratePEMCertificateChain(
 
 	instancePEM := &bytes.Buffer{}
 	pem.Encode(
-		instancePEM, &pem.Block{Type: "CERTIFICATE", Bytes: i.intermedCert.Raw},
+		instancePEM, &pem.Block{Type: "CERTIFICATE", Bytes: f.intermedCert.Raw},
 	)
 
 	caPEM := &bytes.Buffer{}
-	pem.Encode(caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: i.rootCACert.Raw})
+	pem.Encode(caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: f.rootCACert.Raw})
 
 	return []string{certPEM.String(), instancePEM.String(), caPEM.String()}, nil
 }

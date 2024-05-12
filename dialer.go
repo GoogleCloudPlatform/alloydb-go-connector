@@ -108,6 +108,8 @@ type Dialer struct {
 	// ahead cache assumes a background goroutine may run consistently.
 	lazyRefresh bool
 
+	staticConnInfo io.Reader
+
 	client *alloydbadmin.AlloyDBAdminClient
 	logger debug.Logger
 
@@ -194,6 +196,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		closed:         make(chan struct{}),
 		cache:          make(map[alloydb.InstanceURI]monitoredCache),
 		lazyRefresh:    cfg.lazyRefresh,
+		staticConnInfo: cfg.staticConnInfo,
 		key:            cfg.rsaKey,
 		refreshTimeout: cfg.refreshTimeout,
 		client:         client,
@@ -563,14 +566,25 @@ func (d *Dialer) connectionInfoCache(
 				uri.String(),
 			)
 			var cache connectionInfoCache
-			if d.lazyRefresh {
+			switch {
+			case d.lazyRefresh:
 				cache = alloydb.NewLazyRefreshCache(
 					uri,
 					d.logger,
 					d.client, d.key,
 					d.refreshTimeout, d.dialerID,
 				)
-			} else {
+			case d.staticConnInfo != nil:
+				var err error
+				cache, err = alloydb.NewStaticConnectionInfoCache(
+					uri,
+					d.logger,
+					d.staticConnInfo,
+				)
+				if err != nil {
+					return monitoredCache{}, err
+				}
+			default:
 				cache = alloydb.NewRefreshAheadCache(
 					uri,
 					d.logger,

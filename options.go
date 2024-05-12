@@ -17,6 +17,7 @@ package alloydbconn
 import (
 	"context"
 	"crypto/rsa"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -47,6 +48,8 @@ type dialerConfig struct {
 	useIAMAuthN    bool
 	logger         debug.Logger
 	lazyRefresh    bool
+
+	staticConnInfo io.Reader
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -185,6 +188,36 @@ func WithDebugLogger(l debug.Logger) Option {
 func WithLazyRefresh() Option {
 	return func(d *dialerConfig) {
 		d.lazyRefresh = true
+	}
+}
+
+// WithStaticConnectionInfo specifies an io.Reader from which to read static
+// connection info. This is a *dev-only* option and should not be used in
+// production as it will result in failed connections after the client
+// certificate expires. It is also subject to breaking changes in the format.
+// NOTE: The static connection info is not refreshed by the dialer. The JSON
+// format supports multiple instances, regardless of cluster.
+//
+// The reader should hold JSON with the following format:
+//
+//	{
+//	    "publicKey": "<PEM Encoded public RSA key>",
+//	    "privateKey": "<PEM Encoded private RSA key>",
+//	    "projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>": {
+//	        "ipAddress": "<PSA-based private IP address>",
+//	        "publicIpAddress": "<public IP address>",
+//	        "pscInstanceConfig": {
+//	            "pscDnsName": "<PSC DNS name>"
+//	        },
+//	        "pemCertificateChain": [
+//	            "<client cert>", "<intermediate cert>", "<CA cert>"
+//	        ],
+//	        "caCert": "<CA cert>"
+//	    }
+//	}
+func WithStaticConnectionInfo(r io.Reader) Option {
+	return func(d *dialerConfig) {
+		d.staticConnInfo = r
 	}
 }
 

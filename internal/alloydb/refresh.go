@@ -149,13 +149,25 @@ func fetchClientCertificate(
 		)
 	}
 
-	certPEMBlock := []byte(strings.Join(resp.PemCertificateChain, "\n"))
 	keyPEMBlock := &pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(key),
 	}
+	keyPEM := pem.EncodeToMemory(keyPEMBlock)
 
-	cert, err := tls.X509KeyPair(certPEMBlock, pem.EncodeToMemory(keyPEMBlock))
+	return newClientCertificate(
+		inst, keyPEM, resp.PemCertificateChain, resp.CaCert,
+	)
+}
+
+func newClientCertificate(
+	inst InstanceURI,
+	keyPEM []byte,
+	chain []string,
+	caCertRaw string,
+) (cc *clientCertificate, err error) {
+	certPEMBlock := []byte(strings.Join(chain, "\n"))
+	cert, err := tls.X509KeyPair(certPEMBlock, keyPEM)
 	if err != nil {
 		return nil, errtype.NewRefreshError(
 			"create ephemeral cert failed",
@@ -164,7 +176,7 @@ func fetchClientCertificate(
 		)
 	}
 
-	caCertPEMBlock, _ := pem.Decode([]byte(resp.CaCert))
+	caCertPEMBlock, _ := pem.Decode([]byte(caCertRaw))
 	if caCertPEMBlock == nil {
 		return nil, errtype.NewRefreshError(
 			"create ephemeral cert failed",
@@ -182,7 +194,7 @@ func fetchClientCertificate(
 	}
 
 	// Extract expiry from client certificate.
-	clientCertPEMBlock, _ := pem.Decode([]byte(resp.PemCertificateChain[0]))
+	clientCertPEMBlock, _ := pem.Decode([]byte(chain[0]))
 	if clientCertPEMBlock == nil {
 		return nil, errtype.NewRefreshError(
 			"create ephemeral cert failed",
