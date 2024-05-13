@@ -9,7 +9,7 @@ require (
 	github.com/jackc/pgx/v5 v5.5.5
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.25.0
-	golang.org/x/oauth2 v0.19.0
+	golang.org/x/oauth2 v0.20.0
 	golang.org/x/time v0.5.0
 	google.golang.org/api v0.172.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240415180920-8c6c420018be
@@ -19,8 +19,7 @@ require (
 
 require (
 	cloud.google.com/go v0.112.0 // indirect
-	cloud.google.com/go/compute v1.24.0 // indirect
-	cloud.google.com/go/compute/metadata v0.2.3 // indirect
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	cloud.google.com/go/longrunning v0.5.5 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
