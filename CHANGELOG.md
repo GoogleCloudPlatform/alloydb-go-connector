@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.10.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.9.0...v1.10.0) (2024-05-14)
+
+
+### Features
+
+* add context debug logger ([#573](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/573)) ([375cca3](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/375cca3af2d4a074fea7597e0d6be35e72a2976d))
+* add support for a lazy refresh ([#565](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/565)) ([75fb63e](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/75fb63e9b9a77427c58be8e57705eb8cdaf91e41)), closes [#549](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/549)
+* invalidate cache on IP type errors ([#555](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/555)) ([154ab5f](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/154ab5f7197eca3e57dceb5c337d0beb187e2496)), closes [#554](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/554)
+* support static connection info ([#572](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/572)) ([af8b703](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/af8b7039e288a4d10b6865df0bf5e45985f5ed5c))
+
 ## [1.9.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.8.0...v1.9.0) (2024-04-16)
 
 
