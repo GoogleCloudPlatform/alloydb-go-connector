@@ -312,7 +312,7 @@ func main() {
 
 The Go Connector supports optional debug logging to help diagnose problems with
 the background certificate refresh. To enable it, provide a logger that
-implements the `debug.Logger` interface when initializing the Dialer.
+implements the `debug.ContextLogger` interface when initializing the Dialer.
 
 For example:
 
@@ -326,7 +326,7 @@ import (
 
 type myLogger struct{}
 
-func (l *myLogger) Debugf(format string, args ...interface{}) {
+func (l *myLogger) Debugf(ctx context.Context, format string, args ...interface{}) {
     // Log as you like here
 }
 
@@ -335,7 +335,7 @@ func connect() {
 
     d, err := NewDialer(
         context.Background(),
-        alloydbconn.WithDebugLogger(l),
+        alloydbconn.WithContextDebugLogger(l),
     )
     // use dialer as usual...
 }

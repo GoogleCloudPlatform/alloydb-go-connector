@@ -137,7 +137,7 @@ func (r *refreshOperation) isValid() bool {
 // expires (every ~56 minutes).
 type RefreshAheadCache struct {
 	instanceURI InstanceURI
-	logger      debug.Logger
+	logger      debug.ContextLogger
 	key         *rsa.PrivateKey
 	// refreshTimeout sets the maximum duration a refresh cycle can run
 	// for.
@@ -165,7 +165,7 @@ type RefreshAheadCache struct {
 // caches connection info.
 func NewRefreshAheadCache(
 	instance InstanceURI,
-	l debug.Logger,
+	l debug.ContextLogger,
 	client *alloydbadmin.AlloyDBAdminClient,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
@@ -265,6 +265,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		// instance has been closed, don't schedule anything
 		if err := i.ctx.Err(); err != nil {
 			i.logger.Debugf(
+				context.Background(),
 				"[%v] Instance is closed, stopping refresh operations",
 				i.instanceURI.String(),
 			)
@@ -273,6 +274,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			return
 		}
 		i.logger.Debugf(
+			context.Background(),
 			"[%v] Connection info refresh operation started",
 			i.instanceURI.String(),
 		)
@@ -288,6 +290,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 				nil,
 			)
 			i.logger.Debugf(
+				ctx,
 				"[%v] Connection info refresh operation failed, err = %v",
 				i.instanceURI.String(),
 				r.err,
@@ -295,10 +298,12 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		} else {
 			r.result, r.err = i.r.performRefresh(i.ctx, i.instanceURI, i.key)
 			i.logger.Debugf(
+				ctx,
 				"[%v] Connection info refresh operation complete",
 				i.instanceURI.String(),
 			)
 			i.logger.Debugf(
+				ctx,
 				"[%v] Current certificate expiration = %v",
 				i.instanceURI.String(),
 				r.result.Expiration.UTC().Format(time.RFC3339),
@@ -315,6 +320,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		// if failed, scheduled the next refresh immediately
 		if r.err != nil {
 			i.logger.Debugf(
+				ctx,
 				"[%v] Connection info refresh operation scheduled immediately",
 				i.instanceURI.String(),
 			)
@@ -335,6 +341,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		i.cur = r
 		t := refreshDuration(time.Now(), i.cur.result.Expiration)
 		i.logger.Debugf(
+			ctx,
 			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
 			i.instanceURI.String(),
 			time.Now().Add(t).UTC().Format(time.RFC3339),

@@ -78,7 +78,7 @@ func (s *staticData) UnmarshalJSON(data []byte) error {
 
 // StaticConnectionInfoCache provides connection info that is never refreshed.
 type StaticConnectionInfoCache struct {
-	logger debug.Logger
+	logger debug.ContextLogger
 	info   ConnectionInfo
 }
 
@@ -86,7 +86,7 @@ type StaticConnectionInfoCache struct {
 // always return the predefined connection info within the provided io.Reader
 func NewStaticConnectionInfoCache(
 	inst InstanceURI,
-	l debug.Logger,
+	l debug.ContextLogger,
 	r io.Reader,
 ) (*StaticConnectionInfoCache, error) {
 	data, err := io.ReadAll(r)
