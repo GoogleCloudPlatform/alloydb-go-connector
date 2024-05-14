@@ -111,7 +111,7 @@ type Dialer struct {
 	staticConnInfo io.Reader
 
 	client *alloydbadmin.AlloyDBAdminClient
-	logger debug.Logger
+	logger debug.ContextLogger
 
 	// defaultDialCfg holds the constructor level DialOptions, so that it can
 	// be copied and mutated by the Dial function.
@@ -134,7 +134,7 @@ type Dialer struct {
 
 type nullLogger struct{}
 
-func (nullLogger) Debugf(string, ...interface{}) {}
+func (nullLogger) Debugf(context.Context, string, ...interface{}) {}
 
 // NewDialer creates a new Dialer.
 //
@@ -242,14 +242,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.InstanceInfo")
-	cache, err := d.connectionInfoCache(inst)
+	cache, err := d.connectionInfoCache(ctx, inst)
 	if err != nil {
 		endInfo(err)
 		return nil, err
 	}
 	ci, err := cache.ConnectionInfo(ctx)
 	if err != nil {
-		d.removeCached(inst, cache, err)
+		d.removeCached(ctx, inst, cache, err)
 		endInfo(err)
 		return nil, err
 	}
@@ -260,19 +260,19 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	// The TLS handshake will not fail on an expired client certificate. It's
 	// not until the first read where the client cert error will be surfaced.
 	// So check that the certificate is valid before proceeding.
-	if invalidClientCert(inst, d.logger, ci.Expiration) {
-		d.logger.Debugf("[%v] Refreshing certificate now", inst.String())
+	if invalidClientCert(ctx, inst, d.logger, ci.Expiration) {
+		d.logger.Debugf(ctx, "[%v] Refreshing certificate now", inst.String())
 		cache.ForceRefresh()
 		// Block on refreshed connection info
 		ci, err = cache.ConnectionInfo(ctx)
 		if err != nil {
-			d.removeCached(inst, cache, err)
+			d.removeCached(ctx, inst, cache, err)
 			return nil, err
 		}
 	}
 	addr, ok := ci.IPAddrs[cfg.ipType]
 	if !ok {
-		d.removeCached(inst, cache, err)
+		d.removeCached(ctx, inst, cache, err)
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", cfg.ipType),
 			inst.String(),
@@ -288,10 +288,10 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if cfg.dialFunc != nil {
 		f = cfg.dialFunc
 	}
-	d.logger.Debugf("[%v] Dialing %v", inst.String(), hostPort)
+	d.logger.Debugf(ctx, "[%v] Dialing %v", inst.String(), hostPort)
 	conn, err = f(ctx, "tcp", hostPort)
 	if err != nil {
-		d.logger.Debugf("[%v] Dialing %v failed: %v", inst.String(), hostPort, err)
+		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", inst.String(), hostPort, err)
 		// refresh the instance info in case it caused the connection failure
 		cache.ForceRefresh()
 		return nil, errtype.NewDialError("failed to dial", inst.String(), err)
@@ -328,7 +328,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	tlsConn := tls.Client(conn, c)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		d.logger.Debugf("[%v] TLS handshake failed: %v", inst.String(), err)
+		d.logger.Debugf(ctx, "[%v] TLS handshake failed: %v", inst.String(), err)
 		// refresh the instance info in case it caused the handshake failure
 		cache.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
@@ -359,9 +359,11 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 // removeCached stops all background refreshes and deletes the connection
 // info cache from the map of caches.
 func (d *Dialer) removeCached(
+	ctx context.Context,
 	i alloydb.InstanceURI, c connectionInfoCache, err error,
 ) {
 	d.logger.Debugf(
+		ctx,
 		"[%v] Removing connection info from cache: %v",
 		i.String(),
 		err,
@@ -373,18 +375,20 @@ func (d *Dialer) removeCached(
 }
 
 func invalidClientCert(
-	inst alloydb.InstanceURI, l debug.Logger, expiration time.Time,
+	ctx context.Context,
+	inst alloydb.InstanceURI, l debug.ContextLogger, expiration time.Time,
 ) bool {
 	now := time.Now().UTC()
 	notAfter := expiration.UTC()
 	invalid := now.After(notAfter)
 	l.Debugf(
+		ctx,
 		"[%v] Now = %v, Current cert expiration = %v",
 		inst.String(),
 		now.Format(time.RFC3339),
 		notAfter.Format(time.RFC3339),
 	)
-	l.Debugf("[%v] Cert is valid = %v", inst.String(), !invalid)
+	l.Debugf(ctx, "[%v] Cert is valid = %v", inst.String(), !invalid)
 	return invalid
 }
 
@@ -550,7 +554,7 @@ func (d *Dialer) Close() error {
 }
 
 func (d *Dialer) connectionInfoCache(
-	uri alloydb.InstanceURI,
+	ctx context.Context, uri alloydb.InstanceURI,
 ) (monitoredCache, error) {
 	d.lock.RLock()
 	c, ok := d.cache[uri]
@@ -562,6 +566,7 @@ func (d *Dialer) connectionInfoCache(
 		c, ok = d.cache[uri]
 		if !ok {
 			d.logger.Debugf(
+				ctx,
 				"[%v] Connection info added to cache",
 				uri.String(),
 			)

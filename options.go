@@ -46,7 +46,7 @@ type dialerConfig struct {
 	tokenSource    oauth2.TokenSource
 	userAgents     []string
 	useIAMAuthN    bool
-	logger         debug.Logger
+	logger         debug.ContextLogger
 	lazyRefresh    bool
 
 	staticConnInfo io.Reader
@@ -170,9 +170,29 @@ func WithIAMAuthN() Option {
 	}
 }
 
+type debugLoggerWithoutContext struct {
+	logger debug.Logger
+}
+
+// Debugf implements debug.ContextLogger.
+func (d *debugLoggerWithoutContext) Debugf(_ context.Context, format string, args ...interface{}) {
+	d.logger.Debugf(format, args...)
+}
+
+var _ debug.ContextLogger = new(debugLoggerWithoutContext)
+
 // WithDebugLogger configures a debug logger for reporting on internal
 // operations. By default the debug logger is disabled.
+// Prefer WithContextLogger.
 func WithDebugLogger(l debug.Logger) Option {
+	return func(d *dialerConfig) {
+		d.logger = &debugLoggerWithoutContext{l}
+	}
+}
+
+// WithContextLogger configures a debug lgoger for reporting on internal
+// operations. By default the debug logger is disabled.
+func WithContextLogger(l debug.ContextLogger) Option {
 	return func(d *dialerConfig) {
 		d.logger = l
 	}
