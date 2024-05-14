@@ -15,6 +15,7 @@
 package mock
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -22,6 +23,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/binary"
+	"encoding/pem"
 	"fmt"
 	"math/big"
 	"net"
@@ -91,6 +93,17 @@ type FakeAlloyDBInstance struct {
 
 	serverCert *x509.Certificate
 	serverKey  *rsa.PrivateKey
+}
+
+// String returns the URI of the instance.
+func (f FakeAlloyDBInstance) String() string {
+	return fmt.Sprintf(
+		"projects/%v/locations/%v/clusters/%v/instances/%v",
+		f.project,
+		f.region,
+		f.cluster,
+		f.name,
+	)
 }
 
 func mustGenerateKey() *rsa.PrivateKey {
@@ -201,6 +214,43 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 	f.serverKey = serverKey
 
 	return f
+}
+
+// GeneratePEMCertificateChain produces the certificate chain including an
+// ephemeral client certificate.
+func (f *FakeAlloyDBInstance) GeneratePEMCertificateChain(
+	pub *rsa.PublicKey,
+) ([]string, error) {
+	template := &x509.Certificate{
+		PublicKey:    pub,
+		SerialNumber: &big.Int{},
+		Issuer:       f.intermedCert.Subject,
+		NotBefore:    time.Now(),
+		NotAfter:     f.certExpiry,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+
+	cert, err := x509.CreateCertificate(
+		rand.Reader, template, f.intermedCert,
+		template.PublicKey, f.intermedKey,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	certPEM := &bytes.Buffer{}
+	pem.Encode(certPEM, &pem.Block{Type: "CERTIFICATE", Bytes: cert})
+
+	instancePEM := &bytes.Buffer{}
+	pem.Encode(
+		instancePEM, &pem.Block{Type: "CERTIFICATE", Bytes: f.intermedCert.Raw},
+	)
+
+	caPEM := &bytes.Buffer{}
+	pem.Encode(caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: f.rootCACert.Raw})
+
+	return []string{certPEM.String(), instancePEM.String(), caPEM.String()}, nil
 }
 
 // StartServerProxy starts a fake server proxy and listens on the provided port

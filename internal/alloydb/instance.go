@@ -62,6 +62,15 @@ type InstanceURI struct {
 	name    string
 }
 
+// URI returns the full URI specifying an instance.
+func (i *InstanceURI) URI() string {
+	return fmt.Sprintf(
+		"projects/%s/locations/%s/clusters/%s/instances/%s",
+		i.project, i.region, i.cluster, i.name,
+	)
+}
+
+// String returns a short-hand representation of an instance URI.
 func (i *InstanceURI) String() string {
 	return fmt.Sprintf("%s/%s/%s/%s", i.project, i.region, i.cluster, i.name)
 }

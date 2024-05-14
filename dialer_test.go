@@ -15,7 +15,13 @@
 package alloydbconn
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -89,7 +95,81 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 			}
 		})
 	}
+}
 
+func writeStaticInfo(t *testing.T, i mock.FakeAlloyDBInstance) io.Reader {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pub := x509.MarshalPKCS1PublicKey(&key.PublicKey)
+	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PUBLIC KEY", Bytes: pub})
+	if pubPEM == nil {
+		t.Fatal("public key encoding failed")
+	}
+	priv := x509.MarshalPKCS1PrivateKey(key)
+	privPEM := pem.EncodeToMemory(
+		&pem.Block{Type: "OPENSSH PRIVATE KEY", Bytes: priv},
+	)
+	if privPEM == nil {
+		t.Fatal("private key encoding failed")
+	}
+
+	static := map[string]interface{}{}
+	static["publicKey"] = string(pubPEM)
+	static["privateKey"] = string(privPEM)
+	info := make(map[string]interface{})
+	info["ipAddress"] = "127.0.0.1" // "private" IP is localhost in testing
+	chain, err := i.GeneratePEMCertificateChain(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info["pemCertificateChain"] = chain
+	info["caCert"] = chain[len(chain)-1] // CA cert is last in chain
+	static[i.String()] = info
+
+	data, err := json.Marshal(static)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return bytes.NewReader(data)
+}
+
+func TestDialerWorksWithStaticConnectionInfo(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+	)
+	stop := mock.StartServerProxy(t, inst)
+	t.Cleanup(stop)
+
+	staticPath := writeStaticInfo(t, inst)
+
+	d, err := NewDialer(
+		ctx,
+		WithTokenSource(stubTokenSource{}),
+		WithStaticConnectionInfo(staticPath),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+
+	conn, err := d.Dial(ctx, testInstanceURI)
+	if err != nil {
+		t.Fatalf("expected Dial to succeed, but got error: %v", err)
+	}
+	defer conn.Close()
+
+	data, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("expected ReadAll to succeed, got error %v", err)
+	}
+	if string(data) != "my-instance" {
+		t.Fatalf("expected known response from the server, but got %v", string(data))
+	}
 }
 
 func TestDialWithAdminAPIErrors(t *testing.T) {

@@ -15,18 +15,14 @@
 package mock
 
 import (
-	"bytes"
-	"crypto/rand"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync"
-	"time"
 
 	"cloud.google.com/go/alloydb/apiv1alpha/alloydbpb"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -131,35 +127,19 @@ func CreateEphemeralSuccess(i FakeAlloyDBInstance, ct int) *Request {
 				return
 			}
 
-			template := &x509.Certificate{
-				PublicKey:    pub,
-				SerialNumber: &big.Int{},
-				Issuer:       i.intermedCert.Subject,
-				NotBefore:    time.Now(),
-				NotAfter:     i.certExpiry,
-				KeyUsage:     x509.KeyUsageDigitalSignature,
-				ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-			}
-
-			cert, err := x509.CreateCertificate(
-				rand.Reader, template, i.intermedCert, template.PublicKey, i.intermedKey)
+			chain, err := i.GeneratePEMCertificateChain(pub)
 			if err != nil {
-				http.Error(resp, fmt.Errorf("unable to create certificate: %w", err).Error(), http.StatusBadRequest)
+				http.Error(
+					resp,
+					fmt.Errorf("unable to create certificate: %w", err).Error(),
+					http.StatusBadRequest,
+				)
 				return
 			}
 
-			certPEM := &bytes.Buffer{}
-			pem.Encode(certPEM, &pem.Block{Type: "CERTIFICATE", Bytes: cert})
-
-			instancePEM := &bytes.Buffer{}
-			pem.Encode(instancePEM, &pem.Block{Type: "CERTIFICATE", Bytes: i.intermedCert.Raw})
-
-			caPEM := &bytes.Buffer{}
-			pem.Encode(caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: i.rootCACert.Raw})
-
 			rresp := alloydbpb.GenerateClientCertificateResponse{
-				CaCert:              caPEM.String(),
-				PemCertificateChain: []string{certPEM.String(), instancePEM.String(), caPEM.String()},
+				CaCert:              chain[len(chain)-1], // last entry is CA
+				PemCertificateChain: chain,
 			}
 			if err := json.NewEncoder(resp).Encode(&rresp); err != nil {
 				http.Error(resp, fmt.Errorf("unable to encode response: %w", err).Error(), http.StatusBadRequest)
