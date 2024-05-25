@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go/alloydb v1.10.2
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v4 v4.18.3
-	github.com/jackc/pgx/v5 v5.5.5
+	github.com/jackc/pgx/v5 v5.6.0
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.25.0
 	golang.org/x/oauth2 v0.20.0
