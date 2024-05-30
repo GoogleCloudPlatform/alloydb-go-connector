@@ -63,6 +63,24 @@ func WithOptions(opts ...Option) Option {
 	}
 }
 
+// WithOpenCensus configures alloydbconn to send metrics and traces using
+// OpenCensus. Currently, OpenCensus is enabled by default. In a future
+// version, OpenTelemetry will become the default and this option may be used
+// to restore OpenCensus.
+func WithOpenCensus() Option {
+	return func(d *dialerConfig) {
+        d.telemetry = "opencensus"
+	}
+}
+
+// WithOpenTelemetry configures cloudsqlconn to send metrics and traces using
+// OpenTelemetry.
+func WithOpenTelemetry() Option {
+	return func(d *dialerConfig) {
+        d.telemetry = "otel"
+	}
+}
+
 // WithCredentialsFile returns an Option that specifies a service account
 // or refresh token JSON credentials file to be used as the basis for
 // authentication.
