@@ -438,11 +438,12 @@ func (d *Dialer) metadataExchange(conn net.Conn) error {
 	buf = append(buf[:4], m...)
 
 	// Set IO deadline before write
-	err = conn.SetDeadline(time.Now().Add(ioTimeout))
-	if err != nil {
-		return err
-	}
-	defer conn.SetDeadline(time.Time{})
+	// TODO: disable deadlines when using SSH tunnel
+	// err = conn.SetDeadline(time.Now().Add(ioTimeout))
+	// if err != nil {
+	// 	return err
+	// }
+	// defer conn.SetDeadline(time.Time{})
 
 	_, err = conn.Write(buf)
 	if err != nil {
@@ -450,11 +451,12 @@ func (d *Dialer) metadataExchange(conn net.Conn) error {
 	}
 
 	// Reset IO deadline before read
-	err = conn.SetDeadline(time.Now().Add(ioTimeout))
-	if err != nil {
-		return err
-	}
-	defer conn.SetDeadline(time.Time{})
+	// TODO: disable deadlines when using SSH tunnel
+	// err = conn.SetDeadline(time.Now().Add(ioTimeout))
+	// if err != nil {
+	// 	return err
+	// }
+	// defer conn.SetDeadline(time.Time{})
 
 	buf = buf[:4]
 	_, err = conn.Read(buf)

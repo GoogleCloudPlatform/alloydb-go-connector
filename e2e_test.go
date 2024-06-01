@@ -184,7 +184,13 @@ func TestDatabaseSQLConnectPGXV4(t *testing.T) {
 		t.Skip("skipping integration tests")
 	}
 
-	cleanup, err := pgxv4.RegisterDriver("alloydb-v4")
+	privKey, err := os.ReadFile("/Users/enocom/.ssh/google_compute_engine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup, err := pgxv4.RegisterDriver(
+		"alloydb-v4", alloydbconn.WithSSHTunnel(privKey, "34.170.119.127:22", "enocom"),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +201,8 @@ func TestDatabaseSQLConnectPGXV4(t *testing.T) {
 			// sslmode is disabled, because the Dialer will handle the SSL
 			// connection instead.
 			"host=%s user=%s password=%s dbname=%s sslmode=disable",
-			alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
+			"projects/enocom-experiments-304623/locations/us-east4/clusters/cluster/instances/instance",
+			"postgres", "mycoolpassword", "postgres",
 		),
 	)
 	if err != nil {

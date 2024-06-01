@@ -26,6 +26,7 @@ import (
 	"cloud.google.com/go/alloydbconn/debug"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	apiopt "google.golang.org/api/option"
@@ -148,6 +149,29 @@ func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
 		d.adminOpts = append(d.adminOpts, apiopt.WithEndpoint(url))
 	}
+}
+
+// WithSSHTunnel configures alloydbconn to connect to private addresses though
+// an SSH tunnel.
+func WithSSHTunnel(keyPEMBytes []byte, remoteAddr, username string) Option {
+	// TODO: support password-encoded SSH keys
+	signer, err := ssh.ParsePrivateKey(keyPEMBytes)
+	if err != nil {
+		return func(d *dialerConfig) { d.err = err }
+	}
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		client, err := ssh.Dial("tcp", remoteAddr, &ssh.ClientConfig{
+			User: username,
+			Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+			// TODO: make this more secure
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return client.DialContext(ctx, network, addr)
+	}
+	return WithDialFunc(dial)
 }
 
 // WithDialFunc configures the function used to connect to the address on the
