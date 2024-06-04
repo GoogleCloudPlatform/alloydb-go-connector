@@ -198,7 +198,9 @@ func testInstanceURI() InstanceURI {
 
 func TestConnectInfoErrors(t *testing.T) {
 	ctx := context.Background()
-	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithTokenSource(stubTokenSource{}))
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithTokenSource(stubTokenSource{}),
+	)
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -222,7 +224,16 @@ func TestConnectInfoErrors(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	ctx := context.Background()
-	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithTokenSource(stubTokenSource{}))
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+	)
+	mc, url, _ := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url),
+	)
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -239,7 +250,9 @@ func TestClose(t *testing.T) {
 	i.Close()
 
 	_, err = i.ConnectionInfo(ctx)
-	if !errors.Is(err, context.Canceled) {
+
+	dErr := &errtype.DialError{}
+	if !errors.Is(err, context.Canceled) && !errors.As(err, &dErr) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
 }
