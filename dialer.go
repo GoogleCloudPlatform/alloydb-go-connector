@@ -63,18 +63,47 @@ var (
 	//go:embed version.txt
 	versionString string
 	userAgent     = "alloydb-go-connector/" + strings.TrimSpace(versionString)
-
-	// defaultKey is the default RSA public/private keypair used by the clients.
-	defaultKey    *rsa.PrivateKey
-	defaultKeyErr error
-	keyOnce       sync.Once
 )
 
-func getDefaultKeys() (*rsa.PrivateKey, error) {
-	keyOnce.Do(func() {
-		defaultKey, defaultKeyErr = rsa.GenerateKey(rand.Reader, 2048)
-	})
-	return defaultKey, defaultKeyErr
+// keyGenerator encapsulates the details of RSA key generation to provide lazy
+// generation, custom keys, or a default RSA generator.
+type keyGenerator struct {
+	once    sync.Once
+	key     *rsa.PrivateKey
+	err     error
+	genFunc func() (*rsa.PrivateKey, error)
+}
+
+// newKeyGenerator initializes a keyGenerator that will (in order):
+// - always return the RSA key if one is provided, or
+// - generate an RSA key lazily when it's requested, or
+// - (default) immediately generate an RSA key as part of the initializer.
+func newKeyGenerator(
+	k *rsa.PrivateKey, lazy bool, genFunc func() (*rsa.PrivateKey, error),
+) (*keyGenerator, error) {
+	g := &keyGenerator{genFunc: genFunc}
+	switch {
+	case k != nil:
+		// If the caller has provided a key, initialize the key and consume the
+		// sync.Once now.
+		g.once.Do(func() { g.key, g.err = k, nil })
+	case lazy:
+		// If lazy refresh is enabled, do nothing and wait for the call to
+		// rsaKey.
+	default:
+		// If no key has been provided and lazy refresh isn't enabled, generate
+		// the key and consume the sync.Once now.
+		g.once.Do(func() { g.key, g.err = g.genFunc() })
+	}
+	return g, g.err
+}
+
+// rsaKey will generate an RSA key if one is not already cached. Otherwise, it
+// will return the cached key.
+func (g *keyGenerator) rsaKey() (*rsa.PrivateKey, error) {
+	g.once.Do(func() { g.key, g.err = g.genFunc() })
+
+	return g.key, g.err
 }
 
 type connectionInfoCache interface {
@@ -96,7 +125,7 @@ type monitoredCache struct {
 type Dialer struct {
 	lock           sync.RWMutex
 	cache          map[alloydb.InstanceURI]monitoredCache
-	key            *rsa.PrivateKey
+	keyGenerator   *keyGenerator
 	refreshTimeout time.Duration
 	// closed reports if the dialer has been closed.
 	closed chan struct{}
@@ -158,14 +187,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// Add this to the end to make sure it's not overridden
 	cfg.adminOpts = append(cfg.adminOpts, option.WithUserAgent(userAgent))
 
-	if cfg.rsaKey == nil {
-		key, err := getDefaultKeys()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate RSA keys: %v", err)
-		}
-		cfg.rsaKey = key
-	}
-
 	// If no token source is configured, use ADC's token source.
 	ts := cfg.tokenSource
 	if ts == nil {
@@ -192,12 +213,19 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	if err := trace.InitMetrics(); err != nil {
 		return nil, err
 	}
+	g, err := newKeyGenerator(cfg.rsaKey, cfg.lazyRefresh,
+		func() (*rsa.PrivateKey, error) {
+			return rsa.GenerateKey(rand.Reader, 2048)
+		})
+	if err != nil {
+		return nil, err
+	}
 	d := &Dialer{
 		closed:         make(chan struct{}),
 		cache:          make(map[alloydb.InstanceURI]monitoredCache),
 		lazyRefresh:    cfg.lazyRefresh,
 		staticConnInfo: cfg.staticConnInfo,
-		key:            cfg.rsaKey,
+		keyGenerator:   g,
 		refreshTimeout: cfg.refreshTimeout,
 		client:         client,
 		logger:         cfg.logger,
@@ -570,13 +598,17 @@ func (d *Dialer) connectionInfoCache(
 				"[%v] Connection info added to cache",
 				uri.String(),
 			)
+			k, err := d.keyGenerator.rsaKey()
+			if err != nil {
+				return monitoredCache{}, err
+			}
 			var cache connectionInfoCache
 			switch {
 			case d.lazyRefresh:
 				cache = alloydb.NewLazyRefreshCache(
 					uri,
 					d.logger,
-					d.client, d.key,
+					d.client, k,
 					d.refreshTimeout, d.dialerID,
 				)
 			case d.staticConnInfo != nil:
@@ -593,7 +625,7 @@ func (d *Dialer) connectionInfoCache(
 				cache = alloydb.NewRefreshAheadCache(
 					uri,
 					d.logger,
-					d.client, d.key,
+					d.client, k,
 					d.refreshTimeout, d.dialerID,
 				)
 			}
