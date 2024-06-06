@@ -32,7 +32,7 @@ func TestRefresh(t *testing.T) {
 	wantPublicIP := "127.0.0.1"
 	wantPSC := "x.y.alloydb.goog"
 	wantExpiry := time.Now().Add(time.Hour).UTC().Round(time.Second)
-	wantInstURI := "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
+	wantInstURI := "projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
 	cn, err := ParseInstURI(wantInstURI)
 	if err != nil {
 		t.Fatalf("parseConnName(%s)failed : %v", cn, err)
@@ -62,8 +62,8 @@ func TestRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admin API client error: %v", err)
 	}
-	r := newRefresher(cl, testDialerID)
-	res, err := r.performRefresh(context.Background(), cn, RSAKey)
+	r := newAdminAPIClient(cl, rsaKey, testDialerID)
+	res, err := r.connectionInfo(context.Background(), cn)
 	if err != nil {
 		t.Fatalf("performRefresh unexpectedly failed with error: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestRefresh(t *testing.T) {
 }
 
 func TestRefreshFailsFast(t *testing.T) {
-	wantInstURI := "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
+	wantInstURI := "projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
 	cn, err := ParseInstURI(wantInstURI)
 	if err != nil {
 		t.Fatalf("parseConnName(%s)failed : %v", cn, err)
@@ -124,9 +124,9 @@ func TestRefreshFailsFast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admin API client error: %v", err)
 	}
-	r := newRefresher(cl, testDialerID)
+	r := newAdminAPIClient(cl, rsaKey, testDialerID)
 
-	_, err = r.performRefresh(context.Background(), cn, RSAKey)
+	_, err = r.connectionInfo(context.Background(), cn)
 	if err != nil {
 		t.Fatalf("expected no error, got = %v", err)
 	}
@@ -134,7 +134,7 @@ func TestRefreshFailsFast(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	// context is canceled
-	_, err = r.performRefresh(ctx, cn, RSAKey)
+	_, err = r.connectionInfo(ctx, cn)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled error, got = %v", err)
 	}

@@ -221,23 +221,25 @@ func newClientCertificate(
 	}, nil
 }
 
-// newRefresher creates a Refresher.
-func newRefresher(
+func newAdminAPIClient(
 	client *alloydbadmin.AlloyDBAdminClient,
+	key *rsa.PrivateKey,
 	dialerID string,
-) refresher {
-	return refresher{
+) adminAPIClient {
+	return adminAPIClient{
 		client:   client,
+		key:      key,
 		dialerID: dialerID,
 	}
 }
 
-// refresher manages the AlloyDB Admin API access to instance metadata and to
-// ephemeral certificates.
-type refresher struct {
+// adminAPIClient manages the AlloyDB Admin API access to instance metadata and
+// to ephemeral certificates.
+type adminAPIClient struct {
 	// client provides access to the AlloyDB Admin API
 	client *alloydbadmin.AlloyDBAdminClient
-
+	// key is used to request client certificates
+	key *rsa.PrivateKey
 	// dialerID is the unique ID of the associated dialer.
 	dialerID string
 }
@@ -251,16 +253,17 @@ type ConnectionInfo struct {
 	Expiration time.Time
 }
 
-func (r refresher) performRefresh(
-	ctx context.Context, i InstanceURI, k *rsa.PrivateKey,
+func (c adminAPIClient) connectionInfo(
+	ctx context.Context, i InstanceURI,
 ) (res ConnectionInfo, err error) {
+
 	var refreshEnd trace.EndSpanFunc
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.RefreshConnection",
 		trace.AddInstanceName(i.String()),
 	)
 	defer func() {
 		go trace.RecordRefreshResult(
-			context.Background(), i.String(), r.dialerID, err,
+			context.Background(), i.String(), c.dialerID, err,
 		)
 		refreshEnd(err)
 	}()
@@ -272,7 +275,7 @@ func (r refresher) performRefresh(
 	mdCh := make(chan mdRes, 1)
 	go func() {
 		defer close(mdCh)
-		c, err := fetchInstanceInfo(ctx, r.client, i)
+		c, err := fetchInstanceInfo(ctx, c.client, i)
 		mdCh <- mdRes{info: c, err: err}
 	}()
 
@@ -283,7 +286,7 @@ func (r refresher) performRefresh(
 	certCh := make(chan certRes, 1)
 	go func() {
 		defer close(certCh)
-		cc, err := fetchClientCertificate(ctx, r.client, i, k)
+		cc, err := fetchClientCertificate(ctx, c.client, i, c.key)
 		certCh <- certRes{cc: cc, err: err}
 	}()
 
