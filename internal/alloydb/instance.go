@@ -48,7 +48,7 @@ const (
 
 var (
 	// Instance URI is in the format:
-	// '/projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>'
+	// 'projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>'
 	// Additionally, we have to support legacy "domain-scoped" projects
 	// (e.g. "google.com:PROJECT")
 	instURIRegex = regexp.MustCompile("projects/([^:]+(:[^:]+)?)/locations/([^:]+)/clusters/([^:]+)/instances/([^:]+)")
@@ -138,13 +138,12 @@ func (r *refreshOperation) isValid() bool {
 type RefreshAheadCache struct {
 	instanceURI InstanceURI
 	logger      debug.ContextLogger
-	key         *rsa.PrivateKey
 	// refreshTimeout sets the maximum duration a refresh cycle can run
 	// for.
 	refreshTimeout time.Duration
 	// l controls the rate at which refresh cycles are run.
 	l *rate.Limiter
-	r refresher
+	r adminAPIClient
 
 	resultGuard sync.RWMutex
 	// cur represents the current refreshOperation that will be used to
@@ -175,9 +174,8 @@ func NewRefreshAheadCache(
 	i := &RefreshAheadCache{
 		instanceURI:    instance,
 		logger:         l,
-		key:            key,
 		l:              rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
-		r:              newRefresher(client, dialerID),
+		r:              newAdminAPIClient(client, key, dialerID),
 		refreshTimeout: refreshTimeout,
 		ctx:            ctx,
 		cancel:         cancel,
@@ -296,7 +294,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 				r.err,
 			)
 		} else {
-			r.result, r.err = i.r.performRefresh(i.ctx, i.instanceURI, i.key)
+			r.result, r.err = i.r.connectionInfo(i.ctx, i.instanceURI)
 			i.logger.Debugf(
 				ctx,
 				"[%v] Connection info refresh operation complete",

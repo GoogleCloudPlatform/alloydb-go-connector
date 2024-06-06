@@ -29,8 +29,7 @@ import (
 type LazyRefreshCache struct {
 	uri          InstanceURI
 	logger       debug.ContextLogger
-	key          *rsa.PrivateKey
-	r            refresher
+	r            adminAPIClient
 	mu           sync.Mutex
 	needsRefresh bool
 	cached       ConnectionInfo
@@ -48,9 +47,9 @@ func NewLazyRefreshCache(
 	return &LazyRefreshCache{
 		uri:    uri,
 		logger: l,
-		key:    key,
-		r: newRefresher(
+		r: newAdminAPIClient(
 			client,
+			key,
 			dialerID,
 		),
 	}
@@ -84,7 +83,7 @@ func (c *LazyRefreshCache) ConnectionInfo(
 		"[%v] Connection info refresh operation started",
 		c.uri.String(),
 	)
-	ci, err := c.r.performRefresh(ctx, c.uri, c.key)
+	ci, err := c.r.connectionInfo(ctx, c.uri)
 	if err != nil {
 		c.logger.Debugf(
 			ctx,

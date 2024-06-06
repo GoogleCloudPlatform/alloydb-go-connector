@@ -42,8 +42,8 @@ func genRSAKey() *rsa.PrivateKey {
 	return key
 }
 
-// RSAKey is used for test only.
-var RSAKey = genRSAKey()
+// rsaKey is used for test only.
+var rsaKey = genRSAKey()
 
 func TestParseInstURI(t *testing.T) {
 	tcs := []struct {
@@ -53,7 +53,7 @@ func TestParseInstURI(t *testing.T) {
 	}{
 		{
 			desc: "vanilla instance URI",
-			in:   "/projects/proj/locations/reg/clusters/clust/instances/name",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name",
 			want: InstanceURI{
 				project: "proj",
 				region:  "reg",
@@ -63,7 +63,7 @@ func TestParseInstURI(t *testing.T) {
 		},
 		{
 			desc: "with legacy domain-scoped project",
-			in:   "/projects/google.com:proj/locations/reg/clusters/clust/instances/name",
+			in:   "projects/google.com:proj/locations/reg/clusters/clust/instances/name",
 			want: InstanceURI{
 				project: "google.com:proj",
 				region:  "reg",
@@ -157,7 +157,7 @@ func TestConnectionInfo(t *testing.T) {
 	i := NewRefreshAheadCache(
 		testInstanceURI(),
 		nullLogger{},
-		c, RSAKey, 30*time.Second, "dialer-id",
+		c, rsaKey, 30*time.Second, "dialer-id",
 	)
 	if err != nil {
 		t.Fatalf("failed to create mock instance: %v", err)
@@ -192,7 +192,7 @@ func TestConnectionInfo(t *testing.T) {
 }
 
 func testInstanceURI() InstanceURI {
-	i, _ := ParseInstURI("/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
+	i, _ := ParseInstURI("projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
 	return i
 }
 
@@ -209,7 +209,7 @@ func TestConnectInfoErrors(t *testing.T) {
 	i := NewRefreshAheadCache(
 		testInstanceURI(),
 		nullLogger{},
-		c, RSAKey, 0, "dialer-id",
+		c, rsaKey, 0, "dialer-id",
 	)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
@@ -242,7 +242,7 @@ func TestClose(t *testing.T) {
 	i := NewRefreshAheadCache(
 		testInstanceURI(),
 		nullLogger{},
-		c, RSAKey, 30, "dialer-ider",
+		c, rsaKey, 30, "dialer-ider",
 	)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
