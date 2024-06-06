@@ -24,6 +24,11 @@ func TestKeyGenerator(t *testing.T) {
 	custom := &rsa.PrivateKey{}
 	generated := &rsa.PrivateKey{}
 
+	var (
+		defaultCount int
+		lazyCount    int
+	)
+
 	tcs := []struct {
 		desc    string
 		key     *rsa.PrivateKey
@@ -53,10 +58,25 @@ func TestKeyGenerator(t *testing.T) {
 			desc: "lazy generates keys on first request",
 			lazy: true,
 			genFunc: func() (*rsa.PrivateKey, error) {
+				if defaultCount > 0 {
+					return nil, errors.New("genFunc was called twice")
+				}
+				defaultCount++
 				return generated, nil
 			},
 			wantKey:  generated,
 			wantLazy: true,
+		},
+		{
+			desc: "key generation happens only once",
+			genFunc: func() (*rsa.PrivateKey, error) {
+				if lazyCount > 0 {
+					return nil, errors.New("genFunc was called twice")
+				}
+				lazyCount++
+				return generated, nil
+			},
+			wantKey: generated,
 		},
 	}
 
@@ -75,6 +95,11 @@ func TestKeyGenerator(t *testing.T) {
 			}
 			if tc.wantKey != k {
 				t.Fatalf("want = %v, got = %v", tc.wantKey, k)
+			}
+			// Ensure a second call doesn't trigger a new key generation
+			_, err = g.rsaKey()
+			if err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
