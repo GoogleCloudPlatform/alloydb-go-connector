@@ -86,7 +86,7 @@ type connectionInfoCache interface {
 // monitoredCache is a wrapper around a connectionInfoCache that tracks the
 // number of connections to the associated instance.
 type monitoredCache struct {
-	openConns uint64
+	openConns *uint64
 	connectionInfoCache
 }
 
@@ -345,13 +345,13 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
-		n := atomic.AddUint64(&cache.openConns, 1)
+		n := atomic.AddUint64(cache.openConns, 1)
 		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
 		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
 
 	return newInstrumentedConn(tlsConn, func() {
-		n := atomic.AddUint64(&cache.openConns, ^uint64(0))
+		n := atomic.AddUint64(cache.openConns, ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
 	}), nil
 }
@@ -597,7 +597,8 @@ func (d *Dialer) connectionInfoCache(
 					d.refreshTimeout, d.dialerID,
 				)
 			}
-			c = monitoredCache{connectionInfoCache: cache}
+			var open uint64
+			c = monitoredCache{openConns: &open, connectionInfoCache: cache}
 			d.cache[uri] = c
 		}
 	}

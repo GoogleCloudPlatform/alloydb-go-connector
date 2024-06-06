@@ -15,6 +15,8 @@ package alloydbconn
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -26,14 +28,14 @@ import (
 )
 
 type spyMetricsExporter struct {
-	mu   sync.Mutex
-	data []*view.Data
+	mu       sync.Mutex
+	viewData []*view.Data
 }
 
 func (e *spyMetricsExporter) ExportView(vd *view.Data) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.data = append(e.data, vd)
+	e.viewData = append(e.viewData, vd)
 }
 
 type metric struct {
@@ -41,11 +43,11 @@ type metric struct {
 	data view.AggregationData
 }
 
-func (e *spyMetricsExporter) Data() []metric {
+func (e *spyMetricsExporter) data() []metric {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var res []metric
-	for _, d := range e.data {
+	for _, d := range e.viewData {
 		for _, r := range d.Rows {
 			res = append(res, metric{name: d.View.Name, data: r.Data})
 		}
@@ -53,23 +55,35 @@ func (e *spyMetricsExporter) Data() []metric {
 	return res
 }
 
+// dump marshals a value to JSON for better test reporting
+func dump[T any](t *testing.T, data T) string {
+	b, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprint(string(b))
+}
+
 // wantLastValueMetric ensures the provided metrics include a metric with the
 // wanted name and at least data point.
-func wantLastValueMetric(t *testing.T, wantName string, ms []metric) {
+func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue int) {
 	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
 	for _, m := range ms {
 		gotNames[m.name] = m.data
-		_, ok := m.data.(*view.LastValueData)
-		if m.name == wantName && ok {
+		d, ok := m.data.(*view.LastValueData)
+		if ok && m.name == wantName && d.Value == float64(wantValue) {
 			return
 		}
 	}
-	t.Fatalf("metric name want = %v with LastValueData, all metrics = %#v", wantName, gotNames)
+	t.Fatalf(
+		"want metric LastValueData{name = %q, value = %v}, got metrics = %v",
+		wantName, wantValue, dump(t, gotNames),
+	)
 }
 
-// wantDistributionMetric ensures the provided metrics include a metric with the
-// wanted name and at least one data point.
+// wantDistributionMetric ensures the provided metrics include a metric with
+// the wanted name and at least one data point.
 func wantDistributionMetric(t *testing.T, wantName string, ms []metric) {
 	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
@@ -80,11 +94,14 @@ func wantDistributionMetric(t *testing.T, wantName string, ms []metric) {
 			return
 		}
 	}
-	t.Fatalf("metric name want = %v with DistributionData, all metrics = %#v", wantName, gotNames)
+	t.Fatalf(
+		"metric name want = %v with DistributionData, all metrics = %v",
+		wantName, dump(t, gotNames),
+	)
 }
 
-// wantCountMetric ensures the provided metrics include a metric with the wanted
-// name and at least one data point.
+// wantCountMetric ensures the provided metrics include a metric with the
+// wanted name and at least one data point.
 func wantCountMetric(t *testing.T, wantName string, ms []metric) {
 	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
@@ -95,7 +112,10 @@ func wantCountMetric(t *testing.T, wantName string, ms []metric) {
 			return
 		}
 	}
-	t.Fatalf("metric name want = %v with CountData, all metrics = %#v", wantName, gotNames)
+	t.Fatalf(
+		"metric name want = %v with CountData, all metrics = %v",
+		wantName, dump(t, gotNames),
+	)
 }
 
 func TestDialerWithMetrics(t *testing.T) {
@@ -119,7 +139,9 @@ func TestDialerWithMetrics(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	}()
-	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url),
+	)
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
@@ -131,13 +153,22 @@ func TestDialerWithMetrics(t *testing.T) {
 	d.client = c
 
 	// dial a good instance
-	conn, err := d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
+	conn, err := d.Dial(ctx, testInstanceURI)
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
 	}
 	defer conn.Close()
+	// dial a second time to ensure the counter is working
+	conn2, err := d.Dial(ctx, testInstanceURI)
+	if err != nil {
+		t.Fatalf("expected Dial to succeed, but got error: %v", err)
+	}
+	defer conn2.Close()
 	// dial a bogus instance
-	_, err = d.Dial(ctx, "/projects/my-project/locations/my-region/clusters/my-cluster/instances/notaninstance")
+	_, err = d.Dial(ctx,
+		"projects/my-project/locations/my-region/clusters/"+
+			"my-cluster/instances/notaninstance",
+	)
 	if err == nil {
 		t.Fatal("expected Dial to fail, but got no error")
 	}
@@ -145,11 +176,11 @@ func TestDialerWithMetrics(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // allow exporter a chance to run
 
 	// success metrics
-	wantLastValueMetric(t, "alloydbconn/open_connections", spy.Data())
-	wantDistributionMetric(t, "alloydbconn/dial_latency", spy.Data())
-	wantCountMetric(t, "alloydbconn/refresh_success_count", spy.Data())
+	wantLastValueMetric(t, "alloydbconn/open_connections", spy.data(), 2)
+	wantDistributionMetric(t, "alloydbconn/dial_latency", spy.data())
+	wantCountMetric(t, "alloydbconn/refresh_success_count", spy.data())
 
 	// failure metrics from dialing bogus instance
-	wantCountMetric(t, "alloydbconn/dial_failure_count", spy.Data())
-	wantCountMetric(t, "alloydbconn/refresh_failure_count", spy.Data())
+	wantCountMetric(t, "alloydbconn/dial_failure_count", spy.data())
+	wantCountMetric(t, "alloydbconn/refresh_failure_count", spy.data())
 }
