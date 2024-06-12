@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.11.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.10.0...v1.11.0) (2024-06-12)
+
+
+### Features
+
+* generate RSA key lazily for lazy refresh ([#589](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/589)) ([f106169](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/f106169b8eee837d9b37d72de22d3a8b86c02966)), closes [#584](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/584)
+
+
+### Bug Fixes
+
+* ensure connection count is correctly reported ([#586](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/586)) ([b640ffb](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/b640ffbc6304f1f4bf67b8a2792f54c8feffee38))
+
 ## [1.10.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.9.0...v1.10.0) (2024-05-14)
 
 
