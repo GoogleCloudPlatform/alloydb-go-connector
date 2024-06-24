@@ -333,25 +333,13 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		}
 	}
 
-	// TODO: use the correct addr as server name once PSC DNS is populated
-	// in all existing clusters. When that happens, delete this if statement.
-	serverName := addr
-	if cfg.ipType == alloydb.PSC {
-		serverName, ok = ci.IPAddrs[alloydb.PrivateIP]
-		if !ok {
-			// This shouldn't happen, but be prudent regardless.
-			return nil, errtype.NewDialError(
-				"failed to lookup server name", inst.String(), nil,
-			)
-		}
-	}
 	c := &tls.Config{
 		Certificates: []tls.Certificate{ci.ClientCert},
 		RootCAs:      ci.RootCAs,
 		// The PSC, private, and public IP all appear in the certificate as
 		// SAN. Use the server name that corresponds to the requested
 		// connection path.
-		ServerName: serverName,
+		ServerName: addr,
 		MinVersion: tls.VersionTLS13,
 	}
 	tlsConn := tls.Client(conn, c)
