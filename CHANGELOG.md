@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.11.0...v1.11.1) (2024-07-10)
+
+
+### Bug Fixes
+
+* rely on the PSC DNS name instead of the private IP address ([#590](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/590)) ([f4dd341](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/f4dd34160d1fb0ee04e0edab1d79bdd0dc69e8c7))
+
 ## [1.11.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.10.0...v1.11.0) (2024-06-12)
 
 
