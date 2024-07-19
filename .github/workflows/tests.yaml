@@ -15,11 +15,11 @@
 name: tests
 on:
   pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
-  pull_request_target:
-    types: [labeled]
   schedule:
   - cron:  '0 2 * * *'
 
@@ -29,7 +29,6 @@ permissions: read-all
 jobs:
   integration:
     # run job on proper workflow event triggers (skip job for pull_request event from forks and only run pull_request_target for "tests: run" label)
-    if: "${{ (github.event.action != 'labeled' && github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name) || github.event.label.name == 'tests: run' }}"
     runs-on: [self-hosted, linux, x64]
     name: "integration tests (linux)"
     permissions:
@@ -38,23 +37,6 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - name: Remove PR label
-        if: "${{ github.event.action == 'labeled' && github.event.label.name == 'tests: run' }}"
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            try {
-              await github.rest.issues.removeLabel({
-                name: 'tests: run',
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number
-              });
-            } catch (e) {
-              console.log('Failed to remove label. Another job may have already removed it!');
-            }
-
       # This helps understand how much disk space the cache and custom runner
       # is actually using.
       # Related to https://github.com/actions/runner/issues/2708
@@ -76,8 +58,8 @@ jobs:
         name: Authenticate to Google Cloud
         uses: google-github-actions/auth@71fee32a0bb7e97b4d33d548e7d957010649d8fa # v2.1.3
         with:
-          workload_identity_provider: ${{ secrets.PROVIDER_NAME }}
-          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.PROVIDER_NAME }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@98ddc00a17442e89a24bbf282954a3b65ce6d200 # v2.1.0
@@ -87,11 +69,11 @@ jobs:
         uses: google-github-actions/get-secretmanager-secrets@dc4a1392bad0fd60aee00bb2097e30ef07a1caae # v2.1.3
         with:
           secrets: |-
-            ALLOYDB_INSTANCE_NAME:${{ secrets.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_INSTANCE_NAME
-            ALLOYDB_CLUSTER_PASS:${{ secrets.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_CLUSTER_PASS
-            ALLOYDB_INSTANCE_IP:${{ secrets.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_INSTANCE_IP
-            ALLOYDB_IAM_USER:${{ secrets.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_GO_IAM_USER
-            ALLOYDB_PSC_INSTANCE_URI:${{ secrets.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_PSC_INSTANCE_URI
+            ALLOYDB_INSTANCE_NAME:${{ vars.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_INSTANCE_NAME
+            ALLOYDB_CLUSTER_PASS:${{ vars.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_CLUSTER_PASS
+            ALLOYDB_INSTANCE_IP:${{ vars.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_INSTANCE_IP
+            ALLOYDB_IAM_USER:${{ vars.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_GO_IAM_USER
+            ALLOYDB_PSC_INSTANCE_URI:${{ vars.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_PSC_INSTANCE_URI
 
       - name: Run tests
         env:
@@ -122,8 +104,6 @@ jobs:
           ./flakybot --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
 
   unit:
-    # run job on proper workflow event triggers (skip job for pull_request event from forks and only run pull_request_target for "tests: run" label)
-    if: "${{ (github.event.action != 'labeled' && github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name) || github.event.label.name == 'tests: run' }}"
     name: "unit tests"
     runs-on: ${{ matrix.os }}
     strategy:
@@ -148,23 +128,6 @@ jobs:
     env:
       GOARCH: ${{ matrix.goarch }}
     steps:
-      - name: Remove PR label
-        if: "${{ github.event.action == 'labeled' && github.event.label.name == 'tests: run' }}"
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            try {
-              await github.rest.issues.removeLabel({
-                name: 'tests: run',
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number
-              });
-            } catch (e) {
-              console.log('Failed to remove label. Another job may have already removed it!');
-            }
-
       - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@cdcb36043654635271a94b9a6d1392de5bb323a7 # v5.0.1
         with:
@@ -182,8 +145,8 @@ jobs:
         if: ${{ github.event_name == 'schedule' || github.event_name == 'push' }}
         uses: google-github-actions/auth@71fee32a0bb7e97b4d33d548e7d957010649d8fa # v2.1.3
         with:
-          workload_identity_provider: ${{ secrets.PROVIDER_NAME }}
-          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.PROVIDER_NAME }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
 
       - name: Run tests
         if: matrix.goarch == ''
