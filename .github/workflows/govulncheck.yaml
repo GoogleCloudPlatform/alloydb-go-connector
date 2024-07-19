@@ -22,8 +22,8 @@ on:
     branches:
     - 'main'
   pull_request:
-  pull_request_target:
-    types: [labeled]
+    branches:
+    - 'main'
   schedule:
   - cron:  '0 2 * * *'
 
