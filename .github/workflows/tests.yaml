@@ -28,8 +28,6 @@ permissions: read-all
 
 jobs:
   integration:
-    # run job on proper workflow event triggers (skip job for pull_request
-    # event from forks and only run pull_request_target for "tests: run" label)
     runs-on: [self-hosted, linux, x64]
     # run integration tests on all builds except pull requests from forks or
     # dependabot
