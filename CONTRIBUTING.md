@@ -26,3 +26,10 @@ information on using pull requests.
 
 This project follows [Google's Open Source Community
 Guidelines](https://opensource.google/conduct/).
+
+## Testing
+
+NOTE: Be sure to run the following commands in the same VPC as the AlloyDB instance
+
+1. Set the environment variables. You can see an example of the environment variables needed by running `cat .envrc.example`
+1. Run the tests by using: `go test`
