@@ -49,6 +49,10 @@ type dialerConfig struct {
 	logger         debug.ContextLogger
 	lazyRefresh    bool
 
+	// disableMetadataExchange is a temporary addition and will be removed in
+	// future versions.
+	disableMetadataExchange bool
+
 	staticConnInfo io.Reader
 	// err tracks any dialer options that may have failed.
 	err error
@@ -238,6 +242,24 @@ func WithLazyRefresh() Option {
 func WithStaticConnectionInfo(r io.Reader) Option {
 	return func(d *dialerConfig) {
 		d.staticConnInfo = r
+	}
+}
+
+// WithOptOutOfAdvancedConnectionCheck disables the dataplane permission check.
+// It is intended only for clients who are running in an environment where the
+// workload's IP address is otherwise unknown and cannot be allow-listed in a
+// VPC Service Control security perimeter. This option is incompatible with IAM
+// Authentication.
+//
+// NOTE: This option is for internal usage only and is meant to ease the
+// migration when the advanced check will be required on the server. In future
+// versions this will revert to a no-op and should not be used. If you think
+// you need this option, open an issue on
+// https://github.com/GoogleCloudPlatform/alloydb-go-connector for design
+// advice.
+func WithOptOutOfAdvancedConnectionCheck() Option {
+	return func(d *dialerConfig) {
+		d.disableMetadataExchange = true
 	}
 }
 

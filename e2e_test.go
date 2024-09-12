@@ -106,6 +106,16 @@ func TestPgxConnect(t *testing.T) {
 				)
 			},
 		},
+		{
+			desc: "metadata exchange disabled",
+			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
+				return connectPgx(
+					ctx, alloydbInstanceName,
+					alloydbUser, alloydbPass, alloydbDB,
+					alloydbconn.WithOptOutOfAdvancedConnectionCheck(),
+				)
+			},
+		},
 	}
 
 	for _, tc := range tcs {

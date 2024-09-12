@@ -169,13 +169,14 @@ func NewRefreshAheadCache(
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
 	dialerID string,
+	disableMetadataExchange bool,
 ) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &RefreshAheadCache{
 		instanceURI:    instance,
 		logger:         l,
 		l:              rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
-		r:              newAdminAPIClient(client, key, dialerID),
+		r:              newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
 		refreshTimeout: refreshTimeout,
 		ctx:            ctx,
 		cancel:         cancel,

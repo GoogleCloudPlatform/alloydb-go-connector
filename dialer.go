@@ -137,6 +137,11 @@ type Dialer struct {
 	// ahead cache assumes a background goroutine may run consistently.
 	lazyRefresh bool
 
+	// disableMetadataExchange is a temporary addition to help clients who
+	// cannot use the metadata exchange yet. In future versions, this field
+	// should be removed.
+	disableMetadataExchange bool
+
 	staticConnInfo io.Reader
 
 	client *alloydbadmin.AlloyDBAdminClient
@@ -183,6 +188,10 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return nil, cfg.err
 		}
 	}
+	if cfg.disableMetadataExchange && cfg.useIAMAuthN {
+		return nil, errors.New("incompatible options: WithOptOutOfAdvancedConnection " +
+			"check cannot be used with WithIAMAuthN")
+	}
 	userAgent := strings.Join(cfg.userAgents, " ")
 	// Add this to the end to make sure it's not overridden
 	cfg.adminOpts = append(cfg.adminOpts, option.WithUserAgent(userAgent))
@@ -221,21 +230,22 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, err
 	}
 	d := &Dialer{
-		closed:         make(chan struct{}),
-		cache:          make(map[alloydb.InstanceURI]monitoredCache),
-		lazyRefresh:    cfg.lazyRefresh,
-		staticConnInfo: cfg.staticConnInfo,
-		keyGenerator:   g,
-		refreshTimeout: cfg.refreshTimeout,
-		client:         client,
-		logger:         cfg.logger,
-		defaultDialCfg: dialCfg,
-		dialerID:       uuid.New().String(),
-		dialFunc:       cfg.dialFunc,
-		useIAMAuthN:    cfg.useIAMAuthN,
-		iamTokenSource: ts,
-		userAgent:      userAgent,
-		buffer:         newBuffer(),
+		closed:                  make(chan struct{}),
+		cache:                   make(map[alloydb.InstanceURI]monitoredCache),
+		lazyRefresh:             cfg.lazyRefresh,
+		disableMetadataExchange: cfg.disableMetadataExchange,
+		staticConnInfo:          cfg.staticConnInfo,
+		keyGenerator:            g,
+		refreshTimeout:          cfg.refreshTimeout,
+		client:                  client,
+		logger:                  cfg.logger,
+		defaultDialCfg:          dialCfg,
+		dialerID:                uuid.New().String(),
+		dialFunc:                cfg.dialFunc,
+		useIAMAuthN:             cfg.useIAMAuthN,
+		iamTokenSource:          ts,
+		userAgent:               userAgent,
+		buffer:                  newBuffer(),
 	}
 	return d, nil
 }
@@ -351,12 +361,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		return nil, errtype.NewDialError("handshake failed", inst.String(), err)
 	}
 
-	// The metadata exchange must occur after the TLS connection is established
-	// to avoid leaking sensitive information.
-	err = d.metadataExchange(tlsConn)
-	if err != nil {
-		_ = tlsConn.Close() // best effort close attempt
-		return nil, err
+	if !d.disableMetadataExchange {
+		// The metadata exchange must occur after the TLS connection is established
+		// to avoid leaking sensitive information.
+		err = d.metadataExchange(tlsConn)
+		if err != nil {
+			_ = tlsConn.Close() // best effort close attempt
+			return nil, err
+		}
 	}
 
 	latency := time.Since(startTime).Milliseconds()
@@ -598,6 +610,7 @@ func (d *Dialer) connectionInfoCache(
 					d.logger,
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
+					d.disableMetadataExchange,
 				)
 			case d.staticConnInfo != nil:
 				var err error
@@ -615,6 +628,7 @@ func (d *Dialer) connectionInfoCache(
 					d.logger,
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
+					d.disableMetadataExchange,
 				)
 			}
 			var open uint64

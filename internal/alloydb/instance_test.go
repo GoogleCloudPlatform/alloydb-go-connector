@@ -158,6 +158,7 @@ func TestConnectionInfo(t *testing.T) {
 		testInstanceURI(),
 		nullLogger{},
 		c, rsaKey, 30*time.Second, "dialer-id",
+		false,
 	)
 	if err != nil {
 		t.Fatalf("failed to create mock instance: %v", err)
@@ -210,6 +211,7 @@ func TestConnectInfoErrors(t *testing.T) {
 		testInstanceURI(),
 		nullLogger{},
 		c, rsaKey, 0, "dialer-id",
+		false,
 	)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
@@ -243,6 +245,7 @@ func TestClose(t *testing.T) {
 		testInstanceURI(),
 		nullLogger{},
 		c, rsaKey, 30, "dialer-ider",
+		false,
 	)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)

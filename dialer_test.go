@@ -49,6 +49,27 @@ func (stubTokenSource) Token() (*oauth2.Token, error) {
 	return &oauth2.Token{}, nil
 }
 
+func TestDialerIncompatibleOptions(t *testing.T) {
+	tcs := []struct {
+		desc string
+		opts []Option
+	}{
+		{
+			desc: "opt out connection check doesn't work with IAM authn",
+			opts: []Option{WithOptOutOfAdvancedConnectionCheck(), WithIAMAuthN()},
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			_, err := NewDialer(context.Background(), tc.opts...)
+			if err == nil {
+				t.Fatalf("got = %v, want no error", err)
+			}
+		})
+	}
+}
+
 func TestDialerCanConnectToInstance(t *testing.T) {
 	ctx := context.Background()
 	inst := mock.NewFakeInstance(
