@@ -49,6 +49,7 @@ func TestLazyRefreshCacheConnectionInfo(t *testing.T) {
 	cache := NewLazyRefreshCache(
 		testInstanceURI(), nullLogger{}, c,
 		rsaKey, 30*time.Second, "",
+		false,
 	)
 
 	ci, err := cache.ConnectionInfo(context.Background())
@@ -91,6 +92,7 @@ func TestLazyRefreshCacheForceRefresh(t *testing.T) {
 	cache := NewLazyRefreshCache(
 		testInstanceURI(), nullLogger{}, c,
 		rsaKey, 30*time.Second, "",
+		false,
 	)
 
 	_, err = cache.ConnectionInfo(context.Background())

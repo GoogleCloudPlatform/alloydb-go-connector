@@ -43,15 +43,12 @@ func NewLazyRefreshCache(
 	key *rsa.PrivateKey,
 	_ time.Duration,
 	dialerID string,
+	disableMetadataExchange bool,
 ) *LazyRefreshCache {
 	return &LazyRefreshCache{
 		uri:    uri,
 		logger: l,
-		r: newAdminAPIClient(
-			client,
-			key,
-			dialerID,
-		),
+		r:      newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
 	}
 }
 
