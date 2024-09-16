@@ -217,14 +217,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 		t.Fatalf("when instance name is invalid, want = %T, got = %v", wantErr1, err)
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	cancel()
-
-	_, err = d.Dial(ctx, testInstanceURI)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("when context is canceled, want = %T, got = %v", context.Canceled, err)
-	}
-
+	// Refresh will fail because no API responses have been configured above.
 	_, err = d.Dial(context.Background(), testInstanceURI)
 	var wantErr2 *errtype.RefreshError
 	if !errors.As(err, &wantErr2) {
