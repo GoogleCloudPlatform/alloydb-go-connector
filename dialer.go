@@ -381,7 +381,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	return newInstrumentedConn(tlsConn, func() {
 		n := atomic.AddUint64(cache.openConns, ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
-	}), nil
+	}, d.dialerID, inst.String()), nil
 }
 
 // removeCached stops all background refreshes and deletes the connection
@@ -537,10 +537,12 @@ func (b *buffer) put(buf *[]byte) {
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
 // decrement the number of open connects and record the result.
-func newInstrumentedConn(conn net.Conn, closeFunc func()) *instrumentedConn {
+func newInstrumentedConn(conn net.Conn, closeFunc func(), dialerID, instance string) *instrumentedConn {
 	return &instrumentedConn{
 		Conn:      conn,
 		closeFunc: closeFunc,
+		dialerID:  dialerID,
+		instance:  instance,
 	}
 }
 
@@ -549,6 +551,28 @@ func newInstrumentedConn(conn net.Conn, closeFunc func()) *instrumentedConn {
 type instrumentedConn struct {
 	net.Conn
 	closeFunc func()
+	dialerID  string
+	instance  string
+}
+
+// Read delegates to the underlying net.Conn interface and records number of
+// bytes read.
+func (i *instrumentedConn) Read(b []byte) (int, error) {
+	bytesRead, err := i.Conn.Read(b)
+	if err == nil {
+		go trace.RecordBytesReceived(context.Background(), int64(bytesRead), i.instance, i.dialerID)
+	}
+	return bytesRead, err
+}
+
+// Write delegates to the underlying net.Conn interface and records number of
+// bytes written.
+func (i *instrumentedConn) Write(b []byte) (int, error) {
+	bytesWritten, err := i.Conn.Write(b)
+	if err == nil {
+		go trace.RecordBytesSent(context.Background(), int64(bytesWritten), i.instance, i.dialerID)
+	}
+	return bytesWritten, err
 }
 
 // Close delegates to the underlying net.Conn interface and reports the close
