@@ -14,6 +14,7 @@
 package alloydbconn
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -118,6 +119,24 @@ func wantCountMetric(t *testing.T, wantName string, ms []metric) {
 	)
 }
 
+// wantSumMetric ensures the provided metrics include a metric with the wanted
+// name and at least one data point.
+func wantSumMetric(t *testing.T, wantName string, ms []metric) {
+	t.Helper()
+	gotNames := make(map[string]view.AggregationData)
+	for _, m := range ms {
+		gotNames[m.name] = m.data
+		_, ok := m.data.(*view.SumData)
+		if m.name == wantName && ok {
+			return
+		}
+	}
+	t.Fatalf(
+		"metric name want = %v with SumData, all metrics = %v",
+		wantName, dump(t, gotNames),
+	)
+}
+
 func TestDialerWithMetrics(t *testing.T) {
 	spy := &spyMetricsExporter{}
 	view.RegisterExporter(spy)
@@ -163,6 +182,22 @@ func TestDialerWithMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
 	}
+	// write to conn to test bytes_sent and bytes_received
+	buf := &bytes.Buffer{}
+	err = buf.WriteByte('a')
+	if err != nil {
+		t.Fatalf("buf.WriteByte failed: %v", err)
+	}
+	// Doing a read before doing a write, because when this unit test runs on
+	// Windows, it fails when the write is done before the read.
+	_, err = conn2.Read(buf.Bytes())
+	if err != nil {
+		t.Fatalf("conn.Read failed: %v", err)
+	}
+	_, err = conn2.Write(buf.Bytes())
+	if err != nil {
+		t.Fatalf("conn.Write failed: %v", err)
+	}
 	defer conn2.Close()
 	// dial a bogus instance
 	_, err = d.Dial(ctx,
@@ -179,6 +214,8 @@ func TestDialerWithMetrics(t *testing.T) {
 	wantLastValueMetric(t, "alloydbconn/open_connections", spy.data(), 2)
 	wantDistributionMetric(t, "alloydbconn/dial_latency", spy.data())
 	wantCountMetric(t, "alloydbconn/refresh_success_count", spy.data())
+	wantSumMetric(t, "alloydbconn/bytes_sent", spy.data())
+	wantSumMetric(t, "alloydbconn/bytes_received", spy.data())
 
 	// failure metrics from dialing bogus instance
 	wantCountMetric(t, "alloydbconn/dial_failure_count", spy.data())

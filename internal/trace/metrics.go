@@ -57,6 +57,16 @@ var (
 		"A failed certificate refresh operation",
 		stats.UnitDimensionless,
 	)
+	mBytesSent = stats.Int64(
+		"alloydbconn/bytes_sent",
+		"The bytes sent to an AlloyDB instance",
+		stats.UnitDimensionless,
+	)
+	mBytesReceived = stats.Int64(
+		"alloydbconn/bytes_received",
+		"The bytes received from an AlloyDB instance",
+		stats.UnitDimensionless,
+	)
 
 	latencyView = &view.View{
 		Name:        "alloydbconn/dial_latency",
@@ -94,6 +104,20 @@ var (
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID, keyErrorCode},
 	}
+	bytesSentView = &view.View{
+		Name:        "alloydbconn/bytes_sent",
+		Measure:     mBytesSent,
+		Description: "The number of bytes sent to an AlloyDB instance",
+		Aggregation: view.Sum(),
+		TagKeys:     []tag.Key{keyInstance, keyDialerID},
+	}
+	bytesReceivedView = &view.View{
+		Name:        "alloydbconn/bytes_received",
+		Measure:     mBytesReceived,
+		Description: "The number of bytes received from an AlloyDB instance",
+		Aggregation: view.Sum(),
+		TagKeys:     []tag.Key{keyInstance, keyDialerID},
+	}
 
 	registerOnce sync.Once
 	registerErr  error
@@ -110,6 +134,8 @@ func InitMetrics() error {
 			dialFailureView,
 			refreshCountView,
 			failedRefreshCountView,
+			bytesSentView,
+			bytesReceivedView,
 		); rErr != nil {
 			registerErr = fmt.Errorf("failed to initialize metrics: %v", rErr)
 		}
@@ -155,6 +181,18 @@ func RecordRefreshResult(ctx context.Context, instance, dialerID string, err err
 		return
 	}
 	stats.Record(ctx, mSuccessfulRefresh.M(1))
+}
+
+// RecordBytesSent reports the number of bytes sent to an AlloyDB instance.
+func RecordBytesSent(ctx context.Context, num int64, instance, dialerID string) {
+	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
+	stats.Record(ctx, mBytesSent.M(num))
+}
+
+// RecordBytesReceived reports the number of bytes received from an AlloyDB instance.
+func RecordBytesReceived(ctx context.Context, num int64, instance, dialerID string) {
+	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
+	stats.Record(ctx, mBytesReceived.M(num))
 }
 
 // errorCode returns an error code as given from the AlloyDB Admin API, provided

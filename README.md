@@ -263,6 +263,9 @@ Supported metrics include:
   refresh operations
 - `alloydbconn/refresh_failure_count`: The number of failed refresh
   operations.
+- `alloydbconn/bytes_sent`: The number of bytes sent to an AlloyDB instance.
+- `alloydbconn/bytes_received`: The number of bytes received from an AlloyDB
+  instance.
 
 Supported traces include:
 
