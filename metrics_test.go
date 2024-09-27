@@ -188,13 +188,15 @@ func TestDialerWithMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buf.WriteByte failed: %v", err)
 	}
-	_, err = conn2.Write(buf.Bytes())
-	if err != nil {
-		t.Fatalf("conn.Write failed: %v", err)
-	}
+	// Doing a read before doing a write, because when this unit test runs on
+	// Windows, it fails when the write is done before the read.
 	_, err = conn2.Read(buf.Bytes())
 	if err != nil {
 		t.Fatalf("conn.Read failed: %v", err)
+	}
+	_, err = conn2.Write(buf.Bytes())
+	if err != nil {
+		t.Fatalf("conn.Write failed: %v", err)
 	}
 	defer conn2.Close()
 	// dial a bogus instance
