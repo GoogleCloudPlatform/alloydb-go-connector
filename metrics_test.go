@@ -66,15 +66,20 @@ func dump[T any](t *testing.T, data T) string {
 }
 
 // wantLastValueMetric ensures the provided metrics include a metric with the
-// wanted name and at least data point.
+// wanted name and wanted value.
 func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue int) {
 	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
 	for _, m := range ms {
 		gotNames[m.name] = m.data
-		d, ok := m.data.(*view.LastValueData)
-		if ok && m.name == wantName && d.Value == float64(wantValue) {
-			return
+	}
+	ad, ok := gotNames[wantName]
+	if ok {
+		lvd, ok := ad.(*view.LastValueData)
+		if ok {
+			if lvd.Value == float64(wantValue) {
+				return
+			}
 		}
 	}
 	t.Fatalf(
