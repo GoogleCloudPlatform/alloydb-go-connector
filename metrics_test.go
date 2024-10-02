@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -71,6 +72,9 @@ func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue i
 	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
 	for _, m := range ms {
+		if strings.Contains(m.name, "open_connections") {
+			fmt.Printf("RISHABH DEBUG calling wantLastValueMetric() => name: %v, value: %v\n", m.name, m.data)
+		}
 		gotNames[m.name] = m.data
 	}
 	ad, ok := gotNames[wantName]
@@ -143,6 +147,7 @@ func wantSumMetric(t *testing.T, wantName string, ms []metric) {
 }
 
 func TestDialerWithMetrics(t *testing.T) {
+	fmt.Printf("RISHABH DEBUG: TestDialerWithMetrics\n")
 	spy := &spyMetricsExporter{}
 	view.RegisterExporter(spy)
 	defer view.UnregisterExporter(spy)
@@ -225,4 +230,6 @@ func TestDialerWithMetrics(t *testing.T) {
 	// failure metrics from dialing bogus instance
 	wantCountMetric(t, "alloydbconn/dial_failure_count", spy.data())
 	wantCountMetric(t, "alloydbconn/refresh_failure_count", spy.data())
+
+	fmt.Printf("RISHABH DEBUG: exiting out of test\n")
 }
