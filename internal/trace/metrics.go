@@ -170,7 +170,7 @@ func RecordDialError(ctx context.Context, instance, dialerID string, err error) 
 }
 
 // RecordRefreshResult reports the result of a refresh operation, either
-// successfull or failed.
+// successful or failed.
 func RecordRefreshResult(ctx context.Context, instance, dialerID string, err error) {
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
 	if err != nil {
