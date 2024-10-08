@@ -71,20 +71,27 @@ func dump[T any](t *testing.T, data T) string {
 func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue int) {
 	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
-	for _, m := range ms {
-		if strings.Contains(m.name, "open_connections") {
-			fmt.Printf("RISHABH DEBUG calling wantLastValueMetric() => name: %v, value: %v\n", m.name, m.data)
-		}
-		gotNames[m.name] = m.data
-	}
-	ad, ok := gotNames[wantName]
-	if ok {
-		lvd, ok := ad.(*view.LastValueData)
-		if ok {
-			if lvd.Value == float64(wantValue) {
-				return
+	for i := 0; i < 10; i++ {
+		for _, m := range ms {
+			if strings.Contains(m.name, "open_connections") {
+				fmt.Printf("RISHABH DEBUG calling wantLastValueMetric() => name: %v, value: %v\n", m.name, m.data)
 			}
+			gotNames[m.name] = m.data
 		}
+		ad, ok := gotNames[wantName]
+		if !ok {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		lvd, ok := ad.(*view.LastValueData)
+		if !ok {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		if lvd.Value == float64(wantValue) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf(
 		"want metric LastValueData{name = %q, value = %v}, got metrics = %v",
