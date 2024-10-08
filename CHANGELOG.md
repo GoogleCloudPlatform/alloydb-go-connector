@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.13.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.12.1...v1.13.0) (2024-10-08)
+
+
+### Features
+
+* add bytes_sent and bytes_received as metrics ([4aa27a5](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/4aa27a520d1e2fe14410e8078cfc38bc29209629))
+* add bytes_sent and bytes_received as metrics ([#624](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/624)) ([4aa27a5](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/4aa27a520d1e2fe14410e8078cfc38bc29209629))
+
 ## [1.12.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.12.0...v1.12.1) (2024-09-10)
 
 
