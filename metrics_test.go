@@ -88,6 +88,7 @@ func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue i
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
+        fmt.Printf("got = %v, want = %v, equal = %v", lvd.Value, float64(wantValue), lvd.Value == float64(wantValue))
 		if lvd.Value == float64(wantValue) {
 			return
 		}
