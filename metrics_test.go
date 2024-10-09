@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -70,33 +69,21 @@ func dump[T any](t *testing.T, data T) string {
 // wanted name and wanted value.
 func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue int) {
 	t.Helper()
-	gotNames := make(map[string]view.AggregationData)
-	for i := 0; i < 10; i++ {
-		for _, m := range ms {
-			if strings.Contains(m.name, "open_connections") {
-				fmt.Printf("RISHABH DEBUG calling wantLastValueMetric() => name: %v, value: %v\n", m.name, m.data)
-			}
-			gotNames[m.name] = m.data
-		}
-		ad, ok := gotNames[wantName]
-		if !ok {
-			time.Sleep(10 * time.Millisecond)
+	for _, m := range ms {
+		if m.name != wantName {
 			continue
 		}
-		lvd, ok := ad.(*view.LastValueData)
+		lvd, ok := m.data.(*view.LastValueData)
 		if !ok {
-			time.Sleep(10 * time.Millisecond)
 			continue
 		}
-        fmt.Printf("got = %v, want = %v, equal = %v", lvd.Value, float64(wantValue), lvd.Value == float64(wantValue))
 		if lvd.Value == float64(wantValue) {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf(
 		"want metric LastValueData{name = %q, value = %v}, got metrics = %v",
-		wantName, wantValue, dump(t, gotNames),
+		wantName, wantValue, dump(t, ms),
 	)
 }
 
