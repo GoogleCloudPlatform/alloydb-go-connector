@@ -37,7 +37,7 @@ body:
     id: sample-code
     attributes:
       label: Sample code
-      description: "If you already have an idea of what the implementation of this feature would like in code please provide it. (pseudo code is okay!)"
+      description: "If you already have an idea of what the implementation of this feature would look like in code please provide it. (pseudo code is okay!)"
       render: Go
   - type: textarea
     id: alternatives-considered
