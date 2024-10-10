@@ -66,20 +66,24 @@ func dump[T any](t *testing.T, data T) string {
 }
 
 // wantLastValueMetric ensures the provided metrics include a metric with the
-// wanted name and at least data point.
+// wanted name and wanted value.
 func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue int) {
 	t.Helper()
-	gotNames := make(map[string]view.AggregationData)
 	for _, m := range ms {
-		gotNames[m.name] = m.data
-		d, ok := m.data.(*view.LastValueData)
-		if ok && m.name == wantName && d.Value == float64(wantValue) {
+		if m.name != wantName {
+			continue
+		}
+		lvd, ok := m.data.(*view.LastValueData)
+		if !ok {
+			continue
+		}
+		if lvd.Value == float64(wantValue) {
 			return
 		}
 	}
 	t.Fatalf(
 		"want metric LastValueData{name = %q, value = %v}, got metrics = %v",
-		wantName, wantValue, dump(t, gotNames),
+		wantName, wantValue, dump(t, ms),
 	)
 }
 
@@ -138,6 +142,7 @@ func wantSumMetric(t *testing.T, wantName string, ms []metric) {
 }
 
 func TestDialerWithMetrics(t *testing.T) {
+	fmt.Printf("RISHABH DEBUG: TestDialerWithMetrics\n")
 	spy := &spyMetricsExporter{}
 	view.RegisterExporter(spy)
 	defer view.UnregisterExporter(spy)
@@ -220,4 +225,6 @@ func TestDialerWithMetrics(t *testing.T) {
 	// failure metrics from dialing bogus instance
 	wantCountMetric(t, "alloydbconn/dial_failure_count", spy.data())
 	wantCountMetric(t, "alloydbconn/refresh_failure_count", spy.data())
+
+	fmt.Printf("RISHABH DEBUG: exiting out of test\n")
 }
