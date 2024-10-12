@@ -42,6 +42,7 @@ func (e *spyMetricsExporter) ExportView(vd *view.Data) {
 type metric struct {
 	name string
 	data view.AggregationData
+	end  time.Time
 }
 
 func (e *spyMetricsExporter) data() []metric {
@@ -50,7 +51,7 @@ func (e *spyMetricsExporter) data() []metric {
 	var res []metric
 	for _, d := range e.viewData {
 		for _, r := range d.Rows {
-			res = append(res, metric{name: d.View.Name, data: r.Data})
+			res = append(res, metric{name: d.View.Name, data: r.Data, end: d.End})
 		}
 	}
 	return res
@@ -69,6 +70,7 @@ func dump[T any](t *testing.T, data T) string {
 // wanted name and wanted value.
 func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue int) {
 	t.Helper()
+	var vals []float64
 	for _, m := range ms {
 		if m.name != wantName {
 			continue
@@ -77,14 +79,14 @@ func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue i
 		if !ok {
 			continue
 		}
-		if lvd.Value == float64(wantValue) {
-			return
-		}
+		vals = append(vals, lvd.Value)
 	}
-	t.Fatalf(
-		"want metric LastValueData{name = %q, value = %v}, got metrics = %v",
-		wantName, wantValue, dump(t, ms),
-	)
+	if vals[len(vals)-1] != float64(wantValue) {
+		t.Fatalf(
+			"want metric LastValueData{name = %q, value = %v}, got metrics = %v",
+			wantName, wantValue, dump(t, ms),
+		)
+	}
 }
 
 // wantDistributionMetric ensures the provided metrics include a metric with
@@ -142,7 +144,6 @@ func wantSumMetric(t *testing.T, wantName string, ms []metric) {
 }
 
 func TestDialerWithMetrics(t *testing.T) {
-	fmt.Printf("RISHABH DEBUG: TestDialerWithMetrics\n")
 	spy := &spyMetricsExporter{}
 	view.RegisterExporter(spy)
 	defer view.UnregisterExporter(spy)
@@ -225,6 +226,4 @@ func TestDialerWithMetrics(t *testing.T) {
 	// failure metrics from dialing bogus instance
 	wantCountMetric(t, "alloydbconn/dial_failure_count", spy.data())
 	wantCountMetric(t, "alloydbconn/refresh_failure_count", spy.data())
-
-	fmt.Printf("RISHABH DEBUG: exiting out of test\n")
 }

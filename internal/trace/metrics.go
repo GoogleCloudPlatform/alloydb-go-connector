@@ -155,7 +155,6 @@ func RecordDialLatency(ctx context.Context, instance, dialerID string, latency i
 
 // RecordOpenConnections records the number of open connections
 func RecordOpenConnections(ctx context.Context, num int64, dialerID, instance string) {
-	fmt.Printf("RISHABH DEBUG calling RecordOpenConnections() => num: %v\n", num)
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
 	stats.Record(ctx, mConnections.M(num))
 }
