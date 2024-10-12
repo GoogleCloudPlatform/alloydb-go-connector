@@ -83,8 +83,8 @@ func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue i
 	}
 	if vals[len(vals)-1] != float64(wantValue) {
 		t.Fatalf(
-			"want metric LastValueData{name = %q, value = %v}, got metrics = %v",
-			wantName, wantValue, dump(t, ms),
+			"want metric LastValueData{name = %q, value = %v}, got values = %v",
+			wantName, wantValue, vals,
 		)
 	}
 }
