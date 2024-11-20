@@ -219,9 +219,16 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		opt(&dialCfg)
 	}
 
+	// These are legacy OpenCensus-based metrics. Once the new OpenTelemetry
+	// metrics are public readable, these old metrics should be removed after
+	// giving clients a chance to migrate.
 	if err := trace.InitMetrics(); err != nil {
 		return nil, err
 	}
+	if err := tel.InitMetrics(); err != nil {
+		return nil, err
+	}
+
 	g, err := newKeyGenerator(cfg.rsaKey, cfg.lazyRefresh,
 		func() (*rsa.PrivateKey, error) {
 			return rsa.GenerateKey(rand.Reader, 2048)
