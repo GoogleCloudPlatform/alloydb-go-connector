@@ -35,7 +35,7 @@ import (
 	"cloud.google.com/go/alloydbconn/debug"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
-	"cloud.google.com/go/alloydbconn/internal/trace"
+	"cloud.google.com/go/alloydbconn/internal/tel"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 	"golang.org/x/oauth2"
@@ -219,7 +219,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		opt(&dialCfg)
 	}
 
-	if err := trace.InitMetrics(); err != nil {
+	if err := tel.InitMetrics(); err != nil {
 		return nil, err
 	}
 	g, err := newKeyGenerator(cfg.rsaKey, cfg.lazyRefresh,
@@ -260,13 +260,13 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	default:
 	}
 	startTime := time.Now()
-	var endDial trace.EndSpanFunc
-	ctx, endDial = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn.Dial",
-		trace.AddInstanceName(instance),
-		trace.AddDialerID(d.dialerID),
+	var endDial tel.EndSpanFunc
+	ctx, endDial = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn.Dial",
+		tel.AddInstanceName(instance),
+		tel.AddDialerID(d.dialerID),
 	)
 	defer func() {
-		go trace.RecordDialError(context.Background(), instance, d.dialerID, err)
+		go tel.RecordDialError(context.Background(), instance, d.dialerID, err)
 		endDial(err)
 	}()
 	cfg := d.defaultDialCfg
@@ -278,8 +278,8 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		return nil, err
 	}
 
-	var endInfo trace.EndSpanFunc
-	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.InstanceInfo")
+	var endInfo tel.EndSpanFunc
+	ctx, endInfo = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.InstanceInfo")
 	cache, err := d.connectionInfoCache(ctx, inst)
 	if err != nil {
 		endInfo(err)
@@ -318,8 +318,8 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		return nil, err
 	}
 
-	var connectEnd trace.EndSpanFunc
-	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.Connect")
+	var connectEnd tel.EndSpanFunc
+	ctx, connectEnd = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.Connect")
 	defer func() { connectEnd(err) }()
 	hostPort := net.JoinHostPort(addr, serverProxyPort)
 	f := d.dialFunc
@@ -374,13 +374,13 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
 		n := atomic.AddUint64(cache.openConns, 1)
-		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
-		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
+		tel.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
+		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
 
 	return newInstrumentedConn(tlsConn, func() {
 		n := atomic.AddUint64(cache.openConns, ^uint64(0))
-		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
+		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
 	}, d.dialerID, inst.String()), nil
 }
 
@@ -560,7 +560,7 @@ type instrumentedConn struct {
 func (i *instrumentedConn) Read(b []byte) (int, error) {
 	bytesRead, err := i.Conn.Read(b)
 	if err == nil {
-		go trace.RecordBytesReceived(context.Background(), int64(bytesRead), i.instance, i.dialerID)
+		go tel.RecordBytesReceived(context.Background(), int64(bytesRead), i.instance, i.dialerID)
 	}
 	return bytesRead, err
 }
@@ -570,7 +570,7 @@ func (i *instrumentedConn) Read(b []byte) (int, error) {
 func (i *instrumentedConn) Write(b []byte) (int, error) {
 	bytesWritten, err := i.Conn.Write(b)
 	if err == nil {
-		go trace.RecordBytesSent(context.Background(), int64(bytesWritten), i.instance, i.dialerID)
+		go tel.RecordBytesSent(context.Background(), int64(bytesWritten), i.instance, i.dialerID)
 	}
 	return bytesWritten, err
 }
