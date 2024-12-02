@@ -29,7 +29,7 @@ import (
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydb/apiv1alpha/alloydbpb"
 	"cloud.google.com/go/alloydbconn/errtype"
-	"cloud.google.com/go/alloydbconn/internal/trace"
+	"cloud.google.com/go/alloydbconn/internal/tel"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -55,8 +55,8 @@ type instanceInfo struct {
 func fetchInstanceInfo(
 	ctx context.Context, cl *alloydbadmin.AlloyDBAdminClient, inst InstanceURI,
 ) (i instanceInfo, err error) {
-	var end trace.EndSpanFunc
-	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
+	var end tel.EndSpanFunc
+	ctx, end = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
 	defer func() { end(err) }()
 	req := &alloydbpb.GetConnectionInfoRequest{
 		Parent: fmt.Sprintf(
@@ -123,8 +123,8 @@ func fetchClientCertificate(
 	key *rsa.PrivateKey,
 	disableMetadataExchange bool,
 ) (cc *clientCertificate, err error) {
-	var end trace.EndSpanFunc
-	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchEphemeralCert")
+	var end tel.EndSpanFunc
+	ctx, end = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchEphemeralCert")
 	defer func() { end(err) }()
 
 	buf := &bytes.Buffer{}
@@ -263,12 +263,12 @@ func (c adminAPIClient) connectionInfo(
 	ctx context.Context, i InstanceURI,
 ) (res ConnectionInfo, err error) {
 
-	var refreshEnd trace.EndSpanFunc
-	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.RefreshConnection",
-		trace.AddInstanceName(i.String()),
+	var refreshEnd tel.EndSpanFunc
+	ctx, refreshEnd = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.RefreshConnection",
+		tel.AddInstanceName(i.String()),
 	)
 	defer func() {
-		go trace.RecordRefreshResult(
+		go tel.RecordRefreshResult(
 			context.Background(), i.String(), c.dialerID, err,
 		)
 		refreshEnd(err)
