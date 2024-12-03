@@ -42,6 +42,7 @@ func (e *spyMetricsExporter) ExportView(vd *view.Data) {
 type metric struct {
 	name string
 	data view.AggregationData
+	end  time.Time
 }
 
 func (e *spyMetricsExporter) data() []metric {
@@ -50,7 +51,7 @@ func (e *spyMetricsExporter) data() []metric {
 	var res []metric
 	for _, d := range e.viewData {
 		for _, r := range d.Rows {
-			res = append(res, metric{name: d.View.Name, data: r.Data})
+			res = append(res, metric{name: d.View.Name, data: r.Data, end: d.End})
 		}
 	}
 	return res
@@ -66,21 +67,26 @@ func dump[T any](t *testing.T, data T) string {
 }
 
 // wantLastValueMetric ensures the provided metrics include a metric with the
-// wanted name and at least data point.
+// wanted name and wanted value.
 func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue int) {
 	t.Helper()
-	gotNames := make(map[string]view.AggregationData)
+	var vals []float64
 	for _, m := range ms {
-		gotNames[m.name] = m.data
-		d, ok := m.data.(*view.LastValueData)
-		if ok && m.name == wantName && d.Value == float64(wantValue) {
-			return
+		if m.name != wantName {
+			continue
 		}
+		lvd, ok := m.data.(*view.LastValueData)
+		if !ok {
+			continue
+		}
+		vals = append(vals, lvd.Value)
 	}
-	t.Fatalf(
-		"want metric LastValueData{name = %q, value = %v}, got metrics = %v",
-		wantName, wantValue, dump(t, gotNames),
-	)
+	if vals[len(vals)-1] != float64(wantValue) {
+		t.Fatalf(
+			"want metric LastValueData{name = %q, value = %v}, got values = %v",
+			wantName, wantValue, vals,
+		)
+	}
 }
 
 // wantDistributionMetric ensures the provided metrics include a metric with
