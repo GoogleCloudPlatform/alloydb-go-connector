@@ -36,6 +36,7 @@ import (
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
 	"cloud.google.com/go/alloydbconn/internal/tel"
+	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 	"golang.org/x/oauth2"
@@ -222,6 +223,10 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	if err := tel.InitMetrics(); err != nil {
 		return nil, err
 	}
+	// TODO: wrap in a sync.Once
+	if _, err := telv2.InitMetrics("TODO"); err != nil {
+		return nil, err
+	}
 	g, err := newKeyGenerator(cfg.rsaKey, cfg.lazyRefresh,
 		func() (*rsa.PrivateKey, error) {
 			return rsa.GenerateKey(rand.Reader, 2048)
@@ -254,39 +259,55 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 // instance argument must be the instance's URI, which is in the format
 // projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
-	select {
-	case <-d.closed:
-		return nil, ErrDialerClosed
-	default:
-	}
-	startTime := time.Now()
-	var endDial tel.EndSpanFunc
+	var (
+		startTime = time.Now()
+		endDial   tel.EndSpanFunc
+		attrs     = telv2.Attributes{
+			IAMAuthN:  d.useIAMAuthN,
+			UserAgent: d.userAgent,
+		}
+	)
 	ctx, endDial = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn.Dial",
 		tel.AddInstanceName(instance),
 		tel.AddDialerID(d.dialerID),
 	)
 	defer func() {
 		go tel.RecordDialError(context.Background(), instance, d.dialerID, err)
+		go telv2.RecordDialCount(ctx, attrs)
 		endDial(err)
 	}()
+
+	inst, err := alloydb.ParseInstURI(instance)
+	if err != nil {
+		// TODO: how to capture this error as a metric when project ID might not be valid
+		attrs.DialStatus = telv2.DialUserError
+		return nil, err
+	}
+
+	select {
+	case <-d.closed:
+		attrs.DialStatus = telv2.DialUserError
+		return nil, ErrDialerClosed
+	default:
+	}
+
 	cfg := d.defaultDialCfg
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	inst, err := alloydb.ParseInstURI(instance)
-	if err != nil {
-		return nil, err
-	}
 
 	var endInfo tel.EndSpanFunc
 	ctx, endInfo = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.InstanceInfo")
-	cache, err := d.connectionInfoCache(ctx, inst)
+	cache, cacheHit, err := d.connectionInfoCache(ctx, inst)
+	attrs.CacheHit = cacheHit
 	if err != nil {
+		attrs.DialStatus = telv2.DialCacheError
 		endInfo(err)
 		return nil, err
 	}
 	ci, err := cache.ConnectionInfo(ctx)
 	if err != nil {
+		attrs.DialStatus = telv2.DialCacheError
 		d.removeCached(ctx, inst, cache, err)
 		endInfo(err)
 		return nil, err
@@ -305,6 +326,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		ci, err = cache.ConnectionInfo(ctx)
 		if err != nil {
 			d.removeCached(ctx, inst, cache, err)
+			attrs.DialStatus = telv2.DialCacheError
 			return nil, err
 		}
 	}
@@ -315,6 +337,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 			fmt.Sprintf("instance does not have IP of type %q", cfg.ipType),
 			inst.String(),
 		)
+		attrs.DialStatus = telv2.DialUserError
 		return nil, err
 	}
 
@@ -332,13 +355,16 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", inst.String(), hostPort, err)
 		// refresh the instance info in case it caused the connection failure
 		cache.ForceRefresh()
+		attrs.DialStatus = telv2.DialTCPError
 		return nil, errtype.NewDialError("failed to dial", inst.String(), err)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
+			attrs.DialStatus = telv2.DialTCPError
 			return nil, errtype.NewDialError("failed to set keep-alive", inst.String(), err)
 		}
 		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
+			attrs.DialStatus = telv2.DialTCPError
 			return nil, errtype.NewDialError("failed to set keep-alive period", inst.String(), err)
 		}
 	}
@@ -358,6 +384,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		// refresh the instance info in case it caused the handshake failure
 		cache.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
+		attrs.DialStatus = telv2.DialTLSError
 		return nil, errtype.NewDialError("handshake failed", inst.String(), err)
 	}
 
@@ -367,20 +394,25 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		err = d.metadataExchange(tlsConn)
 		if err != nil {
 			_ = tlsConn.Close() // best effort close attempt
+			attrs.DialStatus = telv2.DialMDXError
 			return nil, err
 		}
 	}
+	attrs.DialStatus = telv2.DialSuccess
 
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
 		n := atomic.AddUint64(cache.openConns, 1)
 		tel.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
 		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
+		telv2.RecordOpenConnection(ctx, attrs)
+		telv2.RecordDialLatency(ctx, latency, attrs)
 	}()
 
 	return newInstrumentedConn(tlsConn, func() {
 		n := atomic.AddUint64(cache.openConns, ^uint64(0))
 		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
+		telv2.RecordClosedConnection(context.Background(), attrs)
 	}, d.dialerID, inst.String()), nil
 }
 
@@ -607,7 +639,7 @@ func (d *Dialer) Close() error {
 
 func (d *Dialer) connectionInfoCache(
 	ctx context.Context, uri alloydb.InstanceURI,
-) (monitoredCache, error) {
+) (monitoredCache, bool, error) {
 	d.lock.RLock()
 	c, ok := d.cache[uri]
 	d.lock.RUnlock()
@@ -624,7 +656,7 @@ func (d *Dialer) connectionInfoCache(
 			)
 			k, err := d.keyGenerator.rsaKey()
 			if err != nil {
-				return monitoredCache{}, err
+				return monitoredCache{}, ok, err
 			}
 			var cache connectionInfoCache
 			switch {
@@ -635,6 +667,7 @@ func (d *Dialer) connectionInfoCache(
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
 					d.disableMetadataExchange,
+					d.userAgent,
 				)
 			case d.staticConnInfo != nil:
 				var err error
@@ -644,7 +677,7 @@ func (d *Dialer) connectionInfoCache(
 					d.staticConnInfo,
 				)
 				if err != nil {
-					return monitoredCache{}, err
+					return monitoredCache{}, ok, err
 				}
 			default:
 				cache = alloydb.NewRefreshAheadCache(
@@ -653,6 +686,7 @@ func (d *Dialer) connectionInfoCache(
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
 					d.disableMetadataExchange,
+					d.userAgent,
 				)
 			}
 			var open uint64
@@ -660,5 +694,5 @@ func (d *Dialer) connectionInfoCache(
 			d.cache[uri] = c
 		}
 	}
-	return c, nil
+	return c, ok, nil
 }

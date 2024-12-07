@@ -25,6 +25,7 @@ import (
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/debug"
 	"cloud.google.com/go/alloydbconn/errtype"
+	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
 	"golang.org/x/time/rate"
 )
 
@@ -158,6 +159,8 @@ type RefreshAheadCache struct {
 	// new refresh operations from being triggered.
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	userAgent string
 }
 
 // NewRefreshAheadCache initializes a new cache that proactively refreshes the
@@ -170,6 +173,7 @@ func NewRefreshAheadCache(
 	refreshTimeout time.Duration,
 	dialerID string,
 	disableMetadataExchange bool,
+	userAgent string,
 ) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &RefreshAheadCache{
@@ -180,6 +184,7 @@ func NewRefreshAheadCache(
 		refreshTimeout: refreshTimeout,
 		ctx:            ctx,
 		cancel:         cancel,
+		userAgent:      userAgent,
 	}
 	// For the initial refresh operation, set cur = next so that connection
 	// requests block until the first refresh is complete.
@@ -333,6 +338,11 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			if !i.cur.isValid() {
 				i.cur = r
 			}
+			go telv2.RecordRefreshCount(context.Background(), telv2.Attributes{
+				UserAgent:     i.userAgent,
+				RefreshType:   telv2.RefreshAhead,
+				RefreshStatus: telv2.RefreshFailure,
+			})
 			return
 		}
 		// Update the current results, and schedule the next refresh in
@@ -347,6 +357,11 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			t.Round(time.Minute),
 		)
 		i.next = i.scheduleRefresh(t)
+		go telv2.RecordRefreshCount(context.Background(), telv2.Attributes{
+			UserAgent:     i.userAgent,
+			RefreshType:   telv2.RefreshAhead,
+			RefreshStatus: telv2.RefreshSuccess,
+		})
 	})
 	return r
 }

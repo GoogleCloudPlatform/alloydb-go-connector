@@ -22,6 +22,7 @@ import (
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/debug"
+	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
 )
 
 // LazyRefreshCache is caches connection info and refreshes the cache only when
@@ -33,6 +34,7 @@ type LazyRefreshCache struct {
 	mu           sync.Mutex
 	needsRefresh bool
 	cached       ConnectionInfo
+	userAgent    string
 }
 
 // NewLazyRefreshCache initializes a new LazyRefreshCache.
@@ -44,11 +46,13 @@ func NewLazyRefreshCache(
 	_ time.Duration,
 	dialerID string,
 	disableMetadataExchange bool,
+	userAgent string,
 ) *LazyRefreshCache {
 	return &LazyRefreshCache{
-		uri:    uri,
-		logger: l,
-		r:      newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
+		uri:       uri,
+		logger:    l,
+		r:         newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
+		userAgent: userAgent,
 	}
 }
 
@@ -88,8 +92,18 @@ func (c *LazyRefreshCache) ConnectionInfo(
 			c.uri.String(),
 			err,
 		)
+		go telv2.RecordRefreshCount(ctx, telv2.Attributes{
+			UserAgent:     c.userAgent,
+			RefreshType:   telv2.RefreshLazy,
+			RefreshStatus: telv2.RefreshFailure,
+		})
 		return ConnectionInfo{}, err
 	}
+	go telv2.RecordRefreshCount(ctx, telv2.Attributes{
+		UserAgent:     c.userAgent,
+		RefreshType:   telv2.RefreshLazy,
+		RefreshStatus: telv2.RefreshSuccess,
+	})
 	c.logger.Debugf(
 		ctx,
 		"[%v] Connection info refresh operation complete",
