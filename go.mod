@@ -2,8 +2,6 @@ module cloud.google.com/go/alloydbconn
 
 go 1.23
 
-toolchain go1.23.6
-
 require (
 	cloud.google.com/go/alloydb v1.14.1
 	github.com/google/uuid v1.6.0
