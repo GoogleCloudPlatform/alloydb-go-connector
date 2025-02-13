@@ -50,7 +50,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
-          go-version: "1.23"
+          go-version: "1.24"
           cache: false
 
       - name: Checkout code
@@ -115,7 +115,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
         goarch: ["", "386"]
-        go-version: ["1.22", "1.23"]
+        go-version: ["1.23", "1.24"]
         exclude:
           - os: macos-latest
             goarch: "386"
@@ -123,7 +123,7 @@ jobs:
             goarch: "386"
           - os: ubuntu-latest
             goarch: "386"
-            go-version: "1.22"
+            go-version: "1.23"
       fail-fast: false
     permissions:
       contents: 'read'
