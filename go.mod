@@ -1,8 +1,8 @@
 module cloud.google.com/go/alloydbconn
 
-go 1.22.7
+go 1.23
 
-toolchain go1.22.12
+toolchain go1.23.6
 
 require (
 	cloud.google.com/go/alloydb v1.14.1
