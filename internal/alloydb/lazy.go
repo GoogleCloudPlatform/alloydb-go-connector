@@ -22,17 +22,20 @@ import (
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/debug"
+	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
 )
 
 // LazyRefreshCache is caches connection info and refreshes the cache only when
 // a caller requests connection info and the current certificate is expired.
 type LazyRefreshCache struct {
-	uri          InstanceURI
-	logger       debug.ContextLogger
-	r            adminAPIClient
-	mu           sync.Mutex
-	needsRefresh bool
-	cached       ConnectionInfo
+	uri            InstanceURI
+	logger         debug.ContextLogger
+	r              adminAPIClient
+	mu             sync.Mutex
+	needsRefresh   bool
+	cached         ConnectionInfo
+	userAgent      string
+	metricRecorder *telv2.MetricRecorder
 }
 
 // NewLazyRefreshCache initializes a new LazyRefreshCache.
@@ -44,11 +47,15 @@ func NewLazyRefreshCache(
 	_ time.Duration,
 	dialerID string,
 	disableMetadataExchange bool,
+	userAgent string,
+	mr *telv2.MetricRecorder,
 ) *LazyRefreshCache {
 	return &LazyRefreshCache{
-		uri:    uri,
-		logger: l,
-		r:      newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
+		uri:            uri,
+		logger:         l,
+		r:              newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
+		userAgent:      userAgent,
+		metricRecorder: mr,
 	}
 }
 
@@ -88,8 +95,18 @@ func (c *LazyRefreshCache) ConnectionInfo(
 			c.uri.String(),
 			err,
 		)
+		go c.metricRecorder.RecordRefreshCount(ctx, telv2.Attributes{
+			UserAgent:     c.userAgent,
+			RefreshType:   telv2.RefreshLazyType,
+			RefreshStatus: telv2.RefreshFailure,
+		})
 		return ConnectionInfo{}, err
 	}
+	go c.metricRecorder.RecordRefreshCount(ctx, telv2.Attributes{
+		UserAgent:     c.userAgent,
+		RefreshType:   telv2.RefreshLazyType,
+		RefreshStatus: telv2.RefreshSuccess,
+	})
 	c.logger.Debugf(
 		ctx,
 		"[%v] Connection info refresh operation complete",

@@ -36,6 +36,7 @@ import (
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
 	"cloud.google.com/go/alloydbconn/internal/tel"
+	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 	"golang.org/x/oauth2"
@@ -142,10 +143,14 @@ type Dialer struct {
 	// should be removed.
 	disableMetadataExchange bool
 
+	// disableBuiltInMetrics turns the internal metric export into a no-op.
+	disableBuiltInMetrics bool
+
 	staticConnInfo io.Reader
 
-	client *alloydbadmin.AlloyDBAdminClient
-	logger debug.ContextLogger
+	client     *alloydbadmin.AlloyDBAdminClient
+	clientOpts []option.ClientOption
+	logger     debug.ContextLogger
 
 	// defaultDialCfg holds the constructor level DialOptions, so that it can
 	// be copied and mutated by the Dial function.
@@ -153,7 +158,10 @@ type Dialer struct {
 
 	// dialerID uniquely identifies a Dialer. Used for monitoring purposes,
 	// *only* when a client has configured OpenCensus exporters.
-	dialerID string
+	dialerID        string
+	initOnce        sync.Once
+	metricsMu       sync.Mutex
+	metricRecorders map[alloydb.InstanceURI]*telv2.MetricRecorder
 
 	// dialFunc is the function used to connect to the address on the named
 	// network. By default it is golang.org/x/net/proxy#Dial.
@@ -222,6 +230,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	if err := tel.InitMetrics(); err != nil {
 		return nil, err
 	}
+	dialerID := uuid.New().String()
 	g, err := newKeyGenerator(cfg.rsaKey, cfg.lazyRefresh,
 		func() (*rsa.PrivateKey, error) {
 			return rsa.GenerateKey(rand.Reader, 2048)
@@ -234,13 +243,16 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		cache:                   make(map[alloydb.InstanceURI]monitoredCache),
 		lazyRefresh:             cfg.lazyRefresh,
 		disableMetadataExchange: cfg.disableMetadataExchange,
+		disableBuiltInMetrics:   cfg.disableBuiltInTelemetry,
 		staticConnInfo:          cfg.staticConnInfo,
 		keyGenerator:            g,
 		refreshTimeout:          cfg.refreshTimeout,
 		client:                  client,
+		clientOpts:              cfg.adminOpts,
 		logger:                  cfg.logger,
 		defaultDialCfg:          dialCfg,
-		dialerID:                uuid.New().String(),
+		dialerID:                dialerID,
+		metricRecorders:         map[alloydb.InstanceURI]*telv2.MetricRecorder{},
 		dialFunc:                cfg.dialFunc,
 		useIAMAuthN:             cfg.useIAMAuthN,
 		iamTokenSource:          ts,
@@ -250,43 +262,90 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	return d, nil
 }
 
+// initInstanceMetrics does a lazy initialization of the metric exporter. It
+// uses the project ID of the first dialed instance to send metrics for all
+// instances.
+func (d *Dialer) initInstanceMetrics(ctx context.Context, inst alloydb.InstanceURI) *telv2.MetricRecorder {
+	d.metricsMu.Lock()
+	defer d.metricsMu.Unlock()
+	if mr, ok := d.metricRecorders[inst]; ok {
+		// Metric recorder has already been registered.
+		return mr
+	}
+	cfg := telv2.Config{
+		Enabled:   !d.disableBuiltInMetrics,
+		Version:   versionString,
+		ClientID:  d.dialerID,
+		ProjectID: inst.Project(),
+		Location:  inst.Region(),
+		Cluster:   inst.Cluster(),
+		Instance:  inst.Name(),
+	}
+	mr, err := telv2.NewMetricRecorder(ctx, cfg, d.clientOpts...)
+	if err != nil {
+		d.logger.Debugf(ctx, "failed to init metrics: %v", err)
+		return &telv2.MetricRecorder{} // TODO: return no-op recorder
+	}
+	d.metricRecorders[inst] = mr
+	return mr
+}
+
 // Dial returns a net.Conn connected to the specified AlloyDB instance. The
 // instance argument must be the instance's URI, which is in the format
 // projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
-	select {
-	case <-d.closed:
-		return nil, ErrDialerClosed
-	default:
+	inst, err := alloydb.ParseInstURI(instance)
+	if err != nil {
+		return nil, err
 	}
-	startTime := time.Now()
-	var endDial tel.EndSpanFunc
+	mr := d.initInstanceMetrics(ctx, inst)
+
+	var (
+		startTime = time.Now()
+		endDial   tel.EndSpanFunc
+		attrs     = telv2.Attributes{
+			IAMAuthN:    d.useIAMAuthN,
+			UserAgent:   d.userAgent,
+			RefreshType: telv2.RefreshAheadType,
+		}
+	)
+	if d.lazyRefresh {
+		attrs.RefreshType = telv2.RefreshLazyType
+	}
 	ctx, endDial = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn.Dial",
 		tel.AddInstanceName(instance),
 		tel.AddDialerID(d.dialerID),
 	)
 	defer func() {
 		go tel.RecordDialError(context.Background(), instance, d.dialerID, err)
+		go mr.RecordDialCount(ctx, attrs)
 		endDial(err)
 	}()
+
+	select {
+	case <-d.closed:
+		attrs.DialStatus = telv2.DialUserError
+		return nil, ErrDialerClosed
+	default:
+	}
+
 	cfg := d.defaultDialCfg
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	inst, err := alloydb.ParseInstURI(instance)
-	if err != nil {
-		return nil, err
-	}
 
 	var endInfo tel.EndSpanFunc
 	ctx, endInfo = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.InstanceInfo")
-	cache, err := d.connectionInfoCache(ctx, inst)
+	cache, cacheHit, err := d.connectionInfoCache(ctx, inst, mr)
+	attrs.CacheHit = cacheHit
 	if err != nil {
+		attrs.DialStatus = telv2.DialCacheError
 		endInfo(err)
 		return nil, err
 	}
 	ci, err := cache.ConnectionInfo(ctx)
 	if err != nil {
+		attrs.DialStatus = telv2.DialCacheError
 		d.removeCached(ctx, inst, cache, err)
 		endInfo(err)
 		return nil, err
@@ -305,6 +364,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		ci, err = cache.ConnectionInfo(ctx)
 		if err != nil {
 			d.removeCached(ctx, inst, cache, err)
+			attrs.DialStatus = telv2.DialCacheError
 			return nil, err
 		}
 	}
@@ -315,6 +375,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 			fmt.Sprintf("instance does not have IP of type %q", cfg.ipType),
 			inst.String(),
 		)
+		attrs.DialStatus = telv2.DialUserError
 		return nil, err
 	}
 
@@ -332,13 +393,16 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", inst.String(), hostPort, err)
 		// refresh the instance info in case it caused the connection failure
 		cache.ForceRefresh()
+		attrs.DialStatus = telv2.DialTCPError
 		return nil, errtype.NewDialError("failed to dial", inst.String(), err)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
+			attrs.DialStatus = telv2.DialTCPError
 			return nil, errtype.NewDialError("failed to set keep-alive", inst.String(), err)
 		}
 		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
+			attrs.DialStatus = telv2.DialTCPError
 			return nil, errtype.NewDialError("failed to set keep-alive period", inst.String(), err)
 		}
 	}
@@ -358,6 +422,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		// refresh the instance info in case it caused the handshake failure
 		cache.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
+		attrs.DialStatus = telv2.DialTLSError
 		return nil, errtype.NewDialError("handshake failed", inst.String(), err)
 	}
 
@@ -367,20 +432,25 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		err = d.metadataExchange(tlsConn)
 		if err != nil {
 			_ = tlsConn.Close() // best effort close attempt
+			attrs.DialStatus = telv2.DialMDXError
 			return nil, err
 		}
 	}
+	attrs.DialStatus = telv2.DialSuccess
 
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
 		n := atomic.AddUint64(cache.openConns, 1)
 		tel.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
 		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
+		mr.RecordOpenConnection(ctx, attrs)
+		mr.RecordDialLatency(ctx, latency, attrs)
 	}()
 
-	return newInstrumentedConn(tlsConn, func() {
+	return newInstrumentedConn(tlsConn, mr, attrs, func() {
 		n := atomic.AddUint64(cache.openConns, ^uint64(0))
 		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
+		mr.RecordClosedConnection(context.Background(), attrs)
 	}, d.dialerID, inst.String()), nil
 }
 
@@ -537,12 +607,14 @@ func (b *buffer) put(buf *[]byte) {
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
 // decrement the number of open connects and record the result.
-func newInstrumentedConn(conn net.Conn, closeFunc func(), dialerID, instance string) *instrumentedConn {
+func newInstrumentedConn(conn net.Conn, mr *telv2.MetricRecorder, a telv2.Attributes, closeFunc func(), dialerID, instance string) *instrumentedConn {
 	return &instrumentedConn{
-		Conn:      conn,
-		closeFunc: closeFunc,
-		dialerID:  dialerID,
-		instance:  instance,
+		Conn:           conn,
+		closeFunc:      closeFunc,
+		dialerID:       dialerID,
+		instance:       instance,
+		metricRecorder: mr,
+		attrs:          a,
 	}
 }
 
@@ -550,9 +622,11 @@ func newInstrumentedConn(conn net.Conn, closeFunc func(), dialerID, instance str
 // is closed.
 type instrumentedConn struct {
 	net.Conn
-	closeFunc func()
-	dialerID  string
-	instance  string
+	closeFunc      func()
+	dialerID       string
+	instance       string
+	metricRecorder *telv2.MetricRecorder
+	attrs          telv2.Attributes
 }
 
 // Read delegates to the underlying net.Conn interface and records number of
@@ -561,6 +635,7 @@ func (i *instrumentedConn) Read(b []byte) (int, error) {
 	bytesRead, err := i.Conn.Read(b)
 	if err == nil {
 		go tel.RecordBytesReceived(context.Background(), int64(bytesRead), i.instance, i.dialerID)
+		go i.metricRecorder.RecordBytesRxCount(context.Background(), int64(bytesRead), i.attrs)
 	}
 	return bytesRead, err
 }
@@ -571,6 +646,7 @@ func (i *instrumentedConn) Write(b []byte) (int, error) {
 	bytesWritten, err := i.Conn.Write(b)
 	if err == nil {
 		go tel.RecordBytesSent(context.Background(), int64(bytesWritten), i.instance, i.dialerID)
+		go i.metricRecorder.RecordBytesTxCount(context.Background(), int64(bytesWritten), i.attrs)
 	}
 	return bytesWritten, err
 }
@@ -598,16 +674,21 @@ func (d *Dialer) Close() error {
 	close(d.closed)
 
 	d.lock.Lock()
-	defer d.lock.Unlock()
 	for _, i := range d.cache {
-		i.Close()
+		_ = i.Close()
 	}
-	return nil
+	d.lock.Unlock()
+
+	d.metricsMu.Lock()
+	var err error
+	for _, mr := range d.metricRecorders {
+		err = errors.Join(err, mr.Shutdown(context.Background())) // TODO: limit context to some reasonable value
+	}
+	d.metricsMu.Unlock()
+	return err
 }
 
-func (d *Dialer) connectionInfoCache(
-	ctx context.Context, uri alloydb.InstanceURI,
-) (monitoredCache, error) {
+func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceURI, mr *telv2.MetricRecorder) (monitoredCache, bool, error) {
 	d.lock.RLock()
 	c, ok := d.cache[uri]
 	d.lock.RUnlock()
@@ -617,14 +698,10 @@ func (d *Dialer) connectionInfoCache(
 		// Recheck to ensure instance wasn't created between locks
 		c, ok = d.cache[uri]
 		if !ok {
-			d.logger.Debugf(
-				ctx,
-				"[%v] Connection info added to cache",
-				uri.String(),
-			)
+			d.logger.Debugf(ctx, "[%v] Connection info added to cache", uri.String())
 			k, err := d.keyGenerator.rsaKey()
 			if err != nil {
-				return monitoredCache{}, err
+				return monitoredCache{}, ok, err
 			}
 			var cache connectionInfoCache
 			switch {
@@ -635,6 +712,8 @@ func (d *Dialer) connectionInfoCache(
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
 					d.disableMetadataExchange,
+					d.userAgent,
+					mr,
 				)
 			case d.staticConnInfo != nil:
 				var err error
@@ -644,7 +723,7 @@ func (d *Dialer) connectionInfoCache(
 					d.staticConnInfo,
 				)
 				if err != nil {
-					return monitoredCache{}, err
+					return monitoredCache{}, ok, err
 				}
 			default:
 				cache = alloydb.NewRefreshAheadCache(
@@ -653,6 +732,8 @@ func (d *Dialer) connectionInfoCache(
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
 					d.disableMetadataExchange,
+					d.userAgent,
+					mr,
 				)
 			}
 			var open uint64
@@ -660,5 +741,5 @@ func (d *Dialer) connectionInfoCache(
 			d.cache[uri] = c
 		}
 	}
-	return c, nil
+	return c, ok, nil
 }

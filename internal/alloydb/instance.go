@@ -25,6 +25,7 @@ import (
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/debug"
 	"cloud.google.com/go/alloydbconn/errtype"
+	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
 	"golang.org/x/time/rate"
 )
 
@@ -60,6 +61,21 @@ type InstanceURI struct {
 	region  string
 	cluster string
 	name    string
+}
+
+func (i InstanceURI) Project() string {
+	return i.project
+}
+func (i InstanceURI) Region() string {
+	return i.region
+}
+
+func (i InstanceURI) Cluster() string {
+	return i.cluster
+}
+
+func (i InstanceURI) Name() string {
+	return i.name
 }
 
 // URI returns the full URI specifying an instance.
@@ -158,6 +174,9 @@ type RefreshAheadCache struct {
 	// new refresh operations from being triggered.
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	userAgent      string
+	metricRecorder *telv2.MetricRecorder
 }
 
 // NewRefreshAheadCache initializes a new cache that proactively refreshes the
@@ -170,6 +189,8 @@ func NewRefreshAheadCache(
 	refreshTimeout time.Duration,
 	dialerID string,
 	disableMetadataExchange bool,
+	userAgent string,
+	mr *telv2.MetricRecorder,
 ) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &RefreshAheadCache{
@@ -180,6 +201,8 @@ func NewRefreshAheadCache(
 		refreshTimeout: refreshTimeout,
 		ctx:            ctx,
 		cancel:         cancel,
+		userAgent:      userAgent,
+		metricRecorder: mr,
 	}
 	// For the initial refresh operation, set cur = next so that connection
 	// requests block until the first refresh is complete.
@@ -333,6 +356,11 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			if !i.cur.isValid() {
 				i.cur = r
 			}
+			go i.metricRecorder.RecordRefreshCount(context.Background(), telv2.Attributes{
+				UserAgent:     i.userAgent,
+				RefreshType:   telv2.RefreshAheadType,
+				RefreshStatus: telv2.RefreshFailure,
+			})
 			return
 		}
 		// Update the current results, and schedule the next refresh in
@@ -347,6 +375,11 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			t.Round(time.Minute),
 		)
 		i.next = i.scheduleRefresh(t)
+		go i.metricRecorder.RecordRefreshCount(context.Background(), telv2.Attributes{
+			UserAgent:     i.userAgent,
+			RefreshType:   telv2.RefreshAheadType,
+			RefreshStatus: telv2.RefreshSuccess,
+		})
 	})
 	return r
 }
