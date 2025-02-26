@@ -1,4 +1,4 @@
-// Copyright 2021 Google LLC
+// Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package metric
+// Package exporter is a modified version of
+// github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric.
+//
+// It is meant to write system metrics soley for the
+// alloydb.googleapis.com/InstanceClient resource type and provides an
+// implemtation of OpenTelemetry's metric.Exporter's interface.
+package exporter
 
 import (
-	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
-	"net/url"
 	"reflect"
 	"sort"
 	"strings"
@@ -29,69 +32,91 @@ import (
 	"time"
 	"unicode"
 
+	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/sdk/instrumentation"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/trace"
-
-	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
-	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
-	"github.com/googleapis/gax-go/v2"
 	"google.golang.org/api/option"
 	"google.golang.org/genproto/googleapis/api/distribution"
-	"google.golang.org/genproto/googleapis/api/label"
-	googlemetricpb "google.golang.org/genproto/googleapis/api/metric"
-	monitoredrespb "google.golang.org/genproto/googleapis/api/monitoredres"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/encoding/gzip"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping"
+	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
+	googlemetricpb "google.golang.org/genproto/googleapis/api/metric"
+	monitoredrespb "google.golang.org/genproto/googleapis/api/monitoredres"
 )
 
 const (
+	builtInMetricsMeterName = "alloydb.googleapis.com/client/connectors"
 	// The number of timeserieses to send to GCM in a single request. This
 	// is a hard limit in the GCM API, so we never want to exceed 200.
 	sendBatchSize = 200
-
-	cloudMonitoringMetricDescriptorNameFormat = "workload.googleapis.com/%s"
-	platformMappingMonitoredResourceKey       = "gcp.resource_type"
+	// resource labels
+	ProjectID = "project_id"
+	Location  = "location"
+	Cluster   = "cluster_id"
+	Instance  = "instance_id"
+	ClientID  = "client_uid"
 )
 
-// key is used to judge the uniqueness of the record descriptor.
-type key struct {
-	name        string
-	libraryname string
-}
-
-func keyOf(metrics metricdata.Metrics, library instrumentation.Scope) key {
-	return key{
-		name:        metrics.Name,
-		libraryname: library.Name,
+var (
+	// resourceLabelSet identifies the labels that must be attached to the
+	// monitored resource and not the metric.
+	resourceLabelSet = map[string]bool{
+		ProjectID: true,
+		Location:  true,
+		Cluster:   true,
+		Instance:  true,
+		ClientID:  true,
 	}
+)
+
+// Ensure MetricExporter adhers to metric.Exporter interface
+var _ metric.Exporter = (*MetricExporter)(nil)
+
+// MetricExporter is the implementation of OpenTelemetry's
+// go.opentelemetry.io/otel/sdk/metric.Exporter interface for Google Cloud
+// Monitoring.
+type MetricExporter struct {
+	shutdown     chan struct{}
+	client       *monitoring.MetricClient
+	shutdownOnce sync.Once
+	projectID    string
 }
 
-// metricExporter is the implementation of OpenTelemetry metric exporter for
+// NewMetricExporter returns an exporter that uploads OTel metric data to
 // Google Cloud Monitoring.
-type metricExporter struct {
-	o        *options
-	shutdown chan struct{}
-	// mdCache is the cache to hold MetricDescriptor to avoid creating duplicate MD.
-	mdCache      map[key]*googlemetricpb.MetricDescriptor
-	client       *monitoring.MetricClient
-	mdLock       sync.RWMutex
-	shutdownOnce sync.Once
+func NewMetricExporter(ctx context.Context, projectID string, opts ...option.ClientOption) (*MetricExporter, error) {
+	client, err := monitoring.NewMetricClient(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	e := &MetricExporter{
+		client:    client,
+		shutdown:  make(chan struct{}),
+		projectID: projectID,
+	}
+	return e, nil
+}
+
+// Temporality returns the Temporality to use for an instrument kind.
+func (me *MetricExporter) Temporality(ik metric.InstrumentKind) metricdata.Temporality {
+	return metric.DefaultTemporalitySelector(ik)
+}
+
+// Aggregation returns the Aggregation to use for an instrument kind.
+func (me *MetricExporter) Aggregation(ik metric.InstrumentKind) metric.Aggregation {
+	return metric.DefaultAggregationSelector(ik)
 }
 
 // ForceFlush does nothing, the exporter holds no state.
-func (e *metricExporter) ForceFlush(ctx context.Context) error { return ctx.Err() }
+func (e *MetricExporter) ForceFlush(ctx context.Context) error { return ctx.Err() }
+
+var errShutdown = fmt.Errorf("exporter is shutdown")
 
 // Shutdown shuts down the client connections.
-func (e *metricExporter) Shutdown(ctx context.Context) error {
+func (e *MetricExporter) Shutdown(ctx context.Context) error {
 	err := errShutdown
 	e.shutdownOnce.Do(func() {
 		close(e.shutdown)
@@ -100,144 +125,25 @@ func (e *metricExporter) Shutdown(ctx context.Context) error {
 	return err
 }
 
-// newMetricExporter returns an exporter that uploads OTel metric data to Google Cloud Monitoring.
-func newMetricExporter(o *options) (*metricExporter, error) {
-	if strings.TrimSpace(o.projectID) == "" {
-		return nil, errBlankProjectID
-	}
-
-	clientOpts := append([]option.ClientOption{option.WithGRPCDialOption(grpc.WithUserAgent(userAgent))}, o.monitoringClientOptions...)
-	ctx := o.context
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	client, err := monitoring.NewMetricClient(ctx, clientOpts...)
-	if err != nil {
-		return nil, err
-	}
-
-	if o.compression == "gzip" {
-		client.CallOptions.GetMetricDescriptor = append(client.CallOptions.GetMetricDescriptor,
-			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
-		client.CallOptions.CreateMetricDescriptor = append(client.CallOptions.CreateMetricDescriptor,
-			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
-		client.CallOptions.CreateTimeSeries = append(client.CallOptions.CreateTimeSeries,
-			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
-		client.CallOptions.CreateServiceTimeSeries = append(client.CallOptions.CreateServiceTimeSeries,
-			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
-	}
-
-	cache := map[key]*googlemetricpb.MetricDescriptor{}
-	e := &metricExporter{
-		o:        o,
-		mdCache:  cache,
-		client:   client,
-		shutdown: make(chan struct{}),
-	}
-	return e, nil
-}
-
-var errShutdown = fmt.Errorf("exporter is shutdown")
-
 // Export exports OpenTelemetry Metrics to Google Cloud Monitoring.
-func (me *metricExporter) Export(ctx context.Context, rm *metricdata.ResourceMetrics) error {
+func (me *MetricExporter) Export(ctx context.Context, rm *metricdata.ResourceMetrics) error {
 	select {
 	case <-me.shutdown:
 		return errShutdown
 	default:
 	}
-
-	if me.o.destinationProjectQuota {
-		ctx = metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{"x-goog-user-project": strings.TrimPrefix(me.o.projectID, "projects/")}))
-	}
-	return errors.Join(
-		me.exportMetricDescriptor(ctx, rm),
-		me.exportTimeSeries(ctx, rm),
-	)
-}
-
-// Temporality returns the Temporality to use for an instrument kind.
-func (me *metricExporter) Temporality(ik metric.InstrumentKind) metricdata.Temporality {
-	return metric.DefaultTemporalitySelector(ik)
-}
-
-// Aggregation returns the Aggregation to use for an instrument kind.
-func (me *metricExporter) Aggregation(ik metric.InstrumentKind) metric.Aggregation {
-	return metric.DefaultAggregationSelector(ik)
-}
-
-// exportMetricDescriptor create MetricDescriptor from the record
-// if the descriptor is not registered in Cloud Monitoring yet.
-func (me *metricExporter) exportMetricDescriptor(ctx context.Context, rm *metricdata.ResourceMetrics) error {
-	// We only send metric descriptors if we're configured *and* we're not sending service timeseries.
-	if me.o.disableCreateMetricDescriptors {
-		return nil
-	}
-
-	me.mdLock.Lock()
-	defer me.mdLock.Unlock()
-	mds := make(map[key]*googlemetricpb.MetricDescriptor)
-	extraLabels := me.extraLabelsFromResource(rm.Resource)
-	for _, scope := range rm.ScopeMetrics {
-		for _, metrics := range scope.Metrics {
-			k := keyOf(metrics, scope.Scope)
-
-			if _, ok := me.mdCache[k]; ok {
-				continue
-			}
-
-			if _, localok := mds[k]; !localok {
-				md := me.recordToMdpb(metrics, extraLabels)
-				mds[k] = md
-			}
-		}
-	}
-
-	// TODO: This process is synchronous and blocks longer time if records in cps
-	// have many different descriptors. In the cps.ForEach above, it should spawn
-	// goroutines to send CreateMetricDescriptorRequest asynchronously in the case
-	// the descriptor does not exist in global cache (me.mdCache).
-	// See details in #26.
-	var errs []error
-	for kmd, md := range mds {
-		err := me.createMetricDescriptorIfNeeded(ctx, md)
-		if err == nil {
-			me.mdCache[kmd] = md
-		}
-		errs = append(errs, err)
-	}
-	return errors.Join(errs...)
-}
-
-func (me *metricExporter) createMetricDescriptorIfNeeded(ctx context.Context, md *googlemetricpb.MetricDescriptor) error {
-	mdReq := &monitoringpb.GetMetricDescriptorRequest{
-		Name: fmt.Sprintf("projects/%s/metricDescriptors/%s", me.o.projectID, md.Type),
-	}
-	_, err := me.client.GetMetricDescriptor(ctx, mdReq)
-	if err == nil {
-		// If the metric descriptor already exists, skip the CreateMetricDescriptor call.
-		// Metric descriptors cannot be updated without deleting them first, so there
-		// isn't anything we can do here:
-		// https://cloud.google.com/monitoring/custom-metrics/creating-metrics#md-modify
-		return nil
-	}
-	req := &monitoringpb.CreateMetricDescriptorRequest{
-		Name:             fmt.Sprintf("projects/%s", me.o.projectID),
-		MetricDescriptor: md,
-	}
-	_, err = me.client.CreateMetricDescriptor(ctx, req)
-	return err
+	return me.exportTimeSeries(ctx, rm)
 }
 
 // exportTimeSeries create TimeSeries from the records in cps.
 // res should be the common resource among all TimeSeries, such as instance id, application name and so on.
-func (me *metricExporter) exportTimeSeries(ctx context.Context, rm *metricdata.ResourceMetrics) error {
+func (me *MetricExporter) exportTimeSeries(ctx context.Context, rm *metricdata.ResourceMetrics) error {
 	tss, err := me.recordsToTspbs(rm)
 	if len(tss) == 0 {
 		return err
 	}
 
-	name := fmt.Sprintf("projects/%s", me.o.projectID)
+	name := fmt.Sprintf("projects/%s", me.projectID)
 
 	errs := []error{err}
 	for i := 0; i < len(tss); i += sendBatchSize {
@@ -252,209 +158,23 @@ func (me *metricExporter) exportTimeSeries(ctx context.Context, rm *metricdata.R
 			Name:       name,
 			TimeSeries: tss[i:j],
 		}
-		if me.o.createServiceTimeSeries {
-			errs = append(errs, me.client.CreateServiceTimeSeries(ctx, req))
-		} else {
-			errs = append(errs, me.client.CreateTimeSeries(ctx, req))
-		}
+		errs = append(errs, me.client.CreateServiceTimeSeries(ctx, req))
 	}
 
 	return errors.Join(errs...)
 }
 
-func (me *metricExporter) extraLabelsFromResource(res *resource.Resource) *attribute.Set {
-	set, _ := attribute.NewSetWithFiltered(res.Attributes(), me.o.resourceAttributeFilter)
-	return &set
+type errUnexpectedAggregationKind struct {
+	kind string
 }
 
-// descToMetricType converts descriptor to MetricType proto type.
-// Basically this returns default value ("workload.googleapis.com/[metric type]").
-func (me *metricExporter) descToMetricType(desc metricdata.Metrics) string {
-	if formatter := me.o.metricDescriptorTypeFormatter; formatter != nil {
-		return formatter(desc)
-	}
-	return fmt.Sprintf(cloudMonitoringMetricDescriptorNameFormat, desc.Name)
-}
-
-// metricTypeToDisplayName takes a GCM metric type, like (workload.googleapis.com/MyCoolMetric) and returns the display name.
-func metricTypeToDisplayName(mURL string) string {
-	// strip domain, keep path after domain.
-	u, err := url.Parse(fmt.Sprintf("metrics://%s", mURL))
-	if err != nil || u.Path == "" {
-		return mURL
-	}
-	return strings.TrimLeft(u.Path, "/")
-}
-
-// recordToMdpb extracts data and converts them to googlemetricpb.MetricDescriptor.
-func (me *metricExporter) recordToMdpb(metrics metricdata.Metrics, extraLabels *attribute.Set) *googlemetricpb.MetricDescriptor {
-	name := metrics.Name
-	typ := me.descToMetricType(metrics)
-	kind, valueType := recordToMdpbKindType(metrics.Data)
-
-	// Detailed explanations on MetricDescriptor proto is not documented on
-	// generated Go packages. Refer to the original proto file.
-	// https://github.com/googleapis/googleapis/blob/50af053/google/api/metric.proto#L33
-	return &googlemetricpb.MetricDescriptor{
-		Name:        name,
-		DisplayName: metricTypeToDisplayName(typ),
-		Type:        typ,
-		MetricKind:  kind,
-		ValueType:   valueType,
-		Unit:        string(metrics.Unit),
-		Description: metrics.Description,
-		Labels:      labelDescriptors(metrics, extraLabels),
-	}
-}
-
-func labelDescriptors(metrics metricdata.Metrics, extraLabels *attribute.Set) []*label.LabelDescriptor {
-	labels := []*label.LabelDescriptor{}
-	seenKeys := map[string]struct{}{}
-	addAttributes := func(attr *attribute.Set) {
-		iter := attr.Iter()
-		for iter.Next() {
-			kv := iter.Attribute()
-			// Skip keys that have already been set
-			if _, ok := seenKeys[normalizeLabelKey(string(kv.Key))]; ok {
-				continue
-			}
-			labels = append(labels, &label.LabelDescriptor{
-				Key: normalizeLabelKey(string(kv.Key)),
-			})
-			seenKeys[normalizeLabelKey(string(kv.Key))] = struct{}{}
-		}
-	}
-	addAttributes(extraLabels)
-	switch a := metrics.Data.(type) {
-	case metricdata.Gauge[int64]:
-		for _, pt := range a.DataPoints {
-			addAttributes(&pt.Attributes)
-		}
-	case metricdata.Gauge[float64]:
-		for _, pt := range a.DataPoints {
-			addAttributes(&pt.Attributes)
-		}
-	case metricdata.Sum[int64]:
-		for _, pt := range a.DataPoints {
-			addAttributes(&pt.Attributes)
-		}
-	case metricdata.Sum[float64]:
-		for _, pt := range a.DataPoints {
-			addAttributes(&pt.Attributes)
-		}
-	case metricdata.Histogram[float64]:
-		for _, pt := range a.DataPoints {
-			addAttributes(&pt.Attributes)
-		}
-	case metricdata.Histogram[int64]:
-		for _, pt := range a.DataPoints {
-			addAttributes(&pt.Attributes)
-		}
-	}
-	return labels
-}
-
-type attributes struct {
-	attrs attribute.Set
-}
-
-func (attrs *attributes) GetString(key string) (string, bool) {
-	value, ok := attrs.attrs.Value(attribute.Key(key))
-	return value.AsString(), ok
-}
-
-// resourceToMonitoredResourcepb converts resource in OTel to MonitoredResource
-// proto type for Cloud Monitoring.
-//
-// https://cloud.google.com/monitoring/api/ref_v3/rest/v3/projects.monitoredResourceDescriptors
-func (me *metricExporter) resourceToMonitoredResourcepb(res *resource.Resource) *monitoredrespb.MonitoredResource {
-	platformMrType, platformMappingRequested := res.Set().Value(platformMappingMonitoredResourceKey)
-
-	// check if platform mapping is requested and possible
-	if platformMappingRequested && platformMrType.AsString() == me.o.monitoredResourceDescription.mrType {
-		// assemble attributes required to construct this MR
-		attributeMap := make(map[string]string)
-		for expectedLabel := range me.o.monitoredResourceDescription.mrLabels {
-			value, found := res.Set().Value(attribute.Key(expectedLabel))
-			if found {
-				attributeMap[expectedLabel] = value.AsString()
-			}
-		}
-		return &monitoredrespb.MonitoredResource{
-			Type:   platformMrType.AsString(),
-			Labels: attributeMap,
-		}
-	}
-
-	gmr := resourcemapping.ResourceAttributesToMonitoringMonitoredResource(&attributes{
-		attrs: attribute.NewSet(res.Attributes()...),
-	})
-	newLabels := make(map[string]string, len(gmr.Labels))
-	for k, v := range gmr.Labels {
-		newLabels[k] = sanitizeUTF8(v)
-	}
-	mr := &monitoredrespb.MonitoredResource{
-		Type:   gmr.Type,
-		Labels: newLabels,
-	}
-	return mr
-}
-
-// recordToMdpbKindType return the mapping from OTel's record descriptor to
-// Cloud Monitoring's MetricKind and ValueType.
-func recordToMdpbKindType(a metricdata.Aggregation) (googlemetricpb.MetricDescriptor_MetricKind, googlemetricpb.MetricDescriptor_ValueType) {
-	switch agg := a.(type) {
-	case metricdata.Gauge[int64]:
-		return googlemetricpb.MetricDescriptor_GAUGE, googlemetricpb.MetricDescriptor_INT64
-	case metricdata.Gauge[float64]:
-		return googlemetricpb.MetricDescriptor_GAUGE, googlemetricpb.MetricDescriptor_DOUBLE
-	case metricdata.Sum[int64]:
-		if agg.IsMonotonic {
-			return googlemetricpb.MetricDescriptor_CUMULATIVE, googlemetricpb.MetricDescriptor_INT64
-		}
-		return googlemetricpb.MetricDescriptor_GAUGE, googlemetricpb.MetricDescriptor_INT64
-	case metricdata.Sum[float64]:
-		if agg.IsMonotonic {
-			return googlemetricpb.MetricDescriptor_CUMULATIVE, googlemetricpb.MetricDescriptor_DOUBLE
-		}
-		return googlemetricpb.MetricDescriptor_GAUGE, googlemetricpb.MetricDescriptor_DOUBLE
-	case metricdata.Histogram[int64], metricdata.Histogram[float64]:
-		return googlemetricpb.MetricDescriptor_CUMULATIVE, googlemetricpb.MetricDescriptor_DISTRIBUTION
-	default:
-		return googlemetricpb.MetricDescriptor_METRIC_KIND_UNSPECIFIED, googlemetricpb.MetricDescriptor_VALUE_TYPE_UNSPECIFIED
-	}
-}
-
-// recordToMpb converts data from records to Metric proto type for Cloud Monitoring.
-func (me *metricExporter) recordToMpb(metrics metricdata.Metrics, attributes attribute.Set, library instrumentation.Scope, extraLabels *attribute.Set) *googlemetricpb.Metric {
-	me.mdLock.RLock()
-	defer me.mdLock.RUnlock()
-	k := keyOf(metrics, library)
-	md, ok := me.mdCache[k]
-	if !ok {
-		md = me.recordToMdpb(metrics, extraLabels)
-	}
-
-	labels := make(map[string]string)
-	addAttributes := func(attr *attribute.Set) {
-		iter := attr.Iter()
-		for iter.Next() {
-			kv := iter.Attribute()
-			labels[normalizeLabelKey(string(kv.Key))] = sanitizeUTF8(kv.Value.Emit())
-		}
-	}
-	addAttributes(extraLabels)
-	addAttributes(&attributes)
-
-	return &googlemetricpb.Metric{
-		Type:   md.Type,
-		Labels: labels,
-	}
+func (e errUnexpectedAggregationKind) Error() string {
+	return fmt.Sprintf("the metric kind is unexpected: %v", e.kind)
 }
 
 // recordToTspb converts record to TimeSeries proto type with common resource.
 // ref. https://cloud.google.com/monitoring/api/ref_v3/rest/v3/TimeSeries
-func (me *metricExporter) recordToTspb(m metricdata.Metrics, mr *monitoredrespb.MonitoredResource, library instrumentation.Scope, extraLabels *attribute.Set) ([]*monitoringpb.TimeSeries, error) {
+func (me *MetricExporter) recordToTspb(m metricdata.Metrics) ([]*monitoringpb.TimeSeries, error) {
 	var tss []*monitoringpb.TimeSeries
 	var errs []error
 	if m.Data == nil {
@@ -463,28 +183,31 @@ func (me *metricExporter) recordToTspb(m metricdata.Metrics, mr *monitoredrespb.
 	switch a := m.Data.(type) {
 	case metricdata.Gauge[int64]:
 		for _, point := range a.DataPoints {
+			metric, mr := me.recordToMetricAndMonitoredResourcePbs(m, point.Attributes)
 			ts, err := gaugeToTimeSeries[int64](point, m, mr)
 			if err != nil {
 				errs = append(errs, err)
 				continue
 			}
-			ts.Metric = me.recordToMpb(m, point.Attributes, library, extraLabels)
+			ts.Metric = metric
 			tss = append(tss, ts)
 		}
 	case metricdata.Gauge[float64]:
 		for _, point := range a.DataPoints {
+			metric, mr := me.recordToMetricAndMonitoredResourcePbs(m, point.Attributes)
 			ts, err := gaugeToTimeSeries[float64](point, m, mr)
 			if err != nil {
 				errs = append(errs, err)
 				continue
 			}
-			ts.Metric = me.recordToMpb(m, point.Attributes, library, extraLabels)
+			ts.Metric = metric
 			tss = append(tss, ts)
 		}
 	case metricdata.Sum[int64]:
 		for _, point := range a.DataPoints {
 			var ts *monitoringpb.TimeSeries
 			var err error
+			metric, mr := me.recordToMetricAndMonitoredResourcePbs(m, point.Attributes)
 			if a.IsMonotonic {
 				ts, err = sumToTimeSeries[int64](point, m, mr)
 			} else {
@@ -495,13 +218,14 @@ func (me *metricExporter) recordToTspb(m metricdata.Metrics, mr *monitoredrespb.
 				errs = append(errs, err)
 				continue
 			}
-			ts.Metric = me.recordToMpb(m, point.Attributes, library, extraLabels)
+			ts.Metric = metric
 			tss = append(tss, ts)
 		}
 	case metricdata.Sum[float64]:
 		for _, point := range a.DataPoints {
 			var ts *monitoringpb.TimeSeries
 			var err error
+			metric, mr := me.recordToMetricAndMonitoredResourcePbs(m, point.Attributes)
 			if a.IsMonotonic {
 				ts, err = sumToTimeSeries[float64](point, m, mr)
 			} else {
@@ -512,47 +236,51 @@ func (me *metricExporter) recordToTspb(m metricdata.Metrics, mr *monitoredrespb.
 				errs = append(errs, err)
 				continue
 			}
-			ts.Metric = me.recordToMpb(m, point.Attributes, library, extraLabels)
+			ts.Metric = metric
 			tss = append(tss, ts)
 		}
 	case metricdata.Histogram[int64]:
 		for _, point := range a.DataPoints {
-			ts, err := histogramToTimeSeries(point, m, mr, me.o.enableSumOfSquaredDeviation, me.o.projectID)
+			metric, mr := me.recordToMetricAndMonitoredResourcePbs(m, point.Attributes)
+			ts, err := histogramToTimeSeries(point, m, mr, me.projectID)
 			if err != nil {
 				errs = append(errs, err)
 				continue
 			}
-			ts.Metric = me.recordToMpb(m, point.Attributes, library, extraLabels)
+			ts.Metric = metric
 			tss = append(tss, ts)
 		}
 	case metricdata.Histogram[float64]:
 		for _, point := range a.DataPoints {
-			ts, err := histogramToTimeSeries(point, m, mr, me.o.enableSumOfSquaredDeviation, me.o.projectID)
+			metric, mr := me.recordToMetricAndMonitoredResourcePbs(m, point.Attributes)
+			ts, err := histogramToTimeSeries(point, m, mr, me.projectID)
 			if err != nil {
 				errs = append(errs, err)
 				continue
 			}
-			ts.Metric = me.recordToMpb(m, point.Attributes, library, extraLabels)
+			ts.Metric = metric
 			tss = append(tss, ts)
 		}
 	case metricdata.ExponentialHistogram[int64]:
 		for _, point := range a.DataPoints {
-			ts, err := expHistogramToTimeSeries(point, m, mr, me.o.enableSumOfSquaredDeviation, me.o.projectID)
+			metric, mr := me.recordToMetricAndMonitoredResourcePbs(m, point.Attributes)
+			ts, err := expHistogramToTimeSeries(point, m, mr, me.projectID)
 			if err != nil {
 				errs = append(errs, err)
 				continue
 			}
-			ts.Metric = me.recordToMpb(m, point.Attributes, library, extraLabels)
+			ts.Metric = metric
 			tss = append(tss, ts)
 		}
 	case metricdata.ExponentialHistogram[float64]:
 		for _, point := range a.DataPoints {
-			ts, err := expHistogramToTimeSeries(point, m, mr, me.o.enableSumOfSquaredDeviation, me.o.projectID)
+			metric, mr := me.recordToMetricAndMonitoredResourcePbs(m, point.Attributes)
+			ts, err := expHistogramToTimeSeries(point, m, mr, me.projectID)
 			if err != nil {
 				errs = append(errs, err)
 				continue
 			}
-			ts.Metric = me.recordToMpb(m, point.Attributes, library, extraLabels)
+			ts.Metric = metric
 			tss = append(tss, ts)
 		}
 	default:
@@ -561,17 +289,50 @@ func (me *metricExporter) recordToTspb(m metricdata.Metrics, mr *monitoredrespb.
 	return tss, errors.Join(errs...)
 }
 
-func (me *metricExporter) recordsToTspbs(rm *metricdata.ResourceMetrics) ([]*monitoringpb.TimeSeries, error) {
-	mr := me.resourceToMonitoredResourcepb(rm.Resource)
-	extraLabels := me.extraLabelsFromResource(rm.Resource)
+// recordToMetricAndMonitoredResourcePbs converts data from records to Metric
+// and Monitored resource proto type for Cloud Monitoring.
+func (me *MetricExporter) recordToMetricAndMonitoredResourcePbs(metrics metricdata.Metrics, attributes attribute.Set) (*googlemetricpb.Metric, *monitoredrespb.MonitoredResource) {
+	resourceLabels := make(map[string]string)
+	metricLabels := make(map[string]string)
 
+	iter := attributes.Iter()
+	for iter.Next() {
+		kv := iter.Attribute()
+		k := string(kv.Key)
+
+		// When the label is a resource label, add it to the resource labels.
+		// Otherwise, add it to the metric label.
+		if _, ok := resourceLabelSet[k]; ok {
+			resourceLabels[k] = kv.Value.Emit()
+		} else {
+			metricLabels[k] = kv.Value.Emit()
+
+		}
+	}
+	metric := &googlemetricpb.Metric{
+		Type:   fmt.Sprintf("%v/%v", builtInMetricsMeterName, metrics.Name),
+		Labels: metricLabels,
+	}
+	mr := &monitoredrespb.MonitoredResource{
+		Type:   "alloydb.googleapis.com/InstanceClient",
+		Labels: resourceLabels,
+	}
+	return metric, mr
+}
+
+func (me *MetricExporter) recordsToTspbs(rm *metricdata.ResourceMetrics) ([]*monitoringpb.TimeSeries, error) {
 	var (
 		tss  []*monitoringpb.TimeSeries
 		errs []error
 	)
 	for _, scope := range rm.ScopeMetrics {
 		for _, metrics := range scope.Metrics {
-			ts, err := me.recordToTspb(metrics, mr, scope.Scope, extraLabels)
+			if scope.Scope.Name != builtInMetricsMeterName {
+				// Filter out metric data for instruments that are not part of the
+				// bigtable builtin metrics
+				continue
+			}
+			ts, err := me.recordToTspb(metrics)
 			errs = append(errs, err)
 			tss = append(tss, ts...)
 		}
@@ -622,18 +383,12 @@ func sumToTimeSeries[N int64 | float64](point metricdata.DataPoint[N], metrics m
 	}, nil
 }
 
-// TODO(@dashpole): Refactor to pass control-coupling lint check.
-//
-//nolint:revive
-func histogramToTimeSeries[N int64 | float64](point metricdata.HistogramDataPoint[N], metrics metricdata.Metrics, mr *monitoredrespb.MonitoredResource, enableSOSD bool, projectID string) (*monitoringpb.TimeSeries, error) {
+func histogramToTimeSeries[N int64 | float64](point metricdata.HistogramDataPoint[N], metrics metricdata.Metrics, mr *monitoredrespb.MonitoredResource, projectID string) (*monitoringpb.TimeSeries, error) {
 	interval, err := toNonemptyTimeIntervalpb(point.StartTime, point.Time)
 	if err != nil {
 		return nil, err
 	}
 	distributionValue := histToDistribution(point, projectID)
-	if enableSOSD {
-		setSumOfSquaredDeviation(point, distributionValue)
-	}
 	return &monitoringpb.TimeSeries{
 		Resource:   mr,
 		Unit:       string(metrics.Unit),
@@ -650,13 +405,12 @@ func histogramToTimeSeries[N int64 | float64](point metricdata.HistogramDataPoin
 	}, nil
 }
 
-func expHistogramToTimeSeries[N int64 | float64](point metricdata.ExponentialHistogramDataPoint[N], metrics metricdata.Metrics, mr *monitoredrespb.MonitoredResource, enableSOSD bool, projectID string) (*monitoringpb.TimeSeries, error) {
+func expHistogramToTimeSeries[N int64 | float64](point metricdata.ExponentialHistogramDataPoint[N], metrics metricdata.Metrics, mr *monitoredrespb.MonitoredResource, projectID string) (*monitoringpb.TimeSeries, error) {
 	interval, err := toNonemptyTimeIntervalpb(point.StartTime, point.Time)
 	if err != nil {
 		return nil, err
 	}
 	distributionValue := expHistToDistribution(point, projectID)
-	// TODO: Implement "setSumOfSquaredDeviationExpHist" for parameter "enableSOSD" functionality.
 	return &monitoringpb.TimeSeries{
 		Resource:   mr,
 		Unit:       string(metrics.Unit),
@@ -716,7 +470,7 @@ func histToDistribution[N int64 | float64](hist metricdata.HistogramDataPoint[N]
 				},
 			},
 		},
-		Exemplars: toDistributionExemplar[N](hist.Exemplars, projectID),
+		Exemplars: toDistributionExemplar[N](hist.Exemplars),
 	}
 }
 
@@ -770,22 +524,14 @@ func expHistToDistribution[N int64 | float64](hist metricdata.ExponentialHistogr
 		Mean:          mean,
 		BucketCounts:  counts,
 		BucketOptions: bucketOptions,
-		Exemplars:     toDistributionExemplar[N](hist.Exemplars, projectID),
+		Exemplars:     toDistributionExemplar[N](hist.Exemplars),
 	}
 }
 
-func toDistributionExemplar[N int64 | float64](Exemplars []metricdata.Exemplar[N], projectID string) []*distribution.Distribution_Exemplar {
+func toDistributionExemplar[N int64 | float64](Exemplars []metricdata.Exemplar[N]) []*distribution.Distribution_Exemplar {
 	var exemplars []*distribution.Distribution_Exemplar
 	for _, e := range Exemplars {
 		attachments := []*anypb.Any{}
-		if hasValidSpanContext(e) {
-			sctx, err := anypb.New(&monitoringpb.SpanContext{
-				SpanName: fmt.Sprintf("projects/%s/traces/%s/spans/%s", projectID, hex.EncodeToString(e.TraceID[:]), hex.EncodeToString(e.SpanID[:])),
-			})
-			if err == nil {
-				attachments = append(attachments, sctx)
-			}
-		}
 		if len(e.FilteredAttributes) > 0 {
 			attr, err := anypb.New(&monitoringpb.DroppedLabels{
 				Label: attributesToLabels(e.FilteredAttributes),
@@ -818,27 +564,6 @@ var (
 	nilTraceID trace.TraceID
 	nilSpanID  trace.SpanID
 )
-
-func hasValidSpanContext[N int64 | float64](e metricdata.Exemplar[N]) bool {
-	return !bytes.Equal(e.TraceID[:], nilTraceID[:]) && !bytes.Equal(e.SpanID[:], nilSpanID[:])
-}
-
-func setSumOfSquaredDeviation[N int64 | float64](hist metricdata.HistogramDataPoint[N], dist *distribution.Distribution) {
-	var prevBound float64
-	// Calculate the sum of squared deviation.
-	for i := 0; i < len(hist.Bounds); i++ {
-		// Assume all points in the bucket occur at the middle of the bucket range
-		middleOfBucket := (prevBound + hist.Bounds[i]) / 2
-		dist.SumOfSquaredDeviation += float64(dist.BucketCounts[i]) * (middleOfBucket - dist.Mean) * (middleOfBucket - dist.Mean)
-		prevBound = hist.Bounds[i]
-	}
-	// The infinity bucket is an implicit +Inf bound after the list of explicit bounds.
-	// Assume points in the infinity bucket are at the top of the previous bucket
-	middleOfInfBucket := prevBound
-	if len(dist.BucketCounts) > 0 {
-		dist.SumOfSquaredDeviation += float64(dist.BucketCounts[len(dist.BucketCounts)-1]) * (middleOfInfBucket - dist.Mean) * (middleOfInfBucket - dist.Mean)
-	}
-}
 
 func numberDataPointToValue[N int64 | float64](
 	point metricdata.DataPoint[N],
