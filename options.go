@@ -52,6 +52,8 @@ type dialerConfig struct {
 	// disableMetadataExchange is a temporary addition and will be removed in
 	// future versions.
 	disableMetadataExchange bool
+	// disableBuiltInTelemetry disables the internal metric exporter.
+	disableBuiltInTelemetry bool
 
 	staticConnInfo io.Reader
 	// err tracks any dialer options that may have failed.
@@ -260,6 +262,18 @@ func WithStaticConnectionInfo(r io.Reader) Option {
 func WithOptOutOfAdvancedConnectionCheck() Option {
 	return func(d *dialerConfig) {
 		d.disableMetadataExchange = true
+	}
+}
+
+// WithOptOutOfBuiltInTelemetry disables the internal metric export. By
+// default, the Dialer will report on its internal operations to the
+// alloydb.googleapis.com system metric prefix. These metrics help AlloyDB
+// improve performance and identify client connectivity problems. Presently,
+// these metrics aren't public, but will be made public in the future. To
+// disable this telemetry, provide this option when initializing a Dialer.
+func WithOptOutOfBuiltInTelemetry() Option {
+	return func(d *dialerConfig) {
+		d.disableBuiltInTelemetry = true
 	}
 }
 

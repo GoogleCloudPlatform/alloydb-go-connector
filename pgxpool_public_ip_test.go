@@ -41,13 +41,14 @@ import (
 // that should be called when you're done with the database connection.
 func connectPgxWithPublicIP(
 	ctx context.Context, instURI, user, pass, dbname string,
+	opts ...alloydbconn.Option,
 ) (*pgxpool.Pool, func() error, error) {
 	// First initialize the dialer. alloydbconn.NewDialer accepts additional
 	// options to configure credentials, timeouts, etc.
 	//
 	// For details, see:
 	// https://pkg.go.dev/cloud.google.com/go/alloydbconn#Option
-	d, err := alloydbconn.NewDialer(ctx)
+	d, err := alloydbconn.NewDialer(ctx, opts...)
 	if err != nil {
 		noop := func() error { return nil }
 		return nil, noop, fmt.Errorf("failed to init Dialer: %v", err)
