@@ -114,8 +114,8 @@ type MetricRecorder interface {
 	RecordDialCount(context.Context, Attributes)
 	RecordDialLatency(context.Context, int64, Attributes)
 	RecordOpenConnection(context.Context, Attributes)
-	RecordClosedConnection(ctx context.Context, a Attributes)
-	RecordRefreshCount(ctx context.Context, a Attributes)
+	RecordClosedConnection(context.Context, Attributes)
+	RecordRefreshCount(context.Context, Attributes)
 }
 
 // DefaultExportInterval is the interval that the metric exporter runs. It
@@ -127,7 +127,7 @@ var DefaultExportInterval = 60 * time.Second
 func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cfg Config, opts ...option.ClientOption) MetricRecorder {
 	if !cfg.Enabled {
 		l.Debugf(ctx, "disabling built-in metrics")
-		return nullMetricRecorder{}
+		return NullMetricRecorder{}
 	}
 	eopts := []cmexporter.Option{
 		cmexporter.WithCreateServiceTimeSeries(),
@@ -143,7 +143,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cfg Config, o
 	exp, err := cmexporter.New(eopts...)
 	if err != nil {
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
-		return nullMetricRecorder{}
+		return NullMetricRecorder{}
 	}
 
 	res := resource.NewWithAttributes(monitoredResource,
@@ -171,37 +171,37 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cfg Config, o
 	if err != nil {
 		_ = exp.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize dial count metric: %v", err)
-		return nullMetricRecorder{}
+		return NullMetricRecorder{}
 	}
 	mDialLatency, err := m.Float64Histogram(dialLatency)
 	if err != nil {
 		_ = exp.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize dial latency metric: %v", err)
-		return nullMetricRecorder{}
+		return NullMetricRecorder{}
 	}
 	mOpenConns, err := m.Int64UpDownCounter(openConnections)
 	if err != nil {
 		_ = exp.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize open connections metric: %v", err)
-		return nullMetricRecorder{}
+		return NullMetricRecorder{}
 	}
 	mBytesTx, err := m.Int64Counter(bytesSent)
 	if err != nil {
 		_ = exp.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize bytes sent metric: %v", err)
-		return nullMetricRecorder{}
+		return NullMetricRecorder{}
 	}
 	mBytesRx, err := m.Int64Counter(bytesReceived)
 	if err != nil {
 		_ = exp.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize bytes received metric: %v", err)
-		return nullMetricRecorder{}
+		return NullMetricRecorder{}
 	}
 	mRefreshCount, err := m.Int64Counter(refreshCount)
 	if err != nil {
 		_ = exp.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize refresh count metric: %v", err)
-		return nullMetricRecorder{}
+		return NullMetricRecorder{}
 	}
 	return &metricRecorder{
 		exporter:      exp,
@@ -337,15 +337,30 @@ func (m *metricRecorder) RecordRefreshCount(ctx context.Context, a Attributes) {
 	)
 }
 
-// nullMetricRecorder implements the MetricRecorder interface with no-ops. It
+// NullMetricRecorder implements the MetricRecorder interface with no-ops. It
 // is useful for disabling the built-in metrics.
-type nullMetricRecorder struct{}
+type NullMetricRecorder struct{}
 
-func (nullMetricRecorder) Shutdown(context.Context) error                        { return nil }
-func (nullMetricRecorder) RecordBytesRxCount(context.Context, int64, Attributes) {}
-func (nullMetricRecorder) RecordBytesTxCount(context.Context, int64, Attributes) {}
-func (nullMetricRecorder) RecordDialCount(context.Context, Attributes)           {}
-func (nullMetricRecorder) RecordDialLatency(context.Context, int64, Attributes)  {}
-func (nullMetricRecorder) RecordOpenConnection(context.Context, Attributes)      {}
-func (nullMetricRecorder) RecordClosedConnection(context.Context, Attributes)    {}
-func (nullMetricRecorder) RecordRefreshCount(context.Context, Attributes)        {}
+// Shutdown is a no-op.
+func (NullMetricRecorder) Shutdown(context.Context) error { return nil }
+
+// RecordBytesRxCount is a no-op.
+func (NullMetricRecorder) RecordBytesRxCount(context.Context, int64, Attributes) {}
+
+// RecordBytesTxCount is a no-op.
+func (NullMetricRecorder) RecordBytesTxCount(context.Context, int64, Attributes) {}
+
+// RecordDialCount is a no-op.
+func (NullMetricRecorder) RecordDialCount(context.Context, Attributes) {}
+
+// RecordDialLatency is a no-op.
+func (NullMetricRecorder) RecordDialLatency(context.Context, int64, Attributes) {}
+
+// RecordOpenConnection is a no-op.
+func (NullMetricRecorder) RecordOpenConnection(context.Context, Attributes) {}
+
+// RecordClosedConnection is a no-op.
+func (NullMetricRecorder) RecordClosedConnection(context.Context, Attributes) {}
+
+// RecordRefreshCount is a no-op.
+func (NullMetricRecorder) RecordRefreshCount(context.Context, Attributes) {}

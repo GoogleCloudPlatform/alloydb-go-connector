@@ -32,12 +32,14 @@ import (
 	"testing"
 	"time"
 
-	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
+
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
+	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
 )
 
 const testInstanceURI = "projects/my-project/locations/my-region/" +
@@ -92,7 +94,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
 
-	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}))
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
@@ -173,6 +175,7 @@ func TestDialerWorksWithStaticConnectionInfo(t *testing.T) {
 		ctx,
 		WithTokenSource(stubTokenSource{}),
 		WithStaticConnectionInfo(staticPath),
+		WithOptOutOfBuiltInTelemetry(),
 	)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
@@ -205,7 +208,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
-	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}))
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
@@ -243,7 +246,7 @@ func TestDialWithUnavailableServerErrors(t *testing.T) {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
 
-	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}))
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
@@ -282,6 +285,7 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 			return nil, errors.New("sentinel error")
 		}),
 		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
 	)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
@@ -314,6 +318,7 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 	d, err := NewDialer(context.Background(),
 		WithTokenSource(stubTokenSource{}),
 		WithRefreshTimeout(time.Second),
+		WithOptOutOfBuiltInTelemetry(),
 	)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
@@ -394,6 +399,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 	d, err := NewDialer(
 		context.Background(),
 		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
 	)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
@@ -519,6 +525,7 @@ func TestDialerSupportsOneOffDialFunction(t *testing.T) {
 			return nil, errors.New("sentinel error")
 		}),
 		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
 	)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
@@ -546,6 +553,7 @@ func TestDialerCloseReportsFriendlyError(t *testing.T) {
 	d, err := NewDialer(
 		context.Background(),
 		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -564,4 +572,84 @@ func TestDialerCloseReportsFriendlyError(t *testing.T) {
 	if !errors.Is(err, ErrDialerClosed) {
 		t.Fatalf("want = %v, got = %v", ErrDialerClosed, err)
 	}
+}
+
+type mockMetricRecorder struct {
+	mu       sync.Mutex
+	gotAttrs telv2.Attributes
+}
+
+func (m *mockMetricRecorder) Shutdown(context.Context) error                              { return nil }
+func (m *mockMetricRecorder) RecordBytesRxCount(context.Context, int64, telv2.Attributes) {}
+func (m *mockMetricRecorder) RecordBytesTxCount(context.Context, int64, telv2.Attributes) {}
+func (m *mockMetricRecorder) RecordDialLatency(context.Context, int64, telv2.Attributes)  {}
+func (m *mockMetricRecorder) RecordOpenConnection(context.Context, telv2.Attributes)      {}
+func (m *mockMetricRecorder) RecordClosedConnection(context.Context, telv2.Attributes)    {}
+func (m *mockMetricRecorder) RecordRefreshCount(context.Context, telv2.Attributes)        {}
+func (m *mockMetricRecorder) RecordDialCount(_ context.Context, a telv2.Attributes) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gotAttrs = a
+}
+
+func (m *mockMetricRecorder) Verify(t *testing.T, wantAttrs telv2.Attributes) {
+	for range 10 {
+		m.mu.Lock()
+		gotAttrs := m.gotAttrs
+		m.mu.Unlock()
+		if gotAttrs == wantAttrs {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	t.Fatalf("got = %v, want = %v", m.gotAttrs, wantAttrs)
+}
+
+func TestDialerDialMetrics(t *testing.T) {
+	u, _ := alloydb.ParseInstURI(testInstanceURI)
+	ctx := context.Background()
+	inst := mock.NewFakeInstance(
+		u.Project(), u.Region(), u.Cluster(), u.Name(),
+	)
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	stop := mock.StartServerProxy(t, inst)
+	defer func() {
+		stop()
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	mockRecorder := &mockMetricRecorder{}
+	d.metricRecorders[u] = mockRecorder
+	d.client = c
+	d.userAgent = "some-ua"
+
+	conn, err := d.Dial(ctx, u.URI())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	wantAttrs := telv2.Attributes{
+		UserAgent:   "some-ua",
+		IAMAuthN:    false,
+		CacheHit:    false,
+		DialStatus:  "success",
+		RefreshType: "refresh_ahead",
+	}
+	mockRecorder.Verify(t, wantAttrs)
 }

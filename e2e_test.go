@@ -85,6 +85,7 @@ func TestPgxConnect(t *testing.T) {
 				return connectPgx(
 					ctx, alloydbInstanceName,
 					alloydbUser, alloydbPass, alloydbDB,
+					alloydbconn.WithOptOutOfBuiltInTelemetry(),
 				)
 			},
 		},
@@ -94,6 +95,7 @@ func TestPgxConnect(t *testing.T) {
 				return connectPgxWithPublicIP(
 					ctx, alloydbInstanceName,
 					alloydbUser, alloydbPass, alloydbDB,
+					alloydbconn.WithOptOutOfBuiltInTelemetry(),
 				)
 			},
 		},
@@ -103,6 +105,7 @@ func TestPgxConnect(t *testing.T) {
 				return connectPgxWithPSC(
 					ctx, alloydbPSCInstanceName,
 					alloydbUser, alloydbPass, alloydbDB,
+					alloydbconn.WithOptOutOfBuiltInTelemetry(),
 				)
 			},
 		},
@@ -113,6 +116,7 @@ func TestPgxConnect(t *testing.T) {
 					ctx, alloydbInstanceName,
 					alloydbUser, alloydbPass, alloydbDB,
 					alloydbconn.WithOptOutOfAdvancedConnectionCheck(),
+					alloydbconn.WithOptOutOfBuiltInTelemetry(),
 				)
 			},
 		},
@@ -154,7 +158,7 @@ func TestDatabaseSQLConnect(t *testing.T) {
 
 	tcs := []struct {
 		desc string
-		f    func(instURI, user, pass, dbname string) (*sql.DB, func() error, error)
+		f    func(instURI, user, pass, dbname string, opts ...alloydbconn.Option) (*sql.DB, func() error, error)
 	}{
 		{
 			desc: "private IP",
@@ -170,6 +174,7 @@ func TestDatabaseSQLConnect(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			db, cleanup, err := tc.f(
 				alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
+				alloydbconn.WithOptOutOfBuiltInTelemetry(),
 			)
 			if err != nil {
 				_ = cleanup()
@@ -195,7 +200,7 @@ func TestDatabaseSQLConnectPGXV4(t *testing.T) {
 		t.Skip("skipping integration tests")
 	}
 
-	cleanup, err := pgxv4.RegisterDriver("alloydb-v4")
+	cleanup, err := pgxv4.RegisterDriver("alloydb-v4", alloydbconn.WithOptOutOfBuiltInTelemetry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +236,9 @@ func TestDatabaseSQLConnectPGXV5(t *testing.T) {
 		t.Skip("skipping integration tests")
 	}
 
-	cleanup, err := pgxv5.RegisterDriver("alloydb-v5", alloydbconn.WithIAMAuthN())
+	cleanup, err := pgxv5.RegisterDriver("alloydb-v5",
+		alloydbconn.WithIAMAuthN(), alloydbconn.WithOptOutOfBuiltInTelemetry(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +314,7 @@ func TestAutoIAMAuthN(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	d, err := alloydbconn.NewDialer(ctx, alloydbconn.WithIAMAuthN())
+	d, err := alloydbconn.NewDialer(ctx, alloydbconn.WithIAMAuthN(), alloydbconn.WithOptOutOfBuiltInTelemetry())
 	if err != nil {
 		t.Fatalf("failed to init Dialer: %v", err)
 	}

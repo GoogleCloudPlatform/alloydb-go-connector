@@ -22,11 +22,13 @@ import (
 	"testing"
 	"time"
 
-	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
+
+	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
+	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
 )
 
 type nullLogger struct{}
@@ -159,6 +161,8 @@ func TestConnectionInfo(t *testing.T) {
 		nullLogger{},
 		c, rsaKey, 30*time.Second, "dialer-id",
 		false,
+		"some-ua",
+		telv2.NullMetricRecorder{},
 	)
 	if err != nil {
 		t.Fatalf("failed to create mock instance: %v", err)
@@ -212,6 +216,8 @@ func TestConnectInfoErrors(t *testing.T) {
 		nullLogger{},
 		c, rsaKey, 0, "dialer-id",
 		false,
+		"some-ua",
+		telv2.NullMetricRecorder{},
 	)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
@@ -246,6 +252,8 @@ func TestClose(t *testing.T) {
 		nullLogger{},
 		c, rsaKey, 30, "dialer-ider",
 		false,
+		"some-ua",
+		telv2.NullMetricRecorder{},
 	)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
@@ -302,4 +310,72 @@ func TestRefreshDuration(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRefreshAheadCacheMetrics(t *testing.T) {
+	u := testInstanceURI()
+	inst := mock.NewFakeInstance(u.Project(), u.Region(), u.Cluster(), u.Name())
+
+	tcs := []struct {
+		desc      string
+		requests  []*mock.Request
+		wantAttrs telv2.Attributes
+	}{
+		{
+			desc: "refresh count success",
+			requests: []*mock.Request{
+				mock.InstanceGetSuccess(inst, 1),
+				mock.CreateEphemeralSuccess(inst, 1),
+			},
+			wantAttrs: telv2.Attributes{
+				UserAgent:     "some-ua",
+				RefreshType:   "refresh_ahead",
+				RefreshStatus: "success",
+			},
+		},
+		{
+			desc:     "refresh count failure",
+			requests: []*mock.Request{}, // no requests will result in 500s
+			wantAttrs: telv2.Attributes{
+				UserAgent:     "some-ua",
+				RefreshType:   "refresh_ahead",
+				RefreshStatus: "failure",
+			},
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			ctx := context.Background()
+
+			mc, url, cleanup := mock.HTTPClient(tc.requests...)
+			defer func() {
+				if err := cleanup(); err != nil {
+					t.Fatalf("%v", err)
+				}
+			}()
+			c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithHTTPClient(mc),
+				option.WithEndpoint(url),
+				option.WithTokenSource(stubTokenSource{}),
+			)
+			if err != nil {
+				t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+			}
+
+			mockRecorder := &mockMetricRecorder{}
+
+			cache := NewRefreshAheadCache(
+				u,
+				nullLogger{},
+				c, rsaKey, 30*time.Second, "dialer-id",
+				false,
+				"some-ua",
+				mockRecorder,
+			)
+			cache.ConnectionInfo(context.Background())
+
+			mockRecorder.Verify(t, tc.wantAttrs)
+		})
+	}
+
 }

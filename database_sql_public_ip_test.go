@@ -40,6 +40,7 @@ import (
 // should be called when you're done with the database connection.
 func connectDatabaseSQLWithPublicIP(
 	instURI, user, pass, dbname string,
+	opts ...alloydbconn.Option,
 ) (*sql.DB, func() error, error) {
 	// First, register the AlloyDB driver. Note, the driver's name is arbitrary
 	// and must only match what you use below in sql.Open. Also,
@@ -52,11 +53,8 @@ func connectDatabaseSQLWithPublicIP(
 	// The cleanup function will stop the dialer's background refresh
 	// goroutines. Call it when you're done with your database connection to
 	// avoid a goroutine leak.
-	cleanup, err := pgxv5.RegisterDriver(
-		"alloydb-public", alloydbconn.WithDefaultDialOptions(
-			alloydbconn.WithPublicIP(),
-		),
-	)
+	opts = append(opts, alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()))
+	cleanup, err := pgxv5.RegisterDriver("alloydb-public", opts...)
 	if err != nil {
 		return nil, cleanup, err
 	}
