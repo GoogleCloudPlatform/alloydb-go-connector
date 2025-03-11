@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.15.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.14.1...v1.15.0) (2025-03-11)
+
+
+### Features
+
+* add support for Go 1.24 and drop Go 1.22 ([#658](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/658)) ([e9611ac](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/e9611ace582c264f513e5175cf50aa5e3a144b69))
+* allow for disabling built-in metrics ([#665](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/665)) ([3478f8f](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/3478f8f6ff827cff1792533c97e1dcb8c25bcdf4))
+
 ## [1.14.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.14.0...v1.14.1) (2025-02-11)
 
 
