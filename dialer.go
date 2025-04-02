@@ -675,14 +675,19 @@ func (d *Dialer) Close() error {
 	d.lock.Unlock()
 
 	d.metricsMu.Lock()
-	var err error
 	ctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
 	defer cancel()
 	for _, mr := range d.metricRecorders {
-		err = errors.Join(err, mr.Shutdown(ctx))
+		// If a metric recorder doesn't shutdown cleanly, log the error and
+		// keep going. An error here isn't actionable and should not be
+		// returned to the caller.
+		if err := mr.Shutdown(ctx); err != nil {
+			d.logger.Debugf(context.Background(), "internal metric exporter failed to shutdown: %v", err)
+		}
 	}
 	d.metricsMu.Unlock()
-	return err
+	return nil
+
 }
 
 func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceURI, mr telv2.MetricRecorder) (monitoredCache, bool, error) {
