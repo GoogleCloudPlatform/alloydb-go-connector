@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.15.0...v1.15.1) (2025-04-02)
+
+
+### Bug Fixes
+
+* shut down the internal exporter only once ([#671](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/671)) ([16a6782](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/16a67829b4e86e5d752e9b00220d06faedb4bbbd)), closes [#776](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/776)
+
 ## [1.15.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.14.1...v1.15.0) (2025-03-11)
 
 
