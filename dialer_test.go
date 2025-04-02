@@ -574,12 +574,32 @@ func TestDialerCloseReportsFriendlyError(t *testing.T) {
 	}
 }
 
-type mockMetricRecorder struct {
-	mu       sync.Mutex
-	gotAttrs telv2.Attributes
+func TestDialerClose(t *testing.T) {
+	d, err := NewDialer(
+		context.Background(),
+		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, _ := alloydb.ParseInstURI(testInstanceURI)
+	d.metricRecorders[inst] = &mockMetricRecorder{shutdownErr: errors.New("sorry")}
+
+	err = d.Close()
+
+	if err != nil {
+		t.Fatalf("expected no error, got = %v", err)
+	}
 }
 
-func (m *mockMetricRecorder) Shutdown(context.Context) error                              { return nil }
+type mockMetricRecorder struct {
+	mu          sync.Mutex
+	gotAttrs    telv2.Attributes
+	shutdownErr error
+}
+
+func (m *mockMetricRecorder) Shutdown(context.Context) error                              { return m.shutdownErr }
 func (m *mockMetricRecorder) RecordBytesRxCount(context.Context, int64, telv2.Attributes) {}
 func (m *mockMetricRecorder) RecordBytesTxCount(context.Context, int64, telv2.Attributes) {}
 func (m *mockMetricRecorder) RecordDialLatency(context.Context, int64, telv2.Attributes)  {}
