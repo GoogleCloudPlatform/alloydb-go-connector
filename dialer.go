@@ -152,7 +152,9 @@ type Dialer struct {
 
 	staticConnInfo io.Reader
 
-	client     *alloydbadmin.AlloyDBAdminClient
+	client *alloydbadmin.AlloyDBAdminClient
+	// clientOpts are options for all Google Cloud API clients. There should be
+	// no AlloyDB-specific configuration in these options.
 	clientOpts []option.ClientOption
 	logger     debug.ContextLogger
 
@@ -179,7 +181,7 @@ type Dialer struct {
 
 type nullLogger struct{}
 
-func (nullLogger) Debugf(context.Context, string, ...interface{}) {}
+func (nullLogger) Debugf(context.Context, string, ...any) {}
 
 // NewDialer creates a new Dialer.
 //
@@ -204,8 +206,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			"check cannot be used with WithIAMAuthN")
 	}
 	userAgent := strings.Join(cfg.userAgents, " ")
-	// Add this to the end to make sure it's not overridden
-	cfg.adminOpts = append(cfg.adminOpts, option.WithUserAgent(userAgent))
+	// Add user agent to the end to make sure it's not overridden.
+	cfg.clientOpts = append(cfg.clientOpts, option.WithUserAgent(userAgent))
 
 	// If no token source is configured, use ADC's token source.
 	ts := cfg.tokenSource
@@ -217,7 +219,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		}
 	}
 
-	client, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, cfg.adminOpts...)
+	cOpts := append(cfg.alloydbClientOpts, cfg.clientOpts...)
+	client, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, cOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AlloyDB Admin API client: %v", err)
 	}
@@ -251,7 +254,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		keyGenerator:            g,
 		refreshTimeout:          cfg.refreshTimeout,
 		client:                  client,
-		clientOpts:              cfg.adminOpts,
+		clientOpts:              cfg.clientOpts,
 		logger:                  cfg.logger,
 		defaultDialCfg:          dialCfg,
 		dialerID:                dialerID,
