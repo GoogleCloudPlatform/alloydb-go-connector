@@ -38,8 +38,14 @@ const CloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 type Option func(d *dialerConfig)
 
 type dialerConfig struct {
-	rsaKey         *rsa.PrivateKey
-	adminOpts      []apiopt.ClientOption
+	rsaKey *rsa.PrivateKey
+	// alloydbClientOpts are options to configure only the AlloyDB Rest API
+	// client. Configuration that should apply to all Google Cloud API clients
+	// should be included in clientOpts.
+	alloydbClientOpts []apiopt.ClientOption
+	// clientOpts are options to configure any Google Cloud API client. They
+	// should not include any AlloyDB-specific configuration.
+	clientOpts     []apiopt.ClientOption
 	dialOpts       []DialOption
 	dialFunc       func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout time.Duration
@@ -95,7 +101,7 @@ func WithCredentialsJSON(b []byte) Option {
 			return
 		}
 		d.tokenSource = c.TokenSource
-		d.adminOpts = append(d.adminOpts, apiopt.WithCredentials(c))
+		d.clientOpts = append(d.clientOpts, apiopt.WithCredentials(c))
 	}
 }
 
@@ -119,7 +125,7 @@ func WithDefaultDialOptions(opts ...DialOption) Option {
 func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
 		d.tokenSource = s
-		d.adminOpts = append(d.adminOpts, apiopt.WithTokenSource(s))
+		d.clientOpts = append(d.clientOpts, apiopt.WithTokenSource(s))
 	}
 }
 
@@ -144,7 +150,7 @@ func WithRefreshTimeout(t time.Duration) Option {
 // advanced use-cases.
 func WithHTTPClient(client *http.Client) Option {
 	return func(d *dialerConfig) {
-		d.adminOpts = append(d.adminOpts, apiopt.WithHTTPClient(client))
+		d.clientOpts = append(d.clientOpts, apiopt.WithHTTPClient(client))
 	}
 }
 
@@ -152,7 +158,7 @@ func WithHTTPClient(client *http.Client) Option {
 // use the provided URL.
 func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
-		d.adminOpts = append(d.adminOpts, apiopt.WithEndpoint(url))
+		d.alloydbClientOpts = append(d.alloydbClientOpts, apiopt.WithEndpoint(url))
 	}
 }
 
@@ -181,7 +187,7 @@ type debugLoggerWithoutContext struct {
 }
 
 // Debugf implements debug.ContextLogger.
-func (d *debugLoggerWithoutContext) Debugf(_ context.Context, format string, args ...interface{}) {
+func (d *debugLoggerWithoutContext) Debugf(_ context.Context, format string, args ...any) {
 	d.logger.Debugf(format, args...)
 }
 
