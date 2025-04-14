@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.15.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.15.0...v1.15.1) (2025-04-14)
+
+
+### Bug Fixes
+
+* configure Cloud Monitoring client correctly ([#673](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/673)) ([91d86af](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/91d86aff0496dfd58a46e894c402b581d4211d5e))
+* shut down the internal exporter only once ([#671](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/671)) ([16a6782](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/16a67829b4e86e5d752e9b00220d06faedb4bbbd)), closes [#776](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/776)
+
 ## [1.15.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.14.1...v1.15.0) (2025-03-11)
 
 
