@@ -606,14 +606,20 @@ func (b *buffer) put(buf *[]byte) {
 // newInstrumentedConn initializes an instrumentedConn that on closing will
 // decrement the number of open connects and record the result.
 func newInstrumentedConn(conn net.Conn, mr telv2.MetricRecorder, a telv2.Attributes, closeFunc func(), dialerID, instance string) *instrumentedConn {
-	return &instrumentedConn{
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &instrumentedConn{
 		Conn:           conn,
 		closeFunc:      closeFunc,
 		dialerID:       dialerID,
 		instance:       instance,
 		metricRecorder: mr,
 		attrs:          a,
+		reportTicker:   time.NewTicker(5 * time.Second),
+		stopReporter:   cancel,
 	}
+
+	go c.report(ctx)
+	return c
 }
 
 // instrumentedConn wraps a net.Conn and invokes closeFunc when the connection
@@ -625,6 +631,10 @@ type instrumentedConn struct {
 	instance       string
 	metricRecorder telv2.MetricRecorder
 	attrs          telv2.Attributes
+	bytesRead      atomic.Int64
+	bytesWritten   atomic.Int64
+	reportTicker   *time.Ticker
+	stopReporter   func()
 }
 
 // Read delegates to the underlying net.Conn interface and records number of
@@ -632,8 +642,7 @@ type instrumentedConn struct {
 func (i *instrumentedConn) Read(b []byte) (int, error) {
 	bytesRead, err := i.Conn.Read(b)
 	if err == nil {
-		go tel.RecordBytesReceived(context.Background(), int64(bytesRead), i.instance, i.dialerID)
-		go i.metricRecorder.RecordBytesRxCount(context.Background(), int64(bytesRead), i.attrs)
+		i.bytesRead.Add(int64(bytesRead))
 	}
 	return bytesRead, err
 }
@@ -643,8 +652,7 @@ func (i *instrumentedConn) Read(b []byte) (int, error) {
 func (i *instrumentedConn) Write(b []byte) (int, error) {
 	bytesWritten, err := i.Conn.Write(b)
 	if err == nil {
-		go tel.RecordBytesSent(context.Background(), int64(bytesWritten), i.instance, i.dialerID)
-		go i.metricRecorder.RecordBytesTxCount(context.Background(), int64(bytesWritten), i.attrs)
+		i.bytesWritten.Add(int64(bytesWritten))
 	}
 	return bytesWritten, err
 }
@@ -652,12 +660,31 @@ func (i *instrumentedConn) Write(b []byte) (int, error) {
 // Close delegates to the underlying net.Conn interface and reports the close
 // to the provided closeFunc only when Close returns no error.
 func (i *instrumentedConn) Close() error {
-	err := i.Conn.Close()
-	if err != nil {
-		return err
+	i.stopReporter()
+	i.reportCounters()
+	i.closeFunc()
+	return i.Conn.Close()
+}
+
+func (i *instrumentedConn) reportCounters() {
+	bytesRead := i.bytesRead.Swap(0)
+	bytesWritten := i.bytesWritten.Swap(0)
+	tel.RecordBytesReceived(context.Background(), bytesRead, i.instance, i.dialerID)
+	tel.RecordBytesSent(context.Background(), bytesWritten, i.instance, i.dialerID)
+	i.metricRecorder.RecordBytesRxCount(context.Background(), int64(bytesRead), i.attrs)
+	i.metricRecorder.RecordBytesTxCount(context.Background(), int64(bytesWritten), i.attrs)
+}
+
+func (i *instrumentedConn) report(ctx context.Context) {
+	defer i.reportTicker.Stop()
+	for {
+		select {
+		case <-i.reportTicker.C:
+			i.reportCounters()
+		case <-ctx.Done():
+			return
+		}
 	}
-	go i.closeFunc()
-	return nil
 }
 
 // Close closes the Dialer; it prevents the Dialer from refreshing the information
