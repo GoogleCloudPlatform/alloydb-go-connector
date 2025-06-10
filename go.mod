@@ -2,8 +2,6 @@ module cloud.google.com/go/alloydbconn
 
 go 1.23.8
 
-toolchain go1.23.10
-
 require (
 	cloud.google.com/go/alloydb v1.16.1
 	cloud.google.com/go/monitoring v1.24.2
