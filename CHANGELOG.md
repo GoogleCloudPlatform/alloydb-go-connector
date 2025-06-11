@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.3](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.15.2...v1.15.3) (2025-06-11)
+
+
+### Bug Fixes
+
+* reduce the number of memory allocations and latency overhead ([#686](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/686)) ([274ce04](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/274ce04953ea5326ab1147c34d7a554847037c2e))
+
 ## [1.15.2](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.15.1...v1.15.2) (2025-05-13)
 
 
