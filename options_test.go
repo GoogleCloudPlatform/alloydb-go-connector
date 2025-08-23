@@ -15,41 +15,46 @@
 package alloydbconn
 
 import (
-	"net/http"
+	"context"
 	"testing"
+
+	"golang.org/x/oauth2"
 )
 
-func TestClientOptions(t *testing.T) {
+type nullTokenSource struct{}
+
+func (nullTokenSource) Token() (*oauth2.Token, error) {
+	return nil, nil
+}
+
+func TestNewDialerConfig_IncompatibleOptions(t *testing.T) {
 	tcs := []struct {
-		desc                     string
-		opt                      Option
-		wantClientOptsLen        int
-		wantAlloyDBClientOptsLen int
+		desc string
+		opts []Option
 	}{
 		{
-			desc:                     "WithAdminAPIEndpoint",
-			opt:                      WithAdminAPIEndpoint("some-endpoint"),
-			wantAlloyDBClientOptsLen: 1,
-			wantClientOptsLen:        0,
+			desc: "WithOptOutOfAdvancedConnectionCheck and WithIAMAuthN",
+			opts: []Option{WithOptOutOfAdvancedConnectionCheck(), WithIAMAuthN()},
 		},
 		{
-			desc:                     "WithHTTPClient",
-			opt:                      WithHTTPClient(http.DefaultClient),
-			wantAlloyDBClientOptsLen: 0,
-			wantClientOptsLen:        1,
+			desc: "WithCredentialsFile and WithCredentialsJSON",
+			opts: []Option{WithCredentialsFile("/some/file"), WithCredentialsJSON(nil)},
+		},
+		{
+			desc: "WithCredentialsFile and WithTokenSource",
+			opts: []Option{WithCredentialsFile("/some/file"), WithTokenSource(nullTokenSource{})},
+		},
+		{
+			desc: "WithCredentialsJSON and WithTokenSource",
+			opts: []Option{WithCredentialsJSON([]byte(`sample-json`)), WithTokenSource(nullTokenSource{})},
 		},
 	}
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
-			d := &dialerConfig{}
-			tc.opt(d)
-
-			if got, want := len(d.clientOpts), tc.wantClientOptsLen; got != want {
-				t.Errorf("clientOpts: got = %v, want = %v", got, want)
-			}
-			if got, want := len(d.alloydbClientOpts), tc.wantAlloyDBClientOptsLen; got != want {
-				t.Errorf("alloydbClientOpts: got = %v, want = %v", got, want)
+			_, err := newDialerConfig(context.Background(), tc.opts...)
+			if err == nil {
+				t.Fatal("expected an error, but got nil")
 			}
 		})
 	}
