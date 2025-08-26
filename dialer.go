@@ -36,9 +36,7 @@ import (
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
 	"cloud.google.com/go/alloydbconn/internal/tel"
 	"github.com/google/uuid"
-	"golang.org/x/net/proxy"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 	"google.golang.org/protobuf/proto"
 
@@ -189,34 +187,9 @@ func (nullLogger) Debugf(context.Context, string, ...any) {}
 // RSA keypair is performed. Calls with a WithRSAKeyPair DialOption or after a default
 // RSA keypair is generated will be faster.
 func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
-	cfg := &dialerConfig{
-		refreshTimeout: alloydb.RefreshTimeout,
-		dialFunc:       proxy.Dial,
-		logger:         nullLogger{},
-		userAgents:     []string{userAgent},
-	}
-	for _, opt := range opts {
-		opt(cfg)
-		if cfg.err != nil {
-			return nil, cfg.err
-		}
-	}
-	if cfg.disableMetadataExchange && cfg.useIAMAuthN {
-		return nil, errors.New("incompatible options: WithOptOutOfAdvancedConnection " +
-			"check cannot be used with WithIAMAuthN")
-	}
-	userAgent := strings.Join(cfg.userAgents, " ")
-	// Add user agent to the end to make sure it's not overridden.
-	cfg.clientOpts = append(cfg.clientOpts, option.WithUserAgent(userAgent))
-
-	// If no token source is configured, use ADC's token source.
-	ts := cfg.tokenSource
-	if ts == nil {
-		var err error
-		ts, err = google.DefaultTokenSource(ctx, CloudPlatformScope)
-		if err != nil {
-			return nil, err
-		}
+	cfg, err := newDialerConfig(ctx, opts...)
+	if err != nil {
+		return nil, err
 	}
 
 	cOpts := append(cfg.alloydbClientOpts, cfg.clientOpts...)
@@ -261,7 +234,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		metricRecorders:         map[alloydb.InstanceURI]telv2.MetricRecorder{},
 		dialFunc:                cfg.dialFunc,
 		useIAMAuthN:             cfg.useIAMAuthN,
-		iamTokenSource:          ts,
+		iamTokenSource:          cfg.tokenSource,
 		userAgent:               userAgent,
 		buffer:                  newBuffer(),
 	}
