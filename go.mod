@@ -1,6 +1,8 @@
 module cloud.google.com/go/alloydbconn
 
-go 1.24
+go 1.24.0
+
+toolchain go1.24.7
 
 require (
 	cloud.google.com/go/alloydb v1.18.0
@@ -19,9 +21,9 @@ require (
 	golang.org/x/oauth2 v0.30.0
 	golang.org/x/time v0.12.0
 	google.golang.org/api v0.246.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250811160224-6b04f9b4fc78
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250826171959-ef028d996bc1
 	google.golang.org/grpc v1.74.2
-	google.golang.org/protobuf v1.36.7
+	google.golang.org/protobuf v1.36.8
 )
 
 require (
