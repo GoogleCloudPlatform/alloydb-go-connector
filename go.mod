@@ -1,6 +1,6 @@
 module cloud.google.com/go/alloydbconn
 
-go 1.23.8
+go 1.24
 
 require (
 	cloud.google.com/go/alloydb v1.18.0
