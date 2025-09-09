@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.6](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.15.5...v1.15.6) (2025-09-09)
+
+
+### Bug Fixes
+
+* return error with conflicting credential opts ([#705](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/705)) ([bb3dc3a](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/bb3dc3a6dfb1bfe0f92322046323daf938ba5d03))
+
 ## [1.15.5](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.15.4...v1.15.5) (2025-08-11)
 
 
