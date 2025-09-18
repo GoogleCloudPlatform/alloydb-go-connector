@@ -312,35 +312,83 @@ func TestAutoIAMAuthN(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	ctx := context.Background()
-
-	d, err := alloydbconn.NewDialer(ctx, alloydbconn.WithIAMAuthN(), alloydbconn.WithOptOutOfBuiltInTelemetry())
-	if err != nil {
-		t.Fatalf("failed to init Dialer: %v", err)
+	tcs := []struct {
+		desc         string
+		opts         []alloydbconn.Option
+		dialOpts     []alloydbconn.DialOption
+		wantIAMAuthN bool
+	}{
+		{
+			desc: "default behavior",
+			opts: []alloydbconn.Option{
+				alloydbconn.WithIAMAuthN(),
+				alloydbconn.WithOptOutOfBuiltInTelemetry(),
+			},
+			wantIAMAuthN: true,
+		},
+		{
+			desc: "dialer with IAM authn off, dial on",
+			opts: []alloydbconn.Option{
+				alloydbconn.WithOptOutOfBuiltInTelemetry(),
+			},
+			dialOpts: []alloydbconn.DialOption{
+				alloydbconn.WithDialIAMAuthN(true),
+			},
+			wantIAMAuthN: true,
+		},
+		{
+			desc: "dialer with IAM authn on, dial off",
+			opts: []alloydbconn.Option{
+				alloydbconn.WithIAMAuthN(),
+				alloydbconn.WithOptOutOfBuiltInTelemetry(),
+			},
+			dialOpts: []alloydbconn.DialOption{
+				alloydbconn.WithDialIAMAuthN(false),
+			},
+			wantIAMAuthN: false,
+		},
 	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			ctx := context.Background()
 
-	dsn := fmt.Sprintf(
-		"user=%s dbname=%s sslmode=disable",
-		alloydbIAMUser, alloydbDB,
-	)
-	config, err := pgx.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("failed to parse pgx config: %v", err)
-	}
+			d, err := alloydbconn.NewDialer(ctx, tc.opts...)
+			if err != nil {
+				t.Fatalf("failed to init Dialer: %v", err)
+			}
 
-	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return d.Dial(ctx, alloydbInstanceName)
-	}
+			var (
+				password = "ignored"
+				user     = alloydbIAMUser
+			)
+			if !tc.wantIAMAuthN {
+				user = alloydbUser
+				password = alloydbPass
+			}
+			dsn := fmt.Sprintf(
+				"user=%s dbname=%s password=%s sslmode=disable",
+				user, alloydbDB, password,
+			)
+			config, err := pgx.ParseConfig(dsn)
+			if err != nil {
+				t.Fatalf("failed to parse pgx config: %v", err)
+			}
 
-	conn, connErr := pgx.ConnectConfig(ctx, config)
-	if connErr != nil {
-		t.Fatalf("failed to connect: %s", connErr)
-	}
-	defer conn.Close(ctx)
+			config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return d.Dial(ctx, alloydbInstanceName, tc.dialOpts...)
+			}
 
-	var tt time.Time
-	if err := conn.QueryRow(context.Background(), "SELECT NOW()").Scan(&tt); err != nil {
-		t.Fatal(err)
+			conn, connErr := pgx.ConnectConfig(ctx, config)
+			if connErr != nil {
+				t.Fatalf("failed to connect: %s", connErr)
+			}
+			defer conn.Close(ctx)
+
+			var tt time.Time
+			if err := conn.QueryRow(context.Background(), "SELECT NOW()").Scan(&tt); err != nil {
+				t.Fatal(err)
+			}
+			t.Log(tt)
+		})
 	}
-	t.Log(tt)
 }

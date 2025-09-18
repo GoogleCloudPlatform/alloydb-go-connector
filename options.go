@@ -364,6 +364,7 @@ type dialCfg struct {
 	dialFunc     func(ctx context.Context, network, addr string) (net.Conn, error)
 	ipType       string
 	tcpKeepAlive time.Duration
+	iamAuthN     bool
 }
 
 // DialOptions turns a list of DialOption instances into an DialOption.
@@ -413,5 +414,14 @@ func WithPrivateIP() DialOption {
 func WithPSC() DialOption {
 	return func(cfg *dialCfg) {
 		cfg.ipType = alloydb.PSC
+	}
+}
+
+// WithDialIAMAuthN allows calls to Dial to enable or disable IAM AuthN on a
+// one-off basis, regardless whether the dialer itself is configured with IAM
+// AuthN. There is no performance penalty to using this option.
+func WithDialIAMAuthN(enabled bool) DialOption {
+	return func(cfg *dialCfg) {
+		cfg.iamAuthN = enabled
 	}
 }
