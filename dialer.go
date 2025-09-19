@@ -170,7 +170,6 @@ type Dialer struct {
 	// network. By default it is golang.org/x/net/proxy#Dial.
 	dialFunc func(cxt context.Context, network, addr string) (net.Conn, error)
 
-	useIAMAuthN    bool
 	iamTokenSource oauth2.TokenSource
 	userAgent      string
 
@@ -201,6 +200,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	dialCfg := dialCfg{
 		ipType:       alloydb.PrivateIP,
 		tcpKeepAlive: defaultTCPKeepAlive,
+		iamAuthN:     cfg.useIAMAuthN, // Use dialer configuration as default
 	}
 	for _, opt := range cfg.dialOpts {
 		opt(&dialCfg)
@@ -233,7 +233,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		dialerID:                dialerID,
 		metricRecorders:         map[alloydb.InstanceURI]telv2.MetricRecorder{},
 		dialFunc:                cfg.dialFunc,
-		useIAMAuthN:             cfg.useIAMAuthN,
 		iamTokenSource:          cfg.tokenSource,
 		userAgent:               userAgent,
 		buffer:                  newBuffer(),
@@ -271,6 +270,10 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		return nil, ErrDialerClosed
 	default:
 	}
+	cfg := d.defaultDialCfg
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 
 	inst, err := alloydb.ParseInstURI(instance)
 	if err != nil {
@@ -282,7 +285,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		startTime = time.Now()
 		endDial   tel.EndSpanFunc
 		attrs     = telv2.Attributes{
-			IAMAuthN:    d.useIAMAuthN,
+			IAMAuthN:    cfg.iamAuthN,
 			UserAgent:   d.userAgent,
 			RefreshType: telv2.RefreshAheadType,
 		}
@@ -299,11 +302,6 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		go mr.RecordDialCount(ctx, attrs)
 		endDial(err)
 	}()
-
-	cfg := d.defaultDialCfg
-	for _, opt := range opts {
-		opt(&cfg)
-	}
 
 	var endInfo tel.EndSpanFunc
 	ctx, endInfo = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.InstanceInfo")
@@ -400,7 +398,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if !d.disableMetadataExchange {
 		// The metadata exchange must occur after the TLS connection is established
 		// to avoid leaking sensitive information.
-		err = d.metadataExchange(tlsConn)
+		err = d.metadataExchange(tlsConn, cfg.iamAuthN)
 		if err != nil {
 			_ = tlsConn.Close() // best effort close attempt
 			attrs.DialStatus = telv2.DialMDXError
@@ -480,13 +478,13 @@ func invalidClientCert(
 //     metadata exchange has succeeded and the connection is complete.
 //
 // Subsequent interactions with the server use the database protocol.
-func (d *Dialer) metadataExchange(conn net.Conn) error {
+func (d *Dialer) metadataExchange(conn net.Conn, useIAMAuthN bool) error {
 	tok, err := d.iamTokenSource.Token()
 	if err != nil {
 		return err
 	}
 	authType := connectorspb.MetadataExchangeRequest_DB_NATIVE
-	if d.useIAMAuthN {
+	if useIAMAuthN {
 		authType = connectorspb.MetadataExchangeRequest_AUTO_IAM
 	}
 	req := &connectorspb.MetadataExchangeRequest{
