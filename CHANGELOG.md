@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.15.6...v1.16.0) (2025-10-20)
+
+
+### Features
+
+* add support for per-dial IAM AuthN config ([#713](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/713)) ([3f405d4](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/3f405d411bf0edcac5effbbbcc803f7e54cb4c88))
+
 ## [1.15.6](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.15.5...v1.15.6) (2025-09-09)
 
 
