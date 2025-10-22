@@ -93,7 +93,7 @@ func (i *InstanceURI) URI() string {
 
 // String returns a short-hand representation of an instance URI.
 func (i *InstanceURI) String() string {
-	return fmt.Sprintf("%s/%s/%s/%s", i.project, i.region, i.cluster, i.name)
+	return fmt.Sprintf("%s.%s.%s.%s", i.project, i.region, i.cluster, i.name)
 }
 
 // ParseInstURI initializes a new InstanceURI struct.
