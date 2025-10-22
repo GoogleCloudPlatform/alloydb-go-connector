@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.16.0...v1.16.1) (2025-10-22)
+
+
+### Bug Fixes
+
+* use correct short Instance URI form in logging ([#719](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/719)) ([3cfa07f](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/3cfa07f5b8d8ee665d3e54867afd6e5555773d93))
+
 ## [1.16.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.15.6...v1.16.0) (2025-10-20)
 
 
