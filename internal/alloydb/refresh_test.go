@@ -21,6 +21,7 @@ import (
 	"time"
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
+	"cloud.google.com/go/alloydbconn/instance"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"google.golang.org/api/option"
 )
@@ -33,7 +34,7 @@ func TestRefresh(t *testing.T) {
 	wantPSC := "x.y.alloydb.goog"
 	wantExpiry := time.Now().Add(time.Hour).UTC().Round(time.Second)
 	wantInstURI := "projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
-	cn, err := ParseInstURI(wantInstURI)
+	cn, err := instance.ParseURI(wantInstURI)
 	if err != nil {
 		t.Fatalf("parseConnName(%s)failed : %v", cn, err)
 	}
@@ -99,7 +100,7 @@ func TestRefresh(t *testing.T) {
 
 func TestRefreshFailsFast(t *testing.T) {
 	wantInstURI := "projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
-	cn, err := ParseInstURI(wantInstURI)
+	cn, err := instance.ParseURI(wantInstURI)
 	if err != nil {
 		t.Fatalf("parseConnName(%s)failed : %v", cn, err)
 	}

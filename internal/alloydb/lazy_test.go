@@ -29,7 +29,7 @@ import (
 
 func TestLazyRefreshCacheConnectionInfo(t *testing.T) {
 	u := testInstanceURI()
-	inst := mock.NewFakeInstance(u.project, u.region, u.cluster, u.name)
+	inst := mock.NewFakeInstance(u.Project, u.Region, u.Cluster, u.Name)
 	client, url, cleanup := mock.HTTPClient(
 		mock.InstanceGetSuccess(inst, 1),
 		mock.CreateEphemeralSuccess(inst, 1),
@@ -74,7 +74,7 @@ func TestLazyRefreshCacheConnectionInfo(t *testing.T) {
 
 func TestLazyRefreshCacheForceRefresh(t *testing.T) {
 	u := testInstanceURI()
-	inst := mock.NewFakeInstance(u.project, u.region, u.cluster, u.name)
+	inst := mock.NewFakeInstance(u.Project, u.Region, u.Cluster, u.Name)
 	client, url, cleanup := mock.HTTPClient(
 		mock.InstanceGetSuccess(inst, 2),
 		mock.CreateEphemeralSuccess(inst, 2),
@@ -144,7 +144,7 @@ func (m *mockMetricRecorder) Verify(t *testing.T, wantAttrs telv2.Attributes) {
 
 func TestLazyRefreshCacheMetrics(t *testing.T) {
 	u := testInstanceURI()
-	inst := mock.NewFakeInstance(u.project, u.region, u.cluster, u.name)
+	inst := mock.NewFakeInstance(u.Project, u.Region, u.Cluster, u.Name)
 	tcs := []struct {
 		desc      string
 		requests  []*mock.Request

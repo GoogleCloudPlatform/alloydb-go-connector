@@ -17,14 +17,13 @@ package alloydb
 import (
 	"context"
 	"crypto/rsa"
-	"fmt"
-	"regexp"
 	"sync"
 	"time"
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/debug"
 	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/instance"
 	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
 	"golang.org/x/time/rate"
 )
@@ -46,76 +45,6 @@ const (
 	// refreshBurst is the initial burst allowed by the rate limiter.
 	refreshBurst = 2
 )
-
-var (
-	// Instance URI is in the format:
-	// 'projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>'
-	// Additionally, we have to support legacy "domain-scoped" projects
-	// (e.g. "google.com:PROJECT")
-	instURIRegex = regexp.MustCompile("projects/([^:]+(:[^:]+)?)/locations/([^:]+)/clusters/([^:]+)/instances/([^:]+)")
-)
-
-// InstanceURI represents an AlloyDB instance.
-type InstanceURI struct {
-	project string
-	region  string
-	cluster string
-	name    string
-}
-
-// Project returns the project ID of the cluster.
-func (i InstanceURI) Project() string {
-	return i.project
-}
-
-// Region returns the region (aka location) of the cluster.
-func (i InstanceURI) Region() string {
-	return i.region
-}
-
-// Cluster returns the name of the cluster.
-func (i InstanceURI) Cluster() string {
-	return i.cluster
-}
-
-// Name returns the name of the instance.
-func (i InstanceURI) Name() string {
-	return i.name
-}
-
-// URI returns the full URI specifying an instance.
-func (i *InstanceURI) URI() string {
-	return fmt.Sprintf(
-		"projects/%s/locations/%s/clusters/%s/instances/%s",
-		i.project, i.region, i.cluster, i.name,
-	)
-}
-
-// String returns a short-hand representation of an instance URI.
-func (i *InstanceURI) String() string {
-	return fmt.Sprintf("%s/%s/%s/%s", i.project, i.region, i.cluster, i.name)
-}
-
-// ParseInstURI initializes a new InstanceURI struct.
-func ParseInstURI(cn string) (InstanceURI, error) {
-	b := []byte(cn)
-	m := instURIRegex.FindSubmatch(b)
-	if m == nil {
-		err := errtype.NewConfigError(
-			"invalid instance URI, expected projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
-			cn,
-		)
-		return InstanceURI{}, err
-	}
-
-	c := InstanceURI{
-		project: string(m[1]),
-		region:  string(m[3]),
-		cluster: string(m[4]),
-		name:    string(m[5]),
-	}
-	return c, nil
-}
 
 // refreshOperation is a pending result of a refresh operation of data used to
 // connect securely. It should only be initialized by the Instance struct as
@@ -157,7 +86,7 @@ func (r *refreshOperation) isValid() bool {
 // required information approximately 4 minutes before the previous certificate
 // expires (every ~56 minutes).
 type RefreshAheadCache struct {
-	instanceURI InstanceURI
+	instanceURI instance.URI
 	logger      debug.ContextLogger
 	// refreshTimeout sets the maximum duration a refresh cycle can run
 	// for.
@@ -187,7 +116,7 @@ type RefreshAheadCache struct {
 // NewRefreshAheadCache initializes a new cache that proactively refreshes the
 // caches connection info.
 func NewRefreshAheadCache(
-	instance InstanceURI,
+	instance instance.URI,
 	l debug.ContextLogger,
 	client *alloydbadmin.AlloyDBAdminClient,
 	key *rsa.PrivateKey,

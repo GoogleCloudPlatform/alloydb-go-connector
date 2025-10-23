@@ -22,6 +22,7 @@ import (
 
 	"cloud.google.com/go/alloydbconn/debug"
 	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/instance"
 )
 
 type staticPSCConfig struct {
@@ -85,7 +86,7 @@ type StaticConnectionInfoCache struct {
 // NewStaticConnectionInfoCache creates a connection info cache that will
 // always return the predefined connection info within the provided io.Reader
 func NewStaticConnectionInfoCache(
-	inst InstanceURI,
+	uri instance.URI,
 	l debug.ContextLogger,
 	r io.Reader,
 ) (*StaticConnectionInfoCache, error) {
@@ -97,12 +98,12 @@ func NewStaticConnectionInfoCache(
 	if err := json.Unmarshal(data, &d); err != nil {
 		return nil, err
 	}
-	static, ok := d.InstanceInfo[inst.URI()]
+	static, ok := d.InstanceInfo[uri.URI()]
 	if !ok {
-		return nil, errtype.NewConfigError("unknown instance", inst.String())
+		return nil, errtype.NewConfigError("unknown instance", uri.String())
 	}
 	cc, err := newClientCertificate(
-		inst, []byte(d.PrivateKey), static.PEMCertificateChain, static.CACert,
+		uri, []byte(d.PrivateKey), static.PEMCertificateChain, static.CACert,
 	)
 	if err != nil {
 		return nil, err
@@ -110,7 +111,7 @@ func NewStaticConnectionInfoCache(
 	pool := x509.NewCertPool()
 	pool.AddCert(cc.caCert)
 	info := ConnectionInfo{
-		Instance: inst,
+		Instance: uri,
 		IPAddrs: map[string]string{
 			PublicIP:  static.PublicIPAddress,
 			PrivateIP: static.IPAddress,

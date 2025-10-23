@@ -29,6 +29,7 @@ import (
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydb/apiv1alpha/alloydbpb"
 	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/instance"
 	"cloud.google.com/go/alloydbconn/internal/tel"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -53,21 +54,18 @@ type instanceInfo struct {
 // information about an AlloyDB instance that is used to create secure
 // connections.
 func fetchInstanceInfo(
-	ctx context.Context, cl *alloydbadmin.AlloyDBAdminClient, inst InstanceURI,
+	ctx context.Context, cl *alloydbadmin.AlloyDBAdminClient, uri instance.URI,
 ) (i instanceInfo, err error) {
 	var end tel.EndSpanFunc
 	ctx, end = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchMetadata")
 	defer func() { end(err) }()
 	req := &alloydbpb.GetConnectionInfoRequest{
-		Parent: fmt.Sprintf(
-			"projects/%s/locations/%s/clusters/%s/instances/%s",
-			inst.project, inst.region, inst.cluster, inst.name,
-		),
+		Parent: uri.URI(),
 	}
 	resp, err := cl.GetConnectionInfo(ctx, req)
 	if err != nil {
 		return instanceInfo{}, errtype.NewRefreshError(
-			"failed to get instance metadata", inst.String(), err,
+			"failed to get instance metadata", uri.String(), err,
 		)
 	}
 
@@ -86,7 +84,7 @@ func fetchInstanceInfo(
 	if len(ipAddrs) == 0 {
 		return instanceInfo{}, errtype.NewConfigError(
 			"cannot connect to instance - it has no supported IP addresses",
-			inst.String(),
+			uri.String(),
 		)
 	}
 	return instanceInfo{ipAddrs: ipAddrs, uid: resp.InstanceUid}, nil
@@ -119,7 +117,7 @@ type clientCertificate struct {
 func fetchClientCertificate(
 	ctx context.Context,
 	cl *alloydbadmin.AlloyDBAdminClient,
-	inst InstanceURI,
+	uri instance.URI,
 	key *rsa.PrivateKey,
 	disableMetadataExchange bool,
 ) (cc *clientCertificate, err error) {
@@ -134,9 +132,7 @@ func fetchClientCertificate(
 		return nil, err
 	}
 	req := &alloydbpb.GenerateClientCertificateRequest{
-		Parent: fmt.Sprintf(
-			"projects/%s/locations/%s/clusters/%s", inst.project, inst.region, inst.cluster,
-		),
+		Parent:              uri.Parent(),
 		PublicKey:           buf.String(),
 		CertDuration:        durationpb.New(time.Second * 3600),
 		UseMetadataExchange: !disableMetadataExchange,
@@ -145,7 +141,7 @@ func fetchClientCertificate(
 	if err != nil {
 		return nil, errtype.NewRefreshError(
 			"create ephemeral cert failed",
-			inst.String(),
+			uri.String(),
 			err,
 		)
 	}
@@ -157,12 +153,12 @@ func fetchClientCertificate(
 	keyPEM := pem.EncodeToMemory(keyPEMBlock)
 
 	return newClientCertificate(
-		inst, keyPEM, resp.PemCertificateChain, resp.CaCert,
+		uri, keyPEM, resp.PemCertificateChain, resp.CaCert,
 	)
 }
 
 func newClientCertificate(
-	inst InstanceURI,
+	inst instance.URI,
 	keyPEM []byte,
 	chain []string,
 	caCertRaw string,
@@ -252,7 +248,7 @@ type adminAPIClient struct {
 
 // ConnectionInfo holds all the data necessary to connect to an instance.
 type ConnectionInfo struct {
-	Instance   InstanceURI
+	Instance   instance.URI
 	IPAddrs    map[string]string
 	ClientCert tls.Certificate
 	RootCAs    *x509.CertPool
@@ -260,7 +256,7 @@ type ConnectionInfo struct {
 }
 
 func (c adminAPIClient) connectionInfo(
-	ctx context.Context, i InstanceURI,
+	ctx context.Context, i instance.URI,
 ) (res ConnectionInfo, err error) {
 
 	var refreshEnd tel.EndSpanFunc
