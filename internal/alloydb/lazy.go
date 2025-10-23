@@ -22,13 +22,14 @@ import (
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/debug"
+	"cloud.google.com/go/alloydbconn/instance"
 	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
 )
 
 // LazyRefreshCache is caches connection info and refreshes the cache only when
 // a caller requests connection info and the current certificate is expired.
 type LazyRefreshCache struct {
-	uri            InstanceURI
+	uri            instance.URI
 	logger         debug.ContextLogger
 	r              adminAPIClient
 	mu             sync.Mutex
@@ -40,7 +41,7 @@ type LazyRefreshCache struct {
 
 // NewLazyRefreshCache initializes a new LazyRefreshCache.
 func NewLazyRefreshCache(
-	uri InstanceURI,
+	uri instance.URI,
 	l debug.ContextLogger,
 	client *alloydbadmin.AlloyDBAdminClient,
 	key *rsa.PrivateKey,

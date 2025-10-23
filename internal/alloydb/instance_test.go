@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/instance"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
@@ -46,80 +47,6 @@ func genRSAKey() *rsa.PrivateKey {
 
 // rsaKey is used for test only.
 var rsaKey = genRSAKey()
-
-func TestParseInstURI(t *testing.T) {
-	tcs := []struct {
-		desc string
-		in   string
-		want InstanceURI
-	}{
-		{
-			desc: "vanilla instance URI",
-			in:   "projects/proj/locations/reg/clusters/clust/instances/name",
-			want: InstanceURI{
-				project: "proj",
-				region:  "reg",
-				cluster: "clust",
-				name:    "name",
-			},
-		},
-		{
-			desc: "with legacy domain-scoped project",
-			in:   "projects/google.com:proj/locations/reg/clusters/clust/instances/name",
-			want: InstanceURI{
-				project: "google.com:proj",
-				region:  "reg",
-				cluster: "clust",
-				name:    "name",
-			},
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.desc, func(t *testing.T) {
-			got, err := ParseInstURI(tc.in)
-			if err != nil {
-				t.Fatalf("want no error, got = %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("want = %v, got = %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestParseConnNameErrors(t *testing.T) {
-	tcs := []struct {
-		desc string
-		in   string
-	}{
-		{
-			desc: "malformatted",
-			in:   "not-correct",
-		},
-		{
-			desc: "missing project",
-			in:   "reg:clust:name",
-		},
-		{
-			desc: "missing cluster",
-			in:   "proj:reg:name",
-		},
-		{
-			desc: "empty",
-			in:   "::::",
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.desc, func(t *testing.T) {
-			_, err := ParseInstURI(tc.in)
-			if err == nil {
-				t.Fatal("want error, got nil")
-			}
-		})
-	}
-}
 
 type stubTokenSource struct{}
 
@@ -196,8 +123,8 @@ func TestConnectionInfo(t *testing.T) {
 
 }
 
-func testInstanceURI() InstanceURI {
-	i, _ := ParseInstURI("projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
+func testInstanceURI() instance.URI {
+	i, _ := instance.ParseURI("projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance")
 	return i
 }
 
@@ -314,7 +241,7 @@ func TestRefreshDuration(t *testing.T) {
 
 func TestRefreshAheadCacheMetrics(t *testing.T) {
 	u := testInstanceURI()
-	inst := mock.NewFakeInstance(u.Project(), u.Region(), u.Cluster(), u.Name())
+	inst := mock.NewFakeInstance(u.Project, u.Region, u.Cluster, u.Name)
 
 	tcs := []struct {
 		desc      string

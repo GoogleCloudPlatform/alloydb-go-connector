@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/alloydbconn/errtype"
+	"cloud.google.com/go/alloydbconn/instance"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
 	"cloud.google.com/go/alloydbconn/internal/mock"
 	"golang.org/x/oauth2"
@@ -365,11 +366,11 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			// Manually populate the internal cache with a spy
-			inst, _ := alloydb.ParseInstURI(tc.uri)
+			uri, _ := instance.ParseURI(tc.uri)
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[inst] = monitoredCache{
+			d.cache[uri] = monitoredCache{
 				connectionInfoCache: spy,
 			}
 
@@ -385,7 +386,7 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 
 			// Now verify that bad connection name has been deleted from map.
 			d.lock.RLock()
-			_, ok := d.cache[inst]
+			_, ok := d.cache[uri]
 			d.lock.RUnlock()
 			if ok {
 				t.Fatal("connection info was not removed from cache")
@@ -407,7 +408,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 
 	sentinel := errors.New("connect info failed")
 	inst := testInstanceURI
-	cn, _ := alloydb.ParseInstURI(inst)
+	uri, _ := instance.ParseURI(inst)
 	spy := &spyConnectionInfoCache{
 		connectInfoCalls: []connectionInfoResp{
 			// First call returns expired certificate
@@ -422,7 +423,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 			},
 		},
 	}
-	d.cache[cn] = monitoredCache{
+	d.cache[uri] = monitoredCache{
 		connectionInfoCache: spy,
 	}
 
@@ -444,7 +445,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 
 	// Now verify that bad connection name has been deleted from map.
 	d.lock.RLock()
-	_, ok := d.cache[cn]
+	_, ok := d.cache[uri]
 	d.lock.RUnlock()
 	if ok {
 		t.Fatal("bad instance was not removed from the cache")
@@ -583,8 +584,8 @@ func TestDialerClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := alloydb.ParseInstURI(testInstanceURI)
-	d.metricRecorders[inst] = &mockMetricRecorder{shutdownErr: errors.New("sorry")}
+	uri, _ := instance.ParseURI(testInstanceURI)
+	d.metricRecorders[uri] = &mockMetricRecorder{shutdownErr: errors.New("sorry")}
 
 	err = d.Close()
 
@@ -627,10 +628,10 @@ func (m *mockMetricRecorder) Verify(t *testing.T, wantAttrs telv2.Attributes) {
 }
 
 func TestDialerDialMetrics(t *testing.T) {
-	u, _ := alloydb.ParseInstURI(testInstanceURI)
+	u, _ := instance.ParseURI(testInstanceURI)
 	ctx := context.Background()
 	inst := mock.NewFakeInstance(
-		u.Project(), u.Region(), u.Cluster(), u.Name(),
+		u.Project, u.Region, u.Cluster, u.Name,
 	)
 	mc, url, cleanup := mock.HTTPClient(
 		mock.InstanceGetSuccess(inst, 1),
