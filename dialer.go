@@ -35,8 +35,8 @@ import (
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
 	"cloud.google.com/go/alloydbconn/internal/tel"
+	"cloud.google.com/go/auth"
 	"github.com/google/uuid"
-	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 	"google.golang.org/protobuf/proto"
 
@@ -170,7 +170,7 @@ type Dialer struct {
 	// network. By default it is golang.org/x/net/proxy#Dial.
 	dialFunc func(cxt context.Context, network, addr string) (net.Conn, error)
 
-	iamTokenSource oauth2.TokenSource
+	iamTokenSource auth.TokenProvider
 	userAgent      string
 
 	buffer *buffer
@@ -186,7 +186,7 @@ func (nullLogger) Debugf(context.Context, string, ...any) {}
 // RSA keypair is performed. Calls with a WithRSAKeyPair DialOption or after a default
 // RSA keypair is generated will be faster.
 func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
-	cfg, err := newDialerConfig(ctx, opts...)
+	cfg, err := newDialerConfig(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		dialerID:                dialerID,
 		metricRecorders:         map[alloydb.InstanceURI]telv2.MetricRecorder{},
 		dialFunc:                cfg.dialFunc,
-		iamTokenSource:          cfg.tokenSource,
+		iamTokenSource:          cfg.tokenProvider,
 		userAgent:               userAgent,
 		buffer:                  newBuffer(),
 	}
@@ -398,7 +398,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if !d.disableMetadataExchange {
 		// The metadata exchange must occur after the TLS connection is established
 		// to avoid leaking sensitive information.
-		err = d.metadataExchange(tlsConn, cfg.iamAuthN)
+		err = d.metadataExchange(ctx, tlsConn, cfg.iamAuthN)
 		if err != nil {
 			_ = tlsConn.Close() // best effort close attempt
 			attrs.DialStatus = telv2.DialMDXError
@@ -478,8 +478,8 @@ func invalidClientCert(
 //     metadata exchange has succeeded and the connection is complete.
 //
 // Subsequent interactions with the server use the database protocol.
-func (d *Dialer) metadataExchange(conn net.Conn, useIAMAuthN bool) error {
-	tok, err := d.iamTokenSource.Token()
+func (d *Dialer) metadataExchange(ctx context.Context, conn net.Conn, useIAMAuthN bool) error {
+	tok, err := d.iamTokenSource.Token(ctx)
 	if err != nil {
 		return err
 	}
@@ -490,7 +490,7 @@ func (d *Dialer) metadataExchange(conn net.Conn, useIAMAuthN bool) error {
 	req := &connectorspb.MetadataExchangeRequest{
 		UserAgent:   d.userAgent,
 		AuthType:    authType,
-		Oauth2Token: tok.AccessToken,
+		Oauth2Token: tok.Value,
 	}
 	m, err := proto.Marshal(req)
 	if err != nil {
