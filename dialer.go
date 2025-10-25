@@ -396,14 +396,17 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 
 	if !d.disableMetadataExchange {
+		d.logger.Debugf(ctx, "[%v] Metadata exchange starting (IAM AuthN = %v)", inst.String(), cfg.iamAuthN)
 		// The metadata exchange must occur after the TLS connection is established
 		// to avoid leaking sensitive information.
 		err = d.metadataExchange(tlsConn, cfg.iamAuthN)
 		if err != nil {
 			_ = tlsConn.Close() // best effort close attempt
 			attrs.DialStatus = telv2.DialMDXError
+			d.logger.Debugf(ctx, "[%v] Metadata exchange failed = %v", err)
 			return nil, err
 		}
+		d.logger.Debugf(ctx, "[%v] Metadata exchange complete", inst.String())
 	}
 	attrs.DialStatus = telv2.DialSuccess
 
@@ -416,6 +419,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		mr.RecordDialLatency(ctx, latency, attrs)
 	}()
 
+	d.logger.Debugf(ctx, "[%v] Dialing complete", inst.String())
 	return newInstrumentedConn(tlsConn, mr, attrs, func() {
 		n := atomic.AddUint64(cache.openConns, ^uint64(0))
 		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
