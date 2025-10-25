@@ -28,9 +28,11 @@ import (
 	"cloud.google.com/go/alloydbconn/debug"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
+	"cloud.google.com/go/auth"
+	"cloud.google.com/go/auth/credentials"
+	"cloud.google.com/go/auth/oauth2adapt"
 	"golang.org/x/net/proxy"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 )
 
@@ -40,7 +42,7 @@ const CloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 // An Option is an option for configuring a Dialer.
 type Option func(d *dialerConfig)
 
-func newDialerConfig(ctx context.Context, opts ...Option) (*dialerConfig, error) {
+func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 	d := &dialerConfig{
 		refreshTimeout: alloydb.RefreshTimeout,
 		dialFunc:       proxy.Dial,
@@ -51,25 +53,19 @@ func newDialerConfig(ctx context.Context, opts ...Option) (*dialerConfig, error)
 		opt(d)
 	}
 
-	incompatibleAuthOpts := d.disableMetadataExchange && d.useIAMAuthN
-	if incompatibleAuthOpts {
-		return nil, errors.New("incompatible options: WithOptOutOfAdvancedConnectionCheck " +
-			"cannot be used with WithIAMAuthN")
+	badPairs := map[bool]string{
+		d.disableMetadataExchange && d.useIAMAuthN:          "incompatible options: WithOptOutOfAdvancedConnectionCheck cannot be used with WithIAMAuthN",
+		d.credentialsFile != "" && d.credentialsJSON != nil: "incompatible options: WithCredentialsFile cannot be used with WithCredentialsJSON",
+		d.credentialsFile != "" && d.tokenProvider != nil:   "incompatible options: WithCredentialsFile cannot be used with WithTokenSource",
+		d.credentialsJSON != nil && d.tokenProvider != nil:  "incompatible options: WithCredentialsJSON cannot be used with WithTokenSource",
+		d.credentials != nil && d.credentialsFile != "":     "incompatible options: WithCredentials cannot be used with WithCredentialsFile",
+		d.credentials != nil && d.credentialsJSON != nil:    "incompatible options: WithCredentials cannot be used with WithCredentialsJSON",
+		d.credentials != nil && d.tokenProvider != nil:      "incompatible options: WithCredentials cannot be used with WithTokenSource",
 	}
-	incompatibleAuthOpts = d.credentialsFile != "" && d.credentialsJSON != nil
-	if incompatibleAuthOpts {
-		return nil, errors.New("incompatible options: WithCredentialsFile " +
-			"cannot be used with WithCredentialsJSON")
-	}
-	incompatibleAuthOpts = d.credentialsFile != "" && d.tokenSource != nil
-	if incompatibleAuthOpts {
-		return nil, errors.New("incompatible options: WithCredentialsFile " +
-			"cannot be used with WithTokenSource")
-	}
-	incompatibleAuthOpts = d.credentialsJSON != nil && d.tokenSource != nil
-	if incompatibleAuthOpts {
-		return nil, errors.New("incompatible options: WithCredentialsJSON " +
-			"cannot be used with WithTokenSource")
+	for bad, msg := range badPairs {
+		if bad {
+			return nil, errors.New(msg)
+		}
 	}
 
 	switch {
@@ -78,32 +74,47 @@ func newDialerConfig(ctx context.Context, opts ...Option) (*dialerConfig, error)
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		// TODO: Use AlloyDB-specfic scope
-		c, err := google.CredentialsFromJSON(context.Background(), b, CloudPlatformScope)
+		c, err := credentials.DetectDefault(&credentials.DetectOptions{
+			// TODO: Use AlloyDB-specfic scope
+			Scopes:          []string{CloudPlatformScope},
+			CredentialsJSON: b,
+		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		d.tokenSource = c.TokenSource
-		d.clientOpts = append(d.clientOpts, option.WithCredentials(c))
+		d.tokenProvider = c.TokenProvider
+		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
 	case d.credentialsJSON != nil:
-		// TODO: Use AlloyDB-specfic scope
-		c, err := google.CredentialsFromJSON(context.Background(), d.credentialsJSON, CloudPlatformScope)
+		c, err := credentials.DetectDefault(&credentials.DetectOptions{
+			// TODO: Use AlloyDB-specfic scope
+			Scopes:          []string{CloudPlatformScope},
+			CredentialsJSON: d.credentialsJSON,
+		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		d.tokenSource = c.TokenSource
-		d.clientOpts = append(d.clientOpts, option.WithCredentials(c))
-	case d.tokenSource != nil:
-		d.clientOpts = append(d.clientOpts, option.WithTokenSource(d.tokenSource))
+		d.tokenProvider = c.TokenProvider
+		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
+	case d.tokenProvider != nil:
+		c := auth.NewCredentials(&auth.CredentialsOptions{
+			TokenProvider: d.tokenProvider,
+		})
+		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
+	case d.credentials != nil:
+		d.tokenProvider = d.credentials.TokenProvider
+		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(d.credentials))
 	default:
 		// If a credentials file, credentials JSON, or a token source was not provided,
 		// default to Application Default Credentials.
-		ts, err := google.DefaultTokenSource(ctx, CloudPlatformScope)
+		c, err := credentials.DetectDefault(&credentials.DetectOptions{
+			// TODO: Use AlloyDB-specfic scope
+			Scopes: []string{CloudPlatformScope},
+		})
 		if err != nil {
 			return nil, err
 		}
-		d.tokenSource = ts
-		d.clientOpts = append(d.clientOpts, option.WithTokenSource(d.tokenSource))
+		d.tokenProvider = c.TokenProvider
+		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
 	}
 
 	if d.httpClient != nil {
@@ -139,7 +150,8 @@ type dialerConfig struct {
 	lazyRefresh      bool
 	adminAPIEndpoint string
 
-	tokenSource     oauth2.TokenSource
+	credentials     *auth.Credentials
+	tokenProvider   auth.TokenProvider
 	credentialsFile string
 	credentialsJSON []byte
 	httpClient      *http.Client
@@ -159,6 +171,14 @@ func WithOptions(opts ...Option) Option {
 		for _, opt := range opts {
 			opt(d)
 		}
+	}
+}
+
+// WithCredentials returns an option that specifies an auth.Credentials object
+// to use for all AlloyDB API interactions.
+func WithCredentials(c *auth.Credentials) Option {
+	return func(d *dialerConfig) {
+		d.credentials = c
 	}
 }
 
@@ -198,7 +218,8 @@ func WithDefaultDialOptions(opts ...DialOption) Option {
 // to be used as the basis for authentication.
 func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
-		d.tokenSource = s
+		tp := oauth2adapt.TokenProviderFromTokenSource(s)
+		d.tokenProvider = tp
 	}
 }
 
