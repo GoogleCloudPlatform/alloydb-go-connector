@@ -15,9 +15,9 @@
 package alloydbconn
 
 import (
-	"context"
 	"testing"
 
+	"cloud.google.com/go/auth"
 	"golang.org/x/oauth2"
 )
 
@@ -48,11 +48,23 @@ func TestNewDialerConfig_IncompatibleOptions(t *testing.T) {
 			desc: "WithCredentialsJSON and WithTokenSource",
 			opts: []Option{WithCredentialsJSON([]byte(`sample-json`)), WithTokenSource(nullTokenSource{})},
 		},
+		{
+			desc: "WithCredentials and WihtCredentialsJSON",
+			opts: []Option{WithCredentials(&auth.Credentials{}), WithCredentialsJSON([]byte(`sample-json`))},
+		},
+		{
+			desc: "WithCredentials and WihtCredentialsFile",
+			opts: []Option{WithCredentials(&auth.Credentials{}), WithCredentialsFile("/some/file")},
+		},
+		{
+			desc: "WithCredentials and WihtTokenSource",
+			opts: []Option{WithCredentials(&auth.Credentials{}), WithTokenSource(nullTokenSource{})},
+		},
 	}
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
-			_, err := newDialerConfig(context.Background(), tc.opts...)
+			_, err := newDialerConfig(tc.opts...)
 			if err == nil {
 				t.Fatal("expected an error, but got nil")
 			}

@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/alloydbconn"
+	"cloud.google.com/go/auth"
+	"cloud.google.com/go/auth/credentials"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -31,7 +33,13 @@ import (
 // removeAuthEnvVar retrieves an OAuth2 token and a path to a service account key
 // and then unsets GOOGLE_APPLICATION_CREDENTIALS. It returns a cleanup function
 // that restores the original setup.
-func removeAuthEnvVar(t *testing.T) (*oauth2.Token, string, func()) {
+func removeAuthEnvVar(t *testing.T) (*auth.Credentials, *oauth2.Token, string, func()) {
+	c, err := credentials.DetectDefault(&credentials.DetectOptions{
+		Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"},
+	})
+	if err != nil {
+		t.Errorf("failed to detect credentials: %v", err)
+	}
 	ts, err := google.DefaultTokenSource(context.Background(),
 		"https://www.googleapis.com/auth/cloud-platform",
 	)
@@ -50,7 +58,7 @@ func removeAuthEnvVar(t *testing.T) (*oauth2.Token, string, func()) {
 	if err := os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS"); err != nil {
 		t.Fatalf("failed to unset GOOGLE_APPLICATION_CREDENTIALS")
 	}
-	return tok, path, func() {
+	return c, tok, path, func() {
 		os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path)
 	}
 }
@@ -74,7 +82,7 @@ func TestAuthenticationOptions(t *testing.T) {
 	requireAlloyDBVars(t)
 	creds := keyfile(t)
 
-	tok, path, cleanup := removeAuthEnvVar(t)
+	c, tok, path, cleanup := removeAuthEnvVar(t)
 	defer cleanup()
 
 	tcs := []struct {
@@ -82,6 +90,10 @@ func TestAuthenticationOptions(t *testing.T) {
 		opt  alloydbconn.Option
 	}{
 		// See e2e_test.go for examples of Application Default Credential tests.
+		{
+			desc: "with credentials",
+			opt:  alloydbconn.WithCredentials(c),
+		},
 		{
 			desc: "with token",
 			opt:  alloydbconn.WithTokenSource(oauth2.StaticTokenSource(tok)),
