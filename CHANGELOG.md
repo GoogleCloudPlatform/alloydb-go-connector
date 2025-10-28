@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.17.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.16.0...v1.17.0) (2025-10-28)
+
+
+### Features
+
+* add support for WithCredentials option ([#723](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/723)) ([73ec88a](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/73ec88a054a54482d5190cf67daa8344519487ce)), closes [#646](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/646)
+
+
+### Bug Fixes
+
+* use correct short Instance URI form in logging ([#719](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/719)) ([3cfa07f](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/3cfa07f5b8d8ee665d3e54867afd6e5555773d93))
+
 ## [1.16.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.15.6...v1.16.0) (2025-10-20)
 
 
