@@ -201,7 +201,7 @@ import (
 )
 
 func Connect() {
-    cleanup, err := pgxv5.RegisterDriver("alloydb", alloydbconn.WithPublicIP())
+    cleanup, err := pgxv5.RegisterDriver("alloydb", alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()))
     if err != nil {
         // ... handle error
     }
