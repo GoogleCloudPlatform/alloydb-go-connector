@@ -15,6 +15,7 @@
 package alloydbconn
 
 import (
+	"context"
 	"testing"
 
 	"cloud.google.com/go/auth"
@@ -70,4 +71,60 @@ func TestNewDialerConfig_IncompatibleOptions(t *testing.T) {
 			}
 		})
 	}
+}
+
+type fakeTokenProvider struct {
+}
+
+func (fakeTokenProvider) Token(context.Context) (*auth.Token, error) {
+	return &auth.Token{Value: "faketoken"}, nil
+}
+
+type fakeTokenSource struct{}
+
+func (fakeTokenSource) Token() (*oauth2.Token, error) {
+	return &oauth2.Token{AccessToken: "faketoken"}, nil
+}
+
+func TestIAMAuthOptions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping credential integration test")
+	}
+	c := &auth.Credentials{
+		TokenProvider: fakeTokenProvider{},
+	}
+
+	tcs := []struct {
+		desc string
+		opts []Option
+	}{
+		{
+			desc: "WithIAMAuthNCredentials",
+			opts: []Option{
+				WithIAMAuthNCredentials(c),
+			},
+		},
+		{
+			desc: "WithIAMAuthNTOkenSource",
+			opts: []Option{
+				WithIAMAuthNTokenSource(fakeTokenSource{}),
+			},
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			cfg, err := newDialerConfig(tc.opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tok, err := cfg.iamAuthNTokenProvider.Token(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tok.Value != "faketoken" {
+				t.Fatal("got unexpected token, want sentinel value \"faketoken\"")
+			}
+		})
+	}
+
 }

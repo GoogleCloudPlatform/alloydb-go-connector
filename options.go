@@ -36,8 +36,12 @@ import (
 	"google.golang.org/api/option"
 )
 
-// CloudPlatformScope is the default OAuth2 scope set on the API client.
-const CloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
+const (
+	// CloudPlatformScope is the default OAuth2 scope set on the API client.
+	CloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
+	// AlloyDBLoginScope is the OAuth2 scope used for IAM Authentication
+	AlloyDBLoginScope = "https://www.googleapis.com/auth/alloydb.login"
+)
 
 // An Option is an option for configuring a Dialer.
 type Option func(d *dialerConfig)
@@ -75,46 +79,57 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
-			// TODO: Use AlloyDB-specfic scope
 			Scopes:          []string{CloudPlatformScope},
 			CredentialsJSON: b,
 		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		d.tokenProvider = c.TokenProvider
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
+
+		// Now rebuild credentials with the Login Scope
+		c, err = credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes:          []string{AlloyDBLoginScope},
+			CredentialsJSON: b,
+		})
+		if err != nil {
+			return nil, errtype.NewConfigError(err.Error(), "n/a")
+		}
+		d.iamAuthNTokenProvider = c.TokenProvider
 	case d.credentialsJSON != nil:
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
-			// TODO: Use AlloyDB-specfic scope
 			Scopes:          []string{CloudPlatformScope},
 			CredentialsJSON: d.credentialsJSON,
 		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		d.tokenProvider = c.TokenProvider
+		d.iamAuthNTokenProvider = c.TokenProvider
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
 	case d.tokenProvider != nil:
 		c := auth.NewCredentials(&auth.CredentialsOptions{
 			TokenProvider: d.tokenProvider,
 		})
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
+		d.iamAuthNTokenProvider = d.tokenProvider
 	case d.credentials != nil:
-		d.tokenProvider = d.credentials.TokenProvider
+		d.iamAuthNTokenProvider = d.credentials.TokenProvider
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(d.credentials))
 	default:
 		// If a credentials file, credentials JSON, or a token source was not provided,
 		// default to Application Default Credentials.
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
-			// TODO: Use AlloyDB-specfic scope
 			Scopes: []string{CloudPlatformScope},
 		})
 		if err != nil {
 			return nil, err
 		}
-		d.tokenProvider = c.TokenProvider
+		d.iamAuthNTokenProvider = c.TokenProvider
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
+	}
+
+	if d.iamAuthNTokenProviderOverride != nil {
+		d.iamAuthNTokenProvider = d.iamAuthNTokenProviderOverride
 	}
 
 	if d.httpClient != nil {
@@ -150,11 +165,16 @@ type dialerConfig struct {
 	lazyRefresh      bool
 	adminAPIEndpoint string
 
-	credentials     *auth.Credentials
-	tokenProvider   auth.TokenProvider
-	credentialsFile string
-	credentialsJSON []byte
-	httpClient      *http.Client
+	credentials           *auth.Credentials
+	tokenProvider         auth.TokenProvider
+	iamAuthNTokenProvider auth.TokenProvider
+	credentialsFile       string
+	credentialsJSON       []byte
+	httpClient            *http.Client
+
+	// iamAuthNTokenProviderOverride if set replaces the iamAuthNTokenProvider
+	// above.
+	iamAuthNTokenProviderOverride auth.TokenProvider
 
 	// disableMetadataExchange is a temporary addition and will be removed in
 	// future versions.
@@ -179,6 +199,16 @@ func WithOptions(opts ...Option) Option {
 func WithCredentials(c *auth.Credentials) Option {
 	return func(d *dialerConfig) {
 		d.credentials = c
+	}
+}
+
+// WithIAMAuthNCredentials configures the credentials used for IAM
+// authentication. When this option isn't set, the connector will use the
+// credentials configured with other options or Application Default Credentials
+// for IAM authentication.
+func WithIAMAuthNCredentials(c *auth.Credentials) Option {
+	return func(d *dialerConfig) {
+		d.iamAuthNTokenProviderOverride = c.TokenProvider
 	}
 }
 
@@ -216,10 +246,32 @@ func WithDefaultDialOptions(opts ...DialOption) Option {
 
 // WithTokenSource returns an Option that specifies an OAuth2 token source
 // to be used as the basis for authentication.
+
+// WithTokenSource returns an Option that specifies an OAuth2 token source to be
+// used as the basis for authentication.
+//
+// When Auth IAM AuthN is enabled, use WithIAMAuthNTokenSources or WithIAMAuthNCredentials to set the token
+// source for login tokens separately from the API client token source.
+//
+// You may only use one of the following options:
+// WithIAMAuthNCredentials, WithIAMAuthNTokenSources, WithCredentials, WithTokenSource
 func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
 		tp := oauth2adapt.TokenProviderFromTokenSource(s)
 		d.tokenProvider = tp
+	}
+}
+
+// WithIAMAuthNTokenSource sets the token use used for IAM Authentication.
+// Any AlloyDB API interactions will not use this token source.
+//
+// The IAM AuthN token source on the other hand should only have:
+//
+//   - https://www.googleapis.com/auth/alloydb.login
+func WithIAMAuthNTokenSource(s oauth2.TokenSource) Option {
+	return func(d *dialerConfig) {
+		tp := oauth2adapt.TokenProviderFromTokenSource(s)
+		d.iamAuthNTokenProviderOverride = tp
 	}
 }
 
