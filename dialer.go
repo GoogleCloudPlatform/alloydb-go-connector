@@ -37,11 +37,11 @@ import (
 	"cloud.google.com/go/alloydbconn/internal/tel"
 	"cloud.google.com/go/auth"
 	"github.com/google/uuid"
-	"google.golang.org/api/option"
 	"google.golang.org/protobuf/proto"
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
+	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 )
 
 const (
@@ -151,10 +151,9 @@ type Dialer struct {
 	staticConnInfo io.Reader
 
 	client *alloydbadmin.AlloyDBAdminClient
-	// clientOpts are options for all Google Cloud API clients. There should be
-	// no AlloyDB-specific configuration in these options.
-	clientOpts []option.ClientOption
-	logger     debug.ContextLogger
+	// mClient is used for built-in system metrics.
+	mClient *monitoring.MetricClient
+	logger  debug.ContextLogger
 
 	// defaultDialCfg holds the constructor level DialOptions, so that it can
 	// be copied and mutated by the Dial function.
@@ -206,8 +205,16 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		opt(&dialCfg)
 	}
 
+	// This is OpenCensus-based metrics, which will eventually be removed in
+	// favor of telv2 (OpenTelemetry-based).
 	if err := tel.InitMetrics(); err != nil {
 		return nil, err
+	}
+	mClient, err := monitoring.NewMetricClient(ctx, cfg.clientOpts...)
+	if err != nil {
+		// Don't fail dialer initialization on metric client errors.
+		// Just disable metric collection below.
+		cfg.logger.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
 	}
 	dialerID := uuid.New().String()
 	g, err := newKeyGenerator(cfg.rsaKey, cfg.lazyRefresh,
@@ -227,7 +234,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		keyGenerator:            g,
 		refreshTimeout:          cfg.refreshTimeout,
 		client:                  client,
-		clientOpts:              cfg.clientOpts,
+		mClient:                 mClient,
 		logger:                  cfg.logger,
 		defaultDialCfg:          dialCfg,
 		dialerID:                dialerID,
@@ -256,7 +263,7 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst alloydb.InstanceURI) t
 		Cluster:   inst.Cluster(),
 		Instance:  inst.Name(),
 	}
-	mr := telv2.NewMetricRecorder(ctx, d.logger, cfg, d.clientOpts...)
+	mr := telv2.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
 	d.metricRecorders[inst] = mr
 	return mr
 }
