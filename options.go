@@ -104,8 +104,17 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		d.iamAuthNTokenProvider = c.TokenProvider
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
+
+		// Now rebuild credentials with the Login Scope
+		c, err = credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes:          []string{AlloyDBLoginScope},
+			CredentialsJSON: d.credentialsJSON,
+		})
+		if err != nil {
+			return nil, errtype.NewConfigError(err.Error(), "n/a")
+		}
+		d.iamAuthNTokenProvider = c.TokenProvider
 	case d.tokenProvider != nil:
 		c := auth.NewCredentials(&auth.CredentialsOptions{
 			TokenProvider: d.tokenProvider,
@@ -124,8 +133,15 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		if err != nil {
 			return nil, err
 		}
-		d.iamAuthNTokenProvider = c.TokenProvider
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
+
+		c, err = credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes: []string{AlloyDBLoginScope},
+		})
+		if err != nil {
+			return nil, err
+		}
+		d.iamAuthNTokenProvider = c.TokenProvider
 	}
 
 	if d.iamAuthNTokenProviderOverride != nil {
