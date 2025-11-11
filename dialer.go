@@ -169,8 +169,8 @@ type Dialer struct {
 	// network. By default it is golang.org/x/net/proxy#Dial.
 	dialFunc func(cxt context.Context, network, addr string) (net.Conn, error)
 
-	iamTokenSource auth.TokenProvider
-	userAgent      string
+	iamAuthNTokenProvider auth.TokenProvider
+	userAgent             string
 
 	buffer *buffer
 }
@@ -240,7 +240,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		dialerID:                dialerID,
 		metricRecorders:         map[alloydb.InstanceURI]telv2.MetricRecorder{},
 		dialFunc:                cfg.dialFunc,
-		iamTokenSource:          cfg.tokenProvider,
+		iamAuthNTokenProvider:   cfg.iamAuthNTokenProvider,
 		userAgent:               userAgent,
 		buffer:                  newBuffer(),
 	}
@@ -486,7 +486,7 @@ func invalidClientCert(
 //
 // Subsequent interactions with the server use the database protocol.
 func (d *Dialer) metadataExchange(ctx context.Context, conn net.Conn, useIAMAuthN bool) error {
-	tok, err := d.iamTokenSource.Token(ctx)
+	tok, err := d.iamAuthNTokenProvider.Token(ctx)
 	if err != nil {
 		return err
 	}
