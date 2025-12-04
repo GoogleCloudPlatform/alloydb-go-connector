@@ -234,6 +234,8 @@ type metricRecorder struct {
 
 // Shutdown should be called when the MetricRecorder is no longer needed.
 func (m *metricRecorder) Shutdown(ctx context.Context) error {
+	// Best effort to send any pending telemetry.
+	_ = m.provider.ForceFlush(ctx)
 	// Shutdown only the provider. The provider will shutdown the exporter as
 	// part of its own shutdown, i.e., provider shuts down the reader, the
 	// reader shuts down the exporter. So one shutdown call here is enough.
