@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.17.0...v1.17.1) (2025-12-08)
+
+
+### Bug Fixes
+
+* use login scope for ADC and credentials JSON ([#730](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/730)) ([51b4f6a](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/51b4f6a53ec2d23b508f8bc73d62050799135bae))
+
 ## [1.17.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.16.0...v1.17.0) (2025-11-11)
 
 
