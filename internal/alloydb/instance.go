@@ -302,7 +302,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		}
 		i.logger.Debugf(
 			context.Background(),
-			"[%v] Connection info refresh operation started",
+			"[%v] Connection info refresh operation started (type = refresh ahead)",
 			i.instanceURI.String(),
 		)
 
@@ -326,7 +326,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			r.result, r.err = i.r.connectionInfo(i.ctx, i.instanceURI)
 			i.logger.Debugf(
 				ctx,
-				"[%v] Connection info refresh operation complete",
+				"[%v] Connection info refresh operation complete (type = refresh ahead)",
 				i.instanceURI.String(),
 			)
 			i.logger.Debugf(

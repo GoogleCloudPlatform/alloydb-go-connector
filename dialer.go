@@ -401,11 +401,12 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		attrs.DialStatus = telv2.DialTLSError
 		return nil, errtype.NewDialError("handshake failed", inst.String(), err)
 	}
+	d.logger.Debugf(ctx, "[%v] Connected securely to %v", inst.String(), hostPort)
 
 	if !d.disableMetadataExchange {
 		// The metadata exchange must occur after the TLS connection is established
 		// to avoid leaking sensitive information.
-		err = d.metadataExchange(ctx, tlsConn, cfg.iamAuthN)
+		err = d.metadataExchange(ctx, tlsConn, cfg.iamAuthN, inst.String())
 		if err != nil {
 			_ = tlsConn.Close() // best effort close attempt
 			attrs.DialStatus = telv2.DialMDXError
@@ -485,7 +486,7 @@ func invalidClientCert(
 //     metadata exchange has succeeded and the connection is complete.
 //
 // Subsequent interactions with the server use the database protocol.
-func (d *Dialer) metadataExchange(ctx context.Context, conn net.Conn, useIAMAuthN bool) error {
+func (d *Dialer) metadataExchange(ctx context.Context, conn net.Conn, useIAMAuthN bool, inst string) error {
 	tok, err := d.iamAuthNTokenProvider.Token(ctx)
 	if err != nil {
 		return err
@@ -494,6 +495,8 @@ func (d *Dialer) metadataExchange(ctx context.Context, conn net.Conn, useIAMAuth
 	if useIAMAuthN {
 		authType = connectorspb.MetadataExchangeRequest_AUTO_IAM
 	}
+	d.logger.Debugf(ctx, "[%v] Metadata exchange start (token expiry = %v, auth type = %v)",
+		inst, tok.Expiry.UTC().Format(time.RFC3339), authType)
 	req := &connectorspb.MetadataExchangeRequest{
 		UserAgent:   d.userAgent,
 		AuthType:    authType,
@@ -548,6 +551,8 @@ func (d *Dialer) metadataExchange(ctx context.Context, conn net.Conn, useIAMAuth
 	if err != nil {
 		return err
 	}
+	d.logger.Debugf(ctx, "[%v] Metadata exchange finish (result = %v)",
+		inst, mdxResp.GetResponseCode())
 
 	if mdxResp.GetResponseCode() != connectorspb.MetadataExchangeResponse_OK {
 		return errors.New(mdxResp.GetError())
@@ -708,7 +713,6 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 		// Recheck to ensure instance wasn't created between locks
 		c, ok = d.cache[uri]
 		if !ok {
-			d.logger.Debugf(ctx, "[%v] Connection info added to cache", uri.String())
 			k, err := d.keyGenerator.rsaKey()
 			if err != nil {
 				return monitoredCache{}, ok, err
@@ -725,6 +729,7 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 					d.userAgent,
 					mr,
 				)
+				d.logger.Debugf(ctx, "[%v] Connection info cache = lazy", uri.String())
 			case d.staticConnInfo != nil:
 				var err error
 				cache, err = alloydb.NewStaticConnectionInfoCache(
@@ -735,6 +740,7 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 				if err != nil {
 					return monitoredCache{}, ok, err
 				}
+				d.logger.Debugf(ctx, "[%v] Connection info cache = static", uri.String())
 			default:
 				cache = alloydb.NewRefreshAheadCache(
 					uri,
@@ -745,6 +751,7 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 					d.userAgent,
 					mr,
 				)
+				d.logger.Debugf(ctx, "[%v] Connection info cache = refresh ahead", uri.String())
 			}
 			var open uint64
 			c = monitoredCache{openConns: &open, connectionInfoCache: cache}
