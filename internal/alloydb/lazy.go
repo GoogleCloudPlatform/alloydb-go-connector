@@ -76,7 +76,7 @@ func (c *LazyRefreshCache) ConnectionInfo(
 	if !c.needsRefresh && now.Before(exp) {
 		c.logger.Debugf(
 			ctx,
-			"[%v] Connection info is still valid, using cached info",
+			"[%v] Connection info is still valid, using cached info (type = lazy)",
 			c.uri.String(),
 		)
 		return c.cached, nil
@@ -84,7 +84,7 @@ func (c *LazyRefreshCache) ConnectionInfo(
 
 	c.logger.Debugf(
 		ctx,
-		"[%v] Connection info refresh operation started",
+		"[%v] Connection info refresh operation started (type = lazy)",
 		c.uri.String(),
 	)
 	ci, err := c.r.connectionInfo(ctx, c.uri)
@@ -109,7 +109,7 @@ func (c *LazyRefreshCache) ConnectionInfo(
 	})
 	c.logger.Debugf(
 		ctx,
-		"[%v] Connection info refresh operation complete",
+		"[%v] Connection info refresh operation complete (type = lazy)",
 		c.uri.String(),
 	)
 	c.logger.Debugf(
