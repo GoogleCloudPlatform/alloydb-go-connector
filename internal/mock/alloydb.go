@@ -265,7 +265,7 @@ func StartServerProxy(t *testing.T, inst FakeAlloyDBInstance) func() {
 			ln  net.Listener
 			err error
 		)
-		for i := 0; i < attempts; i++ {
+		for range attempts {
 			ln, err = tls.Listen("tcp", ":5433", &tls.Config{
 				Certificates: []tls.Certificate{
 					{

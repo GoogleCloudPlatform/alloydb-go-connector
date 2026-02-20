@@ -19,12 +19,12 @@ import "context"
 // Logger is the interface used for debug logging. By default, it is unused.
 type Logger interface {
 	// Debugf is for reporting information about internal operations.
-	Debugf(format string, args ...interface{})
+	Debugf(format string, args ...any)
 }
 
 // ContextLogger is the interface used for debug logging. By default, it is
 // unused.
 type ContextLogger interface {
 	// Debugf is for reporting information about internal operations.
-	Debugf(ctx context.Context, format string, args ...interface{})
+	Debugf(ctx context.Context, format string, args ...any)
 }

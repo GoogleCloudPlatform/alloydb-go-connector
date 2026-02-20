@@ -168,7 +168,7 @@ func HTTPClient(requests ...*Request) (*http.Client, string, func() error) {
 			// Unexpected requests should throw an error
 			resp.WriteHeader(http.StatusNotImplemented)
 			// TODO: follow error format better?
-			resp.Write([]byte(fmt.Sprintf("unexpected request sent to mock client: %v", req)))
+			resp.Write(fmt.Appendf(nil, "unexpected request sent to mock client: %v", req))
 		},
 	))
 	// cleanup stops the test server and checks for uncalled requests

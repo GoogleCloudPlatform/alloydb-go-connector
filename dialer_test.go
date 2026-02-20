@@ -102,7 +102,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 
 	// Run several tests to ensure the underlying shared buffer is properly
 	// reset between connections.
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
 			conn, err := d.Dial(ctx, testInstanceURI)
 			if err != nil {
@@ -140,10 +140,10 @@ func writeStaticInfo(t *testing.T, i mock.FakeAlloyDBInstance) io.Reader {
 		t.Fatal("private key encoding failed")
 	}
 
-	static := map[string]interface{}{}
+	static := map[string]any{}
 	static["publicKey"] = string(pubPEM)
 	static["privateKey"] = string(privPEM)
-	info := make(map[string]interface{})
+	info := make(map[string]any)
 	info["ipAddress"] = "127.0.0.1" // "private" IP is localhost in testing
 	chain, err := i.GeneratePEMCertificateChain(&key.PublicKey)
 	if err != nil {

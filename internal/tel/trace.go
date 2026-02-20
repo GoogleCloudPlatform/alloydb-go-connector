@@ -29,7 +29,7 @@ type EndSpanFunc func(error)
 // Attribute annotates a span with additional data.
 type Attribute struct {
 	key   string
-	value interface{}
+	value any
 }
 
 func (a Attribute) traceAttr() trace.Attribute {
