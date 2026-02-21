@@ -124,8 +124,7 @@ func TestPgxConnect(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 			pool, cleanup, err := tc.f(ctx)
 			if err != nil {
 				_ = cleanup()
