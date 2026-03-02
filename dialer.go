@@ -495,8 +495,8 @@ func (d *Dialer) metadataExchange(ctx context.Context, conn net.Conn, useIAMAuth
 	if useIAMAuthN {
 		authType = connectorspb.MetadataExchangeRequest_AUTO_IAM
 	}
-	d.logger.Debugf(ctx, "[%v] Metadata exchange start (token expiry = %v, auth type = %v)",
-		inst, tok.Expiry.UTC().Format(time.RFC3339), authType)
+	d.logger.Debugf(ctx, "[%v] Metadata exchange start (token expiry = %v, token size = %v, auth type = %v)",
+		inst, tok.Expiry.UTC().Format(time.RFC3339), len(tok.Value), authType)
 	req := &connectorspb.MetadataExchangeRequest{
 		UserAgent:   d.userAgent,
 		AuthType:    authType,
