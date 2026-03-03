@@ -14,275 +14,378 @@
 [pkg-badge]: https://pkg.go.dev/badge/cloud.google.com/go/alloydbconn.svg
 [pkg-docs]: https://pkg.go.dev/cloud.google.com/go/alloydbconn
 
-The _AlloyDB Go Connector_ is an AlloyDB connector designed for use with the Go
-language. Using an AlloyDB connector provides the following benefits:
+The AlloyDB Go Connector is the recommended way to connect to AlloyDB from Go
+applications. It provides:
 
-* **IAM Authorization:** uses IAM permissions to control who/what can connect to
-  your AlloyDB instances
-
-* **Improved Security:** uses TLS 1.3 encryption and identity verification
-  between the client connector and the server-side proxy, independent of the
-  database protocol.
-
-* **Convenience:** removes the requirement to use and distribute SSL
-  certificates, as well as manage firewalls or source/destination IP addresses.
-
-* (optionally) **IAM DB Authentication:** provides support for
-  [AlloyDB’s automatic IAM DB AuthN][iam-db-authn] feature.
+- **Secure connections** — TLS 1.3 encryption and identity verification,
+  independent of the database protocol
+- **IAM-based authorization** — controls who can connect to your AlloyDB
+  instances using Google Cloud IAM
+- **No certificate management** — no SSL certificates, firewall rules, or IP
+  allowlisting required
+- **IAM database authentication** — optional support for
+  [automatic IAM DB authentication][iam-db-authn]
 
 [iam-db-authn]: https://cloud.google.com/alloydb/docs/manage-iam-authn
 
-## Installation
+## Quick Start
 
-You can install this repo with `go get`:
+Install the module:
 
 ```sh
 go get cloud.google.com/go/alloydbconn
 ```
 
-## Usage
+Connect using the standard `database/sql` package:
 
-This package provides several functions for authorizing and encrypting
-connections. These functions can be used with your database driver to connect to
-your AlloyDB instance.
+```go
+package main
 
-AlloyDB supports network connectivity through public IP addresses and private,
-internal IP addresses. By default this package will attempt to connect over a
-private IP connection. When doing so, this package must be run in an
-environment that is connected to the [VPC Network][vpc] that hosts your
-AlloyDB private IP address.
+import (
+    "database/sql"
+    "fmt"
+    "log"
 
-Please see [Configuring AlloyDB Connectivity][alloydb-connectivity] for more details.
+    "cloud.google.com/go/alloydbconn/driver/pgxv5"
+)
+
+func main() {
+    // Register the AlloyDB driver with the name "alloydb"
+    // Uses Private IP by default. See Network Options below for details.
+    cleanup, err := pgxv5.RegisterDriver("alloydb")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer cleanup()
+
+    // Instance URI format:
+    //   projects/PROJECT/locations/REGION/clusters/CLUSTER/instances/INSTANCE
+    db, err := sql.Open("alloydb", fmt.Sprintf(
+        "host=%s user=%s password=%s dbname=%s sslmode=disable",
+        "projects/my-project/locations/us-central1/clusters/my-cluster/instances/my-instance",
+        "my-user",
+        "my-password",
+        "my-db",
+    ))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
+
+    var greeting string
+    if err := db.QueryRow("SELECT 'Hello, AlloyDB!'").Scan(&greeting); err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(greeting)
+}
+```
+
+The connector uses [Application Default Credentials (ADC)][adc] automatically.
+For local development, run:
+
+```sh
+gcloud auth application-default login
+```
+
+[adc]: https://cloud.google.com/docs/authentication#adc
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Connecting with database/sql](#connecting-with-databasesql)
+- [Connecting with pgx](#connecting-with-pgx)
+- [Network Options](#network-options)
+  - [Private IP (default)](#private-ip-default)
+  - [Public IP](#public-ip)
+  - [Private Service Connect (PSC)](#private-service-connect-psc)
+- [IAM Database Authentication](#iam-database-authentication)
+- [Configuring the Dialer](#configuring-the-dialer)
+- [Observability](#observability)
+- [Debug Logging](#debug-logging)
+- [Support Policy](#support-policy)
+
+## Prerequisites
+
+### IAM Permissions
+
+The IAM principal (user or service account) making connections needs:
+
+- [AlloyDB Client][client-role] role (`roles/alloydb.client`)
+- Service Usage Consumer role (`roles/serviceusage.serviceUsageConsumer`)
+
+[client-role]: https://cloud.google.com/alloydb/docs/auth-proxy/overview#how-authorized
+
+### Enable the AlloyDB API
+
+Enable the [AlloyDB API][admin-api] in your Google Cloud project.
+
+[admin-api]: https://console.cloud.google.com/apis/api/alloydb.googleapis.com
+
+### Credentials
+
+The connector uses [Application Default Credentials (ADC)][adc] — **this is
+the recommended approach for most applications.** ADC automatically finds
+credentials from the environment:
+
+- **Local development:** run `gcloud auth application-default login` once
+- **Google Cloud (Compute Engine, Cloud Run, GKE, etc.):** credentials are
+  picked up automatically from the attached service account — no code changes
+  needed
+
+```sh
+# One-time setup for local development
+gcloud auth application-default login
+```
+
+If you need to supply credentials explicitly (e.g., in non-Google managed
+environments without Application Default Credentials), see the [Configuring the
+Dialer](#configuring-the-dialer) section for less common alternatives.
+
+[set-adc]: https://cloud.google.com/docs/authentication/provide-credentials-adc
+
+## Connecting with database/sql
+
+The `database/sql` approach works with any library that accepts a `*sql.DB`.
+
+```go
+import (
+    "database/sql"
+    "fmt"
+
+    "cloud.google.com/go/alloydbconn"
+    "cloud.google.com/go/alloydbconn/driver/pgxv5"
+)
+
+func connect(instURI, user, pass, dbname string) (*sql.DB, func() error, error) {
+    // RegisterDriver registers the AlloyDB driver and returns a cleanup
+    // function that stops background goroutines. Call cleanup when you are
+    // done with the database connection to avoid a goroutine leak.
+    cleanup, err := pgxv5.RegisterDriver("alloydb")
+    if err != nil {
+        return nil, nil, err
+    }
+
+    db, err := sql.Open("alloydb", fmt.Sprintf(
+        // sslmode=disable is correct here: the connector handles TLS.
+        "host=%s user=%s password=%s dbname=%s sslmode=disable",
+        instURI, user, pass, dbname,
+    ))
+    if err != nil {
+        return nil, cleanup, err
+    }
+    return db, cleanup, nil
+}
+```
+
+> **Instance URI format:**
+> `projects/PROJECT/locations/REGION/clusters/CLUSTER/instances/INSTANCE`
+
+## Connecting with pgx
+
+For direct control over connection pooling, use [pgx](https://github.com/jackc/pgx)
+with `pgxpool`:
+
+```go
+import (
+    "context"
+    "fmt"
+    "net"
+
+    "cloud.google.com/go/alloydbconn"
+    "github.com/jackc/pgx/v5/pgxpool"
+)
+
+func connect(ctx context.Context, instURI, user, pass, dbname string) (*pgxpool.Pool, func() error, error) {
+    d, err := alloydbconn.NewDialer(ctx)
+    if err != nil {
+        return nil, func() error { return nil }, fmt.Errorf("failed to init dialer: %v", err)
+    }
+    // cleanup stops the dialer's background goroutines.
+    cleanup := func() error { return d.Close() }
+
+    config, err := pgxpool.ParseConfig(fmt.Sprintf(
+        "user=%s password=%s dbname=%s sslmode=disable",
+        user, pass, dbname,
+    ))
+    if err != nil {
+        return nil, cleanup, fmt.Errorf("failed to parse config: %v", err)
+    }
+
+    // Tell pgx to use the AlloyDB connector for all connections.
+    config.ConnConfig.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
+        return d.Dial(ctx, instURI)
+    }
+
+    pool, err := pgxpool.NewWithConfig(ctx, config)
+    if err != nil {
+        return nil, cleanup, fmt.Errorf("failed to connect: %v", err)
+    }
+    return pool, cleanup, nil
+}
+```
+
+## Network Options
+
+AlloyDB supports three connectivity modes. The connector defaults to
+**private IP**.
+
+### Private IP (default)
+
+Private IP requires your application to run within a [VPC Network][vpc]
+connected to your AlloyDB instance. No extra configuration is needed — the
+default `d.Dial(ctx, instURI)` call will connect over private IP.
 
 [vpc]: https://cloud.google.com/vpc/docs/vpc
 [alloydb-connectivity]: https://cloud.google.com/alloydb/docs/configure-connectivity
 
-### APIs and Services
+### Public IP
 
-This package requires the following to connect successfully:
+Pass `WithPublicIP()` to connect over the instance's public IP address.
 
-* IAM principal (user, service account, etc.) with the [AlloyDB
-  Client and Service Usage Consumer][client-role] roles or equivalent
-  permissions. [Credentials](#credentials) for the IAM principal are
-  used to authorize connections to an AlloyDB instance.
-
-* The [AlloyDB API][admin-api] to be enabled within your Google Cloud
-  Project. By default, the API will be called in the project associated with the
-  IAM principal.
-
-[admin-api]:   https://console.cloud.google.com/apis/api/alloydb.googleapis.com
-[client-role]: https://cloud.google.com/alloydb/docs/auth-proxy/overview#how-authorized
-
-### Credentials
-
-This repo uses the [Application Default Credentials (ADC)][adc] strategy for
-resolving credentials. Please see [these instructions for how to set your ADC][set-adc]
-(Google Cloud Application vs Local Development, IAM user vs service account credentials),
-or consult the [golang.org/x/oauth2/google][google-auth] documentation.
-
-To explicitly set a specific source for the Credentials, see [Using
-Options](#using-options) below.
-
-[adc]: https://cloud.google.com/docs/authentication#adc
-[set-adc]: https://cloud.google.com/docs/authentication/provide-credentials-adc
-[google-auth]: https://pkg.go.dev/golang.org/x/oauth2/google#hdr-Credentials
-
-### Connecting with pgx
-
-To use the dialer with [pgx](https://github.com/jackc/pgx), use
-[pgxpool](https://pkg.go.dev/github.com/jackc/pgx/v4/pgxpool) by configuring a
-[Config.DialFunc][dial-func] like so:
-
-``` go
-// Configure the driver to connect to the database
-dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", pgUser, pgPass, pgDB)
-config, err := pgxpool.ParseConfig(dsn)
-if err != nil {
-    log.Fatalf("failed to parse pgx config: %v", err)
-}
-
-// Create a new dialer with any options
-d, err := alloydbconn.NewDialer(ctx)
-if err != nil {
-    log.Fatalf("failed to initialize dialer: %v", err)
-}
-// Don't close the dialer until you're done with the database connection
-// e.g. at the end of your main function
-defer d.Close()
-
-// Tell the driver to use the AlloyDB Go Connector to create connections
-config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string) (net.Conn, error) {
-    return d.Dial(ctx, "projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>")
-}
-
-// Interact with the driver directly as you normally would
-conn, err := pgxpool.ConnectConfig(context.Background(), config)
-if err != nil {
-    log.Fatalf("failed to connect: %v", connErr)
-}
-defer conn.Close()
-```
-
-[dial-func]: https://pkg.go.dev/github.com/jackc/pgconn#Config
-
-### Using Options
-
-If you need to customize something about the `Dialer`, you can initialize
-directly with `NewDialer`:
+**With database/sql:**
 
 ```go
-ctx := context.Background()
-d, err := alloydbconn.NewDialer(
-    ctx,
-    alloydbconn.WithCredentialsFile("key.json"),
-)
-if err != nil {
-    log.Fatalf("unable to initialize dialer: %s", err)
-}
-
-conn, err := d.Dial(ctx, "projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>")
-```
-
-For a full list of customizable behavior, see alloydbconn.Option.
-
-### Using DialOptions
-
-If you want to customize how the connection is created, use a DialOption.
-
-For example, to connect over public IP, use:
-
-```go
-conn, err := d.Dial(
-    ctx,
-    "projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
-    alloydbconn.WithPublicIP(),
+cleanup, err := pgxv5.RegisterDriver("alloydb",
+    alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()),
 )
 ```
 
-Or to use PSC, use:
+**With pgx:**
 
-``` go
-conn, err := d.Dial(
-    ctx,
-    "projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
-    alloydbconn.WithPSC(),
+```go
+config.ConnConfig.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
+    return d.Dial(ctx, instURI, alloydbconn.WithPublicIP())
+}
+```
+
+### Private Service Connect (PSC)
+
+Pass `WithPSC()` to connect via [Private Service Connect][psc].
+
+**With database/sql:**
+
+```go
+cleanup, err := pgxv5.RegisterDriver("alloydb",
+    alloydbconn.WithDefaultDialOptions(alloydbconn.WithPSC()),
 )
 ```
 
-You can also use the `WithDefaultDialOptions` Option to specify DialOptions to
-be used by default:
+**With pgx:**
 
 ```go
-d, err := alloydbconn.NewDialer(
-    ctx,
+config.ConnConfig.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
+    return d.Dial(ctx, instURI, alloydbconn.WithPSC())
+}
+```
+
+[psc]: https://cloud.google.com/alloydb/docs/psc-overview
+
+## IAM Database Authentication
+
+The connector supports [Automatic IAM database authentication][iam-db-authn].
+With IAM auth, your application's IAM identity is used in place of a static
+database password.
+
+**Before you begin:**
+
+1. [Enable IAM authentication on your AlloyDB instance][configure-iam-authn]
+2. [Add an IAM database user][add-iam-user]
+
+**Connect with IAM authentication:**
+
+```go
+// Pass WithIAMAuthN() to enable automatic IAM authentication.
+cleanup, err := pgxv5.RegisterDriver("alloydb", alloydbconn.WithIAMAuthN())
+```
+
+Set the `user` field in your DSN based on your IAM identity type:
+
+| Identity type | Username format |
+|---|---|
+| IAM user account | Full email: `user@example.com` |
+| Service account | Email without `.gserviceaccount.com`: `my-sa@my-project.iam` |
+
+```go
+db, err := sql.Open("alloydb", fmt.Sprintf(
+    // Omit the password field when using IAM authentication.
+    "host=%s user=%s dbname=%s sslmode=disable",
+    instURI,
+    "my-sa@my-project.iam",
+    dbname,
+))
+```
+
+[configure-iam-authn]: https://cloud.google.com/alloydb/docs/manage-iam-authn#enable
+[add-iam-user]: https://cloud.google.com/alloydb/docs/manage-iam-authn#create-user
+
+## Configuring the Dialer
+
+Both `pgxv5.RegisterDriver` and `alloydbconn.NewDialer` accept options to
+customize connector behavior.
+
+### Explicit credentials (uncommon)
+
+Most applications should rely on [Application Default Credentials](#credentials)
+and won't need these options. Use them only when ADC isn't available in your
+environment.
+
+**From a service account key file:**
+
+```go
+cleanup, err := pgxv5.RegisterDriver("alloydb",
+    alloydbconn.WithCredentialsFile("path/to/service-account-key.json"),
+)
+```
+
+**From a credentials JSON blob:**
+
+```go
+cleanup, err := pgxv5.RegisterDriver("alloydb",
+    alloydbconn.WithCredentialsJSON([]byte(`{...}`)),
+)
+```
+
+### Set default dial options
+
+Apply options to every connection made by the dialer:
+
+```go
+d, err := alloydbconn.NewDialer(ctx,
     alloydbconn.WithDefaultDialOptions(
         alloydbconn.WithPublicIP(),
     ),
 )
 ```
 
-### Using the dialer with database/sql
+For all available options, see the [`alloydbconn.Option` reference][pkg-docs].
 
-Using the dialer directly will expose more configuration options. However, it is
-possible to use the dialer with the `database/sql` package.
+## Observability
 
-To use `database/sql`, use `pgxv5.RegisterDriver` with any necessary Dialer
-configuration. Note: the connection string must use the keyword/value format
-with host set to the instance connection name.
+The connector exports metrics and traces via [OpenCensus][opencensus]. Configure
+an exporter to send telemetry to your monitoring backend.
 
-``` go
-package foo
+### Metrics
 
-import (
-    "database/sql"
+| Metric | Description |
+|---|---|
+| `alloydbconn/dial_latency` | Distribution of dialer latencies (ms) |
+| `alloydbconn/open_connections` | Current number of open AlloyDB connections |
+| `alloydbconn/dial_failure_count` | Number of failed dial attempts |
+| `alloydbconn/refresh_success_count` | Number of successful certificate refresh operations |
+| `alloydbconn/refresh_failure_count` | Number of failed refresh operations |
+| `alloydbconn/bytes_sent` | Bytes sent to an AlloyDB instance |
+| `alloydbconn/bytes_received` | Bytes received from an AlloyDB instance |
 
-    "cloud.google.com/go/alloydbconn"
-    "cloud.google.com/go/alloydbconn/driver/pgxv5"
-)
+### Traces
 
-func Connect() {
-    cleanup, err := pgxv5.RegisterDriver("alloydb", alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()))
-    if err != nil {
-        // ... handle error
-    }
-    defer cleanup()
-
-    db, err := sql.Open(
-        "alloydb",
-        "host=projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE> user=myuser password=mypass dbname=mydb sslmode=disable",
-	)
-    // ... etc
-}
-```
-
-### Automatic IAM Database Authentication
-
-The Go Connector supports [Automatic IAM database authentication][].
-
-Make sure to [configure your AlloyDB Instance to allow IAM authentication][configure-iam-authn]
-and [add an IAM database user][add-iam-user].
-
-A `Dialer` can be configured to connect to an AlloyDB instance using
-automatic IAM database authentication with the `WithIAMAuthN` Option.
-
-```go
-d, err := alloydbconn.NewDialer(ctx, alloydbconn.WithIAMAuthN())
-```
-
-When configuring the DSN for IAM authentication, the `password` field can be
-omitted and the `user` field should be formatted as follows:
-
-- For an IAM user account, this is the user's email address.
-- For a service account, it is the service account's email without the
-`.gserviceaccount.com` domain suffix.
-
-For example, to connect using the `test-sa@test-project.iam.gserviceaccount.com`
-service account, the DSN would look like:
-
-```go
-dsn := "user=test-sa@test-project.iam dbname=mydb sslmode=disable"
-```
-
-[Automatic IAM database authentication]: https://cloud.google.com/alloydb/docs/manage-iam-authn
-[configure-iam-authn]: https://cloud.google.com/alloydb/docs/manage-iam-authn#enable
-[add-iam-user]: https://cloud.google.com/alloydb/docs/manage-iam-authn#create-user
-
-### Enabling Metrics and Tracing
-
-This library includes support for metrics and tracing using [OpenCensus][]. To
-enable metrics or tracing, you need to configure an [exporter][]. OpenCensus
-supports many backends for exporters.
-
-Supported metrics include:
-
-- `alloydbconn/dial_latency`: The distribution of dialer latencies (ms)
-- `alloydbconn/open_connections`: The current number of open AlloyDB
-  connections
-- `alloydbconn/dial_failure_count`: The number of failed dial attempts
-- `alloydbconn/refresh_success_count`: The number of successful certificate
-  refresh operations
-- `alloydbconn/refresh_failure_count`: The number of failed refresh
-  operations.
-- `alloydbconn/bytes_sent`: The number of bytes sent to an AlloyDB instance.
-- `alloydbconn/bytes_received`: The number of bytes received from an AlloyDB
-  instance.
-
-Supported traces include:
-
-- `cloud.google.com/go/alloydbconn.Dial`: The dial operation including
-  refreshing an ephemeral certificate and connecting to the instance
-- `cloud.google.com/go/alloydbconn/internal.InstanceInfo`: The call to retrieve
-  instance metadata (e.g., IP address, etc)
-- `cloud.google.com/go/alloydbconn/internal.Connect`: The connection attempt
-  using the ephemeral certificate
+- `cloud.google.com/go/alloydbconn.Dial` — the full dial operation
+- `cloud.google.com/go/alloydbconn/internal.InstanceInfo` — instance metadata retrieval
+- `cloud.google.com/go/alloydbconn/internal.Connect` — connection attempt using the ephemeral certificate
 - AlloyDB API client operations
 
-For example, to use [Cloud Monitoring][] and [Cloud Trace][], you would
-configure an exporter like so:
+### Example: Cloud Monitoring and Cloud Trace
 
-```golang
-package main
-
+```go
 import (
     "contrib.go.opencensus.io/exporter/stackdriver"
     "go.opencensus.io/trace"
@@ -290,39 +393,34 @@ import (
 
 func main() {
     sd, err := stackdriver.NewExporter(stackdriver.Options{
-        ProjectID: "mycoolproject",
+        ProjectID: "my-project",
     })
     if err != nil {
-        // handle error
+        log.Fatal(err)
     }
     defer sd.Flush()
-    trace.RegisterExporter(sd)
 
+    trace.RegisterExporter(sd)
     sd.StartMetricsExporter()
     defer sd.StopMetricsExporter()
 
     // Use alloydbconn as usual.
-    // ...
 }
 ```
 
-[OpenCensus]: https://opencensus.io/
-[exporter]: https://opencensus.io/exporters/
+[opencensus]: https://opencensus.io/
 [Cloud Monitoring]: https://cloud.google.com/monitoring
 [Cloud Trace]: https://cloud.google.com/trace
 
-### Debug Logging
+## Debug Logging
 
-The Go Connector supports optional debug logging to help diagnose problems with
-the background certificate refresh. To enable it, provide a logger that
-implements the `debug.ContextLogger` interface when initializing the Dialer.
+Enable debug logging to diagnose issues with the background certificate refresh.
+Implement the `debug.ContextLogger` interface and pass it to the dialer:
 
-For example:
-
-``` go
+```go
 import (
     "context"
-    "net"
+    "log"
 
     "cloud.google.com/go/alloydbconn"
 )
@@ -330,47 +428,37 @@ import (
 type myLogger struct{}
 
 func (l *myLogger) Debugf(ctx context.Context, format string, args ...interface{}) {
-    // Log as you like here
+    log.Printf("[DEBUG] "+format, args...)
 }
 
-func connect() {
-    l := &myLogger{}
-
-    d, err := NewDialer(
-        context.Background(),
-        alloydbconn.WithContextDebugLogger(l),
+func connect(ctx context.Context) {
+    d, err := alloydbconn.NewDialer(ctx,
+        alloydbconn.WithContextDebugLogger(&myLogger{}),
     )
-    // use dialer as usual...
+    // use d as usual...
 }
 ```
 
-## Support policy
+## Support Policy
 
-### Major version lifecycle
+### Major Version Lifecycle
 
-This project uses [semantic versioning](https://semver.org/), and uses the
-following lifecycle regarding support for a major version:
+This project uses [semantic versioning](https://semver.org/):
 
-**Active** - Active versions get all new features and security fixes (that
-wouldn’t otherwise introduce a breaking change). New major versions are
-guaranteed to be "active" for a minimum of 1 year.
+| Stage | Description |
+|---|---|
+| **Active** | Receives all new features and security fixes. New major versions are guaranteed active for a minimum of 1 year. |
+| **Deprecated** | Receives security and critical bug fixes only. Supported for 1 year after deprecation. |
+| **Unsupported** | Any major version deprecated for ≥ 1 year. |
 
-**Deprecated** - Deprecated versions continue to receive security and critical
-bug fixes, but do not receive new features. Deprecated versions will be
-supported for 1 year.
-
-**Unsupported** - Any major version that has been deprecated for >=1 year is
-considered unsupported.
-
-## Supported Go Versions
+### Supported Go Versions
 
 We follow the [Go Version Support Policy][go-policy] used by Google Cloud
 Libraries for Go.
 
 [go-policy]: https://github.com/googleapis/google-cloud-go#go-versions-supported
 
-### Release cadence
+### Release Cadence
 
-This project aims for a release on at least a monthly basis. If no new features
-or fixes have been added, a new PATCH version with the latest dependencies is
-released.
+This project aims for a monthly release cadence. If no new features or fixes
+are available, a patch release with updated dependencies is published.
