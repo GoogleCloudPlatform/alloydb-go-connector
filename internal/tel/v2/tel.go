@@ -40,6 +40,9 @@ const (
 	bytesSent         = "bytes_sent_count"
 	bytesReceived     = "bytes_received_count"
 	refreshCount      = "refresh_count"
+	// ResourceType is a special attribute that the exporter
+	// transforms into the MonitoredResource field.
+	ResourceType = "gcp.resource_type"
 	// ProjectID specifies the instance's parent project.
 	ProjectID = "project_id"
 	// Location specifies the instances region (aka location).
@@ -142,6 +145,8 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		cmexporter.WithMonitoredResourceDescription(monitoredResource, []string{
 			ProjectID, Location, Cluster, Instance, ClientID,
 		}),
+		// Don't add any resource attributes to metrics as metric labels.
+		cmexporter.WithFilteredResourceAttributes(cmexporter.NoAttributes),
 	}
 	exp, err := cmexporter.New(eopts...)
 	if err != nil {
@@ -150,9 +155,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 	}
 
 	res := resource.NewWithAttributes(monitoredResource,
-		// The gcp.resource_type is a special attribute that the exporter
-		// transforms into the MonitoredResource field.
-		attribute.String("gcp.resource_type", monitoredResource),
+		attribute.String(ResourceType, monitoredResource),
 		attribute.String(ProjectID, cfg.ProjectID),
 		attribute.String(Location, cfg.Location),
 		attribute.String(Cluster, cfg.Cluster),
