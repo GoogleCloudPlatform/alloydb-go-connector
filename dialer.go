@@ -691,12 +691,9 @@ func (d *Dialer) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
 	defer cancel()
 	for _, mr := range d.metricRecorders {
-		// If a metric recorder doesn't shutdown cleanly, log the error and
-		// keep going. An error here isn't actionable and should not be
-		// returned to the caller.
-		if err := mr.Shutdown(ctx); err != nil {
-			d.logger.Debugf(context.Background(), "internal metric exporter failed to shutdown: %v", err)
-		}
+		// Best effort shutdown for internal metric exporter. An error here
+		// isn't actionable and is just noise.
+		_ = mr.Shutdown(ctx)
 	}
 	d.metricsMu.Unlock()
 	return nil
