@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.18.0...v1.18.1) (2026-03-21)
+
+
+### Bug Fixes
+
+* filter default resource attributes ([#765](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/765)) ([ec27a08](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/ec27a0836b2092b1049b0359d974bfa56e2e5215)), closes [#762](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/762)
+
 ## [1.18.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.17.3...v1.18.0) (2026-03-09)
 
 
