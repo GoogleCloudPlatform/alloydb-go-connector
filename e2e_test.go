@@ -24,9 +24,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/alloydbconn"
-	"cloud.google.com/go/alloydbconn/driver/pgxv4"
 	"cloud.google.com/go/alloydbconn/driver/pgxv5"
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -192,42 +191,6 @@ func TestDatabaseSQLConnect(t *testing.T) {
 			t.Log(tt)
 		})
 	}
-}
-
-func TestDatabaseSQLConnectPGXV4(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration tests")
-	}
-
-	cleanup, err := pgxv4.RegisterDriver("alloydb-v4", alloydbconn.WithOptOutOfBuiltInTelemetry())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	db, err := sql.Open(
-		"alloydb-v4",
-		fmt.Sprintf(
-			// sslmode is disabled, because the Dialer will handle the SSL
-			// connection instead.
-			"host=%s user=%s password=%s dbname=%s sslmode=disable",
-			alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
-		),
-	)
-	if err != nil {
-		_ = cleanup()
-		t.Fatal(err)
-	}
-	defer func() {
-		db.Close()
-		// best effort
-		_ = cleanup()
-	}()
-
-	var tt time.Time
-	if err := db.QueryRow("SELECT NOW()").Scan(&tt); err != nil {
-		t.Fatal(err)
-	}
-	t.Log(tt)
 }
 
 func TestDatabaseSQLConnectPGXV5(t *testing.T) {
