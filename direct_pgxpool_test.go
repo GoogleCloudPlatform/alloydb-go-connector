@@ -18,8 +18,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v4"
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2/google"
 )
 
@@ -70,5 +70,5 @@ func connectDirectPGXPoolAutoIAMAuthN(
 		c.Password = tok.AccessToken
 		return nil
 	}
-	return pgxpool.ConnectConfig(ctx, config)
+	return pgxpool.NewWithConfig(ctx, config)
 }
