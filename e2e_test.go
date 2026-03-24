@@ -26,7 +26,7 @@ import (
 	"cloud.google.com/go/alloydbconn"
 	"cloud.google.com/go/alloydbconn/driver/pgxv4"
 	"cloud.google.com/go/alloydbconn/driver/pgxv5"
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

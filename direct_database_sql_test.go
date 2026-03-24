@@ -23,8 +23,8 @@ import (
 	"database/sql/driver"
 	"fmt"
 
-	"github.com/jackc/pgx/v4"
-	"github.com/jackc/pgx/v4/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -66,9 +66,6 @@ func (p *alloydbDirect) Open(name string) (driver.Conn, error) {
 	config.Password = tok.AccessToken
 
 	dbURI := stdlib.RegisterConnConfig(config)
-	if err != nil {
-		return nil, err
-	}
 	return stdlib.GetDefaultDriver().Open(dbURI)
 }
 
