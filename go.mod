@@ -19,7 +19,7 @@ require (
 	golang.org/x/net v0.52.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/time v0.15.0
-	google.golang.org/api v0.272.0
+	google.golang.org/api v0.273.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260319201613-d00831a3d3e7
 	google.golang.org/grpc v1.79.3
 	google.golang.org/protobuf v1.36.11
@@ -37,7 +37,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
-	github.com/googleapis/gax-go/v2 v2.18.0 // indirect
+	github.com/googleapis/gax-go/v2 v2.19.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
@@ -49,6 +49,6 @@ require (
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
-	google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260217215200-42d3e9bedb6d // indirect
+	google.golang.org/genproto v0.0.0-20260316180232-0b37fe3546d5 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260316180232-0b37fe3546d5 // indirect
 )
