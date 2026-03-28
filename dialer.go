@@ -416,8 +416,13 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	attrs.DialStatus = telv2.DialSuccess
 
 	latency := time.Since(startTime).Milliseconds()
+	// Increment open connections synchronously before returning the
+	// connection to the caller. This prevents a race where the caller
+	// could close the connection before a background goroutine increments
+	// the counter, which would underflow the uint64 and produce incorrect
+	// metric values.
+	n := atomic.AddUint64(cache.openConns, 1)
 	go func() {
-		n := atomic.AddUint64(cache.openConns, 1)
 		tel.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
 		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
 		mr.RecordOpenConnection(ctx, attrs)
@@ -609,6 +614,7 @@ func newInstrumentedConn(conn net.Conn, mr telv2.MetricRecorder, a telv2.Attribu
 // is closed.
 type instrumentedConn struct {
 	net.Conn
+	closeOnce      sync.Once
 	closeFunc      func()
 	dialerID       string
 	instance       string
@@ -640,12 +646,15 @@ func (i *instrumentedConn) Write(b []byte) (int, error) {
 	return bytesWritten, err
 }
 
-// Close delegates to the underlying net.Conn interface and reports the close
-// to the provided closeFunc only when Close returns no error.
+// Close delegates to the underlying net.Conn interface and reports the close.
+// It is safe to call Close multiple times; the closeFunc and final metric
+// report will only execute once.
 func (i *instrumentedConn) Close() error {
-	i.stopReporter()
-	i.reportCounters()
-	i.closeFunc()
+	i.closeOnce.Do(func() {
+		i.stopReporter()
+		i.reportCounters()
+		i.closeFunc()
+	})
 	return i.Conn.Close()
 }
 
