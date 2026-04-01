@@ -91,8 +91,7 @@ jobs:
           ALLOYDB_PSC_INSTANCE_URI: '${{ steps.secrets.outputs.ALLOYDB_PSC_INSTANCE_URI }}'
         # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
         shell: bash
-        run: |
-          go test -v -race -cover ./... | tee test_results.txt
+        run: ./scripts/test_system.sh | tee test_results.txt
 
       - name: Convert test output to XML
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() }}
@@ -147,10 +146,8 @@ jobs:
 
       - name: Run tests
         if: matrix.goarch == ''
-        run: |
-          go test -v -race -cover -short ./...
+        run: ./scripts/test_unit.sh
       - name: Run tests (386)
         # 386 archs don't support race detector
         if: matrix.goarch == '386'
-        run: |
-          go test -v -cover -short ./...
+        run: go test -v -cover -short ./...
