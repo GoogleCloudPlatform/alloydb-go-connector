@@ -365,6 +365,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 				UserAgent:     i.userAgent,
 				RefreshType:   telv2.RefreshAheadType,
 				RefreshStatus: telv2.RefreshFailure,
+				RefreshError:  r.err,
 			})
 			return
 		}

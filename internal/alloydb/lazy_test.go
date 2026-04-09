@@ -125,6 +125,9 @@ type mockMetricRecorder struct {
 func (m *mockMetricRecorder) RecordRefreshCount(_ context.Context, a telv2.Attributes) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// RefreshError carries the underlying refresh error and varies by run.
+	// Strip it so equality comparison in Verify focuses on attribute values.
+	a.RefreshError = nil
 	m.gotAttrs = a
 }
 

@@ -18,46 +18,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/internal/mock"
-	"go.opencensus.io/stats/view"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"google.golang.org/api/option"
 )
 
-type spyMetricsExporter struct {
-	mu       sync.Mutex
-	viewData []*view.Data
-}
-
-func (e *spyMetricsExporter) ExportView(vd *view.Data) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.viewData = append(e.viewData, vd)
-}
-
-type metric struct {
-	name string
-	data view.AggregationData
-}
-
-func (e *spyMetricsExporter) data() []metric {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	var res []metric
-	for _, d := range e.viewData {
-		for _, r := range d.Rows {
-			res = append(res, metric{name: d.View.Name, data: r.Data})
-		}
-	}
-	return res
-}
-
-// dump marshals a value to JSON for better test reporting
+// dump marshals a value to JSON for better test reporting.
 func dump[T any](t *testing.T, data T) string {
+	t.Helper()
 	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -65,83 +39,90 @@ func dump[T any](t *testing.T, data T) string {
 	return fmt.Sprint(string(b))
 }
 
-// wantLastValueMetric ensures the provided metrics include a metric with the
-// wanted name and at least data point.
-func wantLastValueMetric(t *testing.T, wantName string, ms []metric, wantValue int) {
+// collectMetrics gathers all metrics that have been recorded into the
+// supplied manual reader.
+func collectMetrics(t *testing.T, r *metric.ManualReader) metricdata.ResourceMetrics {
 	t.Helper()
-	gotNames := make(map[string]view.AggregationData)
-	for _, m := range ms {
-		gotNames[m.name] = m.data
-		d, ok := m.data.(*view.LastValueData)
-		if ok && m.name == wantName && d.Value == float64(wantValue) {
-			return
-		}
+	var rm metricdata.ResourceMetrics
+	if err := r.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("ManualReader.Collect failed: %v", err)
 	}
-	t.Fatalf(
-		"want metric LastValueData{name = %q, value = %v}, got metrics = %v",
-		wantName, wantValue, dump(t, gotNames),
-	)
+	return rm
 }
 
-// wantDistributionMetric ensures the provided metrics include a metric with
-// the wanted name and at least one data point.
-func wantDistributionMetric(t *testing.T, wantName string, ms []metric) {
-	t.Helper()
-	gotNames := make(map[string]view.AggregationData)
-	for _, m := range ms {
-		gotNames[m.name] = m.data
-		_, ok := m.data.(*view.DistributionData)
-		if m.name == wantName && ok {
-			return
+// findMetric returns the metricdata.Metrics with the given name, or nil.
+func findMetric(rm metricdata.ResourceMetrics, name string) *metricdata.Metrics {
+	for _, sm := range rm.ScopeMetrics {
+		for i := range sm.Metrics {
+			if sm.Metrics[i].Name == name {
+				return &sm.Metrics[i]
+			}
 		}
 	}
-	t.Fatalf(
-		"metric name want = %v with DistributionData, all metrics = %v",
-		wantName, dump(t, gotNames),
-	)
+	return nil
 }
 
-// wantCountMetric ensures the provided metrics include a metric with the
-// wanted name and at least one data point.
-func wantCountMetric(t *testing.T, wantName string, ms []metric) {
+// wantSumMetric asserts that a Sum metric with the given name has been
+// recorded with at least one data point.
+func wantSumMetric[N int64 | float64](t *testing.T, name string, rm metricdata.ResourceMetrics) {
 	t.Helper()
-	gotNames := make(map[string]view.AggregationData)
-	for _, m := range ms {
-		gotNames[m.name] = m.data
-		_, ok := m.data.(*view.CountData)
-		if m.name == wantName && ok {
-			return
-		}
+	m := findMetric(rm, name)
+	if m == nil {
+		t.Fatalf("metric %q not found, all metrics = %v", name, dump(t, rm))
 	}
-	t.Fatalf(
-		"metric name want = %v with CountData, all metrics = %v",
-		wantName, dump(t, gotNames),
-	)
+	sum, ok := m.Data.(metricdata.Sum[N])
+	if !ok {
+		t.Fatalf("metric %q is %T, want Sum[%T]", name, m.Data, *new(N))
+	}
+	if len(sum.DataPoints) == 0 {
+		t.Fatalf("metric %q has no data points", name)
+	}
 }
 
-// wantSumMetric ensures the provided metrics include a metric with the wanted
-// name and at least one data point.
-func wantSumMetric(t *testing.T, wantName string, ms []metric) {
+// wantHistogramMetric asserts that a Histogram metric with the given name
+// has been recorded with at least one data point.
+func wantHistogramMetric(t *testing.T, name string, rm metricdata.ResourceMetrics) {
 	t.Helper()
-	gotNames := make(map[string]view.AggregationData)
-	for _, m := range ms {
-		gotNames[m.name] = m.data
-		_, ok := m.data.(*view.SumData)
-		if m.name == wantName && ok {
+	m := findMetric(rm, name)
+	if m == nil {
+		t.Fatalf("metric %q not found, all metrics = %v", name, dump(t, rm))
+	}
+	if _, ok := m.Data.(metricdata.Histogram[float64]); !ok {
+		t.Fatalf("metric %q is %T, want Histogram[float64]", name, m.Data)
+	}
+}
+
+// wantStatusOnMetric asserts that the named Sum metric has at least one
+// data point whose status attribute matches wantStatus.
+func wantStatusOnMetric(t *testing.T, name, wantStatus string, rm metricdata.ResourceMetrics) {
+	t.Helper()
+	m := findMetric(rm, name)
+	if m == nil {
+		t.Fatalf("metric %q not found, all metrics = %v", name, dump(t, rm))
+	}
+	sum, ok := m.Data.(metricdata.Sum[int64])
+	if !ok {
+		t.Fatalf("metric %q is %T, want Sum[int64]", name, m.Data)
+	}
+	for _, dp := range sum.DataPoints {
+		if v, ok := dp.Attributes.Value("status"); ok && v.AsString() == wantStatus {
 			return
 		}
 	}
-	t.Fatalf(
-		"metric name want = %v with SumData, all metrics = %v",
-		wantName, dump(t, gotNames),
-	)
+	t.Fatalf("metric %q has no data point with status=%q, got = %v", name, wantStatus, dump(t, sum))
 }
 
 func TestDialerWithMetrics(t *testing.T) {
-	spy := &spyMetricsExporter{}
-	view.RegisterExporter(spy)
-	defer view.UnregisterExporter(spy)
-	view.SetReportingPeriod(time.Millisecond)
+	// Register a manual reader on the global MeterProvider so we can collect
+	// the public metrics that the connector records.
+	reader := metric.NewManualReader()
+	mp := metric.NewMeterProvider(metric.WithReader(reader))
+	prev := otel.GetMeterProvider()
+	otel.SetMeterProvider(mp)
+	t.Cleanup(func() {
+		otel.SetMeterProvider(prev)
+		_ = mp.Shutdown(context.Background())
+	})
 
 	ctx := context.Background()
 	inst := mock.NewFakeInstance(
@@ -165,6 +146,9 @@ func TestDialerWithMetrics(t *testing.T) {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
 
+	// Disable the GCP system-metric export so the test doesn't try to
+	// reach Cloud Monitoring. The public metrics still flow through the
+	// global meter provider.
 	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
@@ -177,29 +161,30 @@ func TestDialerWithMetrics(t *testing.T) {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
 	}
 	defer conn.Close()
-	// dial a second time to ensure the counter is working
+	// dial a second time to ensure counters increment
 	conn2, err := d.Dial(ctx, testInstanceURI)
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
 	}
 	// write to conn to test bytes_sent and bytes_received
 	buf := &bytes.Buffer{}
-	err = buf.WriteByte('a')
-	if err != nil {
+	if err := buf.WriteByte('a'); err != nil {
 		t.Fatalf("buf.WriteByte failed: %v", err)
 	}
 	// Doing a read before doing a write, because when this unit test runs on
 	// Windows, it fails when the write is done before the read.
-	_, err = conn2.Read(buf.Bytes())
-	if err != nil {
+	if _, err := conn2.Read(buf.Bytes()); err != nil {
 		t.Fatalf("conn.Read failed: %v", err)
 	}
-	_, err = conn2.Write(buf.Bytes())
-	if err != nil {
+	if _, err := conn2.Write(buf.Bytes()); err != nil {
 		t.Fatalf("conn.Write failed: %v", err)
 	}
-	defer conn2.Close()
-	// dial a bogus instance
+	// Closing conn2 forces a flush of the bytes counters before collection.
+	if err := conn2.Close(); err != nil {
+		t.Fatalf("conn2.Close failed: %v", err)
+	}
+
+	// dial a bogus instance to drive the failure metrics
 	_, err = d.Dial(ctx,
 		"projects/my-project/locations/my-region/clusters/"+
 			"my-cluster/instances/notaninstance",
@@ -208,16 +193,21 @@ func TestDialerWithMetrics(t *testing.T) {
 		t.Fatal("expected Dial to fail, but got no error")
 	}
 
-	time.Sleep(100 * time.Millisecond) // allow exporter a chance to run
+	// Several metrics are recorded from background goroutines (e.g.
+	// RecordDialCount, RecordOpenConnection); give them a moment to run
+	// before collecting.
+	time.Sleep(100 * time.Millisecond)
+
+	rm := collectMetrics(t, reader)
 
 	// success metrics
-	wantLastValueMetric(t, "alloydbconn/open_connections", spy.data(), 2)
-	wantDistributionMetric(t, "alloydbconn/dial_latency", spy.data())
-	wantCountMetric(t, "alloydbconn/refresh_success_count", spy.data())
-	wantSumMetric(t, "alloydbconn/bytes_sent", spy.data())
-	wantSumMetric(t, "alloydbconn/bytes_received", spy.data())
+	wantSumMetric[int64](t, "alloydbconn.open_connections", rm)
+	wantHistogramMetric(t, "alloydbconn.dial_latencies", rm)
+	wantStatusOnMetric(t, "alloydbconn.refresh_count", "success", rm)
+	wantSumMetric[int64](t, "alloydbconn.bytes_sent_count", rm)
+	wantSumMetric[int64](t, "alloydbconn.bytes_received_count", rm)
 
-	// failure metrics from dialing bogus instance
-	wantCountMetric(t, "alloydbconn/dial_failure_count", spy.data())
-	wantCountMetric(t, "alloydbconn/refresh_failure_count", spy.data())
+	// failure metrics from dialing the bogus instance
+	wantStatusOnMetric(t, "alloydbconn.dial_count", "cache_error", rm)
+	wantStatusOnMetric(t, "alloydbconn.refresh_count", "failure", rm)
 }

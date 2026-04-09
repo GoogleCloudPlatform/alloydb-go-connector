@@ -13,18 +13,37 @@
 // limitations under the License.
 
 // Package tel provides telemetry into the connector's internal operations.
+//
+// Metrics recorded by this package are exported in two ways:
+//
+//  1. As Google Cloud Monitoring "system" metrics under the
+//     alloydb.googleapis.com/client/connector/* prefix. This export uses a
+//     dedicated MeterProvider configured with the Google Cloud Monitoring
+//     exporter and is gated by Config.Enabled.
+//
+//  2. Through the global OpenTelemetry MeterProvider (otel.GetMeterProvider).
+//     The metrics are recorded under the meter name
+//     "cloud.google.com/go/alloydbconn" with metric names like
+//     alloydbconn.dial_count, alloydbconn.dial_latencies, etc. Any exporter
+//     registered on the global MeterProvider — for example a Prometheus or
+//     OTLP exporter — will collect them. This path is always active so that
+//     external callers can observe connector behavior even when the GCP
+//     system metric export is disabled.
 package tel
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/alloydbconn/debug"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
+	"google.golang.org/api/googleapi"
 
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	cmexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
@@ -32,7 +51,15 @@ import (
 )
 
 const (
-	meterName         = "alloydb.googleapis.com/client/connector"
+	// sysMeterName is the meter name used for the GCP system metric export.
+	sysMeterName = "alloydb.googleapis.com/client/connector"
+	// pubMeterName is the meter name used for the public OpenTelemetry
+	// metric export. External exporters that scope by meter name should use
+	// this value.
+	pubMeterName = "cloud.google.com/go/alloydbconn"
+	// pubMetricPrefix is prepended to all public metric names.
+	pubMetricPrefix = "alloydbconn."
+
 	monitoredResource = "alloydb.googleapis.com/InstanceClient"
 	dialCount         = "dial_count"
 	dialLatency       = "dial_latencies"
@@ -40,6 +67,7 @@ const (
 	bytesSent         = "bytes_sent_count"
 	bytesReceived     = "bytes_received_count"
 	refreshCount      = "refresh_count"
+
 	// ResourceType is a special attribute that the exporter
 	// transforms into the MonitoredResource field.
 	ResourceType = "gcp.resource_type"
@@ -54,6 +82,7 @@ const (
 	// ClientID is a unique ID specifying the instance of the
 	// alloydbconn.Dialer.
 	ClientID = "client_uid"
+
 	// connectorType is one of go or auth-proxy
 	connectorType = "connector_type"
 	// authType is one of iam or built-in
@@ -65,6 +94,10 @@ const (
 	// refreshType indicates whether the cache is a refresh ahead cache or a
 	// lazy cache.
 	refreshType = "refresh_type"
+	// errorCodeAttr identifies the AlloyDB Admin API error code (or codes)
+	// associated with a failed refresh.
+	errorCodeAttr = "error_code"
+
 	// DialSuccess indicates the dial attempt succeeded.
 	DialSuccess = "success"
 	// DialUserError indicates the dial attempt failed due to a user mistake.
@@ -91,7 +124,9 @@ const (
 
 // Config holds all the necessary information to configure a MetricRecorder.
 type Config struct {
-	// Enabled specifies whether the metrics should be enabled.
+	// Enabled specifies whether the GCP system metric export should be
+	// enabled. The public OpenTelemetry export through the global meter
+	// provider is always active regardless of this value.
 	Enabled bool
 	// Version is the version of the alloydbconn.Dialer.
 	Version string
@@ -99,7 +134,7 @@ type Config struct {
 	ClientID string
 	// ProjectID is the project ID of the AlloyDB instance.
 	ProjectID string
-	// LocationAlloyDBs the location of the AlloyDB instance.
+	// Location is the location of the AlloyDB instance.
 	Location string
 	// Cluster is the name of the AlloyDB cluster.
 	Cluster string
@@ -124,16 +159,95 @@ type MetricRecorder interface {
 // should always be 60s. This value is exposed as a var to faciliate testing.
 var DefaultExportInterval = 60 * time.Second
 
-// NewMetricRecorder creates a MetricRecorder. When the configuration is not
-// enabled, a null recorder is returned instead.
+// instruments is a set of OpenTelemetry instruments used to record connector
+// metrics.
+type instruments struct {
+	dialCount    metric.Int64Counter
+	dialLatency  metric.Float64Histogram
+	openConns    metric.Int64UpDownCounter
+	bytesTx      metric.Int64Counter
+	bytesRx      metric.Int64Counter
+	refreshCount metric.Int64Counter
+}
+
+func newInstruments(m metric.Meter, prefix string) (*instruments, error) {
+	dc, err := m.Int64Counter(prefix + dialCount)
+	if err != nil {
+		return nil, err
+	}
+	dl, err := m.Float64Histogram(prefix + dialLatency)
+	if err != nil {
+		return nil, err
+	}
+	oc, err := m.Int64UpDownCounter(prefix + openConnections)
+	if err != nil {
+		return nil, err
+	}
+	bt, err := m.Int64Counter(prefix + bytesSent)
+	if err != nil {
+		return nil, err
+	}
+	br, err := m.Int64Counter(prefix + bytesReceived)
+	if err != nil {
+		return nil, err
+	}
+	rc, err := m.Int64Counter(prefix + refreshCount)
+	if err != nil {
+		return nil, err
+	}
+	return &instruments{
+		dialCount:    dc,
+		dialLatency:  dl,
+		openConns:    oc,
+		bytesTx:      bt,
+		bytesRx:      br,
+		refreshCount: rc,
+	}, nil
+}
+
+// NewMetricRecorder creates a MetricRecorder. The returned recorder always
+// records into the global OpenTelemetry MeterProvider so that any registered
+// exporters can collect connector metrics. Additionally, when cfg.Enabled is
+// true and a non-nil monitoring client is supplied, the recorder also exports
+// metrics directly to Google Cloud Monitoring under the
+// alloydb.googleapis.com/client/connector/* prefix.
 func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitoring.MetricClient, cfg Config) MetricRecorder {
+	r := &metricRecorder{
+		dialerID: cfg.ClientID,
+		// pubAttrs are added to every public metric so that external
+		// observers can correlate connector metrics with a specific
+		// instance, since they typically do not see the GCP-style monitored
+		// resource.
+		pubAttrs: attribute.NewSet(
+			attribute.String(ProjectID, cfg.ProjectID),
+			attribute.String(Location, cfg.Location),
+			attribute.String(Cluster, cfg.Cluster),
+			attribute.String(Instance, cfg.Instance),
+			attribute.String(ClientID, cfg.ClientID),
+		),
+	}
+
+	// Always set up the public OpenTelemetry instruments backed by the
+	// process-global MeterProvider. Failures here are logged but otherwise
+	// ignored: connector functionality must not depend on telemetry.
+	pubMeter := otel.GetMeterProvider().Meter(
+		pubMeterName, metric.WithInstrumentationVersion(cfg.Version),
+	)
+	pubInst, err := newInstruments(pubMeter, pubMetricPrefix)
+	if err != nil {
+		l.Debugf(ctx, "public OpenTelemetry instruments failed to initialize: %v", err)
+	} else {
+		r.pub = pubInst
+	}
+
+	// Optionally set up the GCP system metric exporter.
 	if !cfg.Enabled {
-		l.Debugf(ctx, "disabling built-in metrics")
-		return NullMetricRecorder{}
+		l.Debugf(ctx, "disabling built-in (GCP system) metrics")
+		return r
 	}
 	if cl == nil {
-		l.Debugf(ctx, "metric client is nil, disabling built-in metrics")
-		return NullMetricRecorder{}
+		l.Debugf(ctx, "metric client is nil, disabling built-in (GCP system) metrics")
+		return r
 	}
 	eopts := []cmexporter.Option{
 		cmexporter.WithCreateServiceTimeSeries(),
@@ -151,7 +265,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 	exp, err := cmexporter.New(eopts...)
 	if err != nil {
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
-		return NullMetricRecorder{}
+		return r
 	}
 
 	res := resource.NewWithAttributes(monitoredResource,
@@ -171,76 +285,45 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		)),
 		sdkmetric.WithResource(res),
 	)
-	m := p.Meter(meterName, metric.WithInstrumentationVersion(cfg.Version))
-
-	mDialCount, err := m.Int64Counter(dialCount)
+	sysMeter := p.Meter(sysMeterName, metric.WithInstrumentationVersion(cfg.Version))
+	sysInst, err := newInstruments(sysMeter, "")
 	if err != nil {
 		_ = exp.Shutdown(ctx)
-		l.Debugf(ctx, "built-in metrics exporter failed to initialize dial count metric: %v", err)
-		return NullMetricRecorder{}
+		l.Debugf(ctx, "built-in metrics exporter failed to initialize instruments: %v", err)
+		return r
 	}
-	mDialLatency, err := m.Float64Histogram(dialLatency)
-	if err != nil {
-		_ = exp.Shutdown(ctx)
-		l.Debugf(ctx, "built-in metrics exporter failed to initialize dial latency metric: %v", err)
-		return NullMetricRecorder{}
-	}
-	mOpenConns, err := m.Int64UpDownCounter(openConnections)
-	if err != nil {
-		_ = exp.Shutdown(ctx)
-		l.Debugf(ctx, "built-in metrics exporter failed to initialize open connections metric: %v", err)
-		return NullMetricRecorder{}
-	}
-	mBytesTx, err := m.Int64Counter(bytesSent)
-	if err != nil {
-		_ = exp.Shutdown(ctx)
-		l.Debugf(ctx, "built-in metrics exporter failed to initialize bytes sent metric: %v", err)
-		return NullMetricRecorder{}
-	}
-	mBytesRx, err := m.Int64Counter(bytesReceived)
-	if err != nil {
-		_ = exp.Shutdown(ctx)
-		l.Debugf(ctx, "built-in metrics exporter failed to initialize bytes received metric: %v", err)
-		return NullMetricRecorder{}
-	}
-	mRefreshCount, err := m.Int64Counter(refreshCount)
-	if err != nil {
-		_ = exp.Shutdown(ctx)
-		l.Debugf(ctx, "built-in metrics exporter failed to initialize refresh count metric: %v", err)
-		return NullMetricRecorder{}
-	}
-	return &metricRecorder{
-		exporter:      exp,
-		provider:      p,
-		dialerID:      cfg.ClientID,
-		mDialCount:    mDialCount,
-		mDialLatency:  mDialLatency,
-		mOpenConns:    mOpenConns,
-		mBytesTx:      mBytesTx,
-		mBytesRx:      mBytesRx,
-		mRefreshCount: mRefreshCount,
-	}
+	r.sysExporter = exp
+	r.sysProvider = p
+	r.sys = sysInst
+	return r
 }
 
 // metricRecorder holds the various counters that track internal operations.
 type metricRecorder struct {
-	exporter      sdkmetric.Exporter
-	provider      *sdkmetric.MeterProvider
-	dialerID      string
-	mDialCount    metric.Int64Counter
-	mDialLatency  metric.Float64Histogram
-	mOpenConns    metric.Int64UpDownCounter
-	mBytesTx      metric.Int64Counter
-	mBytesRx      metric.Int64Counter
-	mRefreshCount metric.Int64Counter
+	// sys/sysProvider/sysExporter implement the GCP system metric export.
+	// They may be nil if the export is disabled.
+	sys         *instruments
+	sysProvider *sdkmetric.MeterProvider
+	sysExporter sdkmetric.Exporter
+
+	// pub holds the instruments backed by the global OpenTelemetry
+	// MeterProvider. Records here flow to whatever external exporters the
+	// caller has registered. Nil only if instrument creation failed.
+	pub      *instruments
+	pubAttrs attribute.Set
+
+	dialerID string
 }
 
 // Shutdown should be called when the MetricRecorder is no longer needed.
 func (m *metricRecorder) Shutdown(ctx context.Context) error {
+	if m.sysProvider == nil {
+		return nil
+	}
 	// Shutdown only the provider. The provider will shutdown the exporter as
 	// part of its own shutdown, i.e., provider shuts down the reader, the
 	// reader shuts down the exporter. So one shutdown call here is enough.
-	return m.provider.Shutdown(ctx)
+	return m.sysProvider.Shutdown(ctx)
 }
 
 func connectorTypeValue(userAgent string) string {
@@ -272,78 +355,152 @@ type Attributes struct {
 	// RefreshType specifies the type of cache in use (e.g., refresh ahead or
 	// lazy).
 	RefreshType string
+	// RefreshError, if non-nil, is the error returned from a failed refresh.
+	// When the error wraps a googleapi.Error, its reason codes are attached
+	// as the error_code attribute on the public refresh_count metric.
+	RefreshError error
+}
+
+// pubAttrs returns the per-record attribute set for the public meter,
+// combining the recorder's instance attributes with the supplied per-call
+// attributes.
+func (m *metricRecorder) addPubAttrs(extra ...attribute.KeyValue) metric.MeasurementOption {
+	all := make([]attribute.KeyValue, 0, m.pubAttrs.Len()+len(extra))
+	for _, kv := range m.pubAttrs.ToSlice() {
+		all = append(all, kv)
+	}
+	all = append(all, extra...)
+	return metric.WithAttributes(all...)
 }
 
 // RecordBytesRxCount records the number of bytes received for a particular
 // instance.
 func (m *metricRecorder) RecordBytesRxCount(ctx context.Context, bytes int64, a Attributes) {
-	m.mBytesRx.Add(ctx, bytes,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
-		)),
-	)
+	attrs := []attribute.KeyValue{
+		attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
+	}
+	if m.sys != nil {
+		m.sys.bytesRx.Add(ctx, bytes, metric.WithAttributes(attrs...))
+	}
+	if m.pub != nil {
+		m.pub.bytesRx.Add(ctx, bytes, m.addPubAttrs(attrs...))
+	}
 }
 
 // RecordBytesTxCount records the number of bytes send for a paritcular
 // instance.
 func (m *metricRecorder) RecordBytesTxCount(ctx context.Context, bytes int64, a Attributes) {
-	m.mBytesTx.Add(ctx, bytes,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
-		)),
-	)
+	attrs := []attribute.KeyValue{
+		attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
+	}
+	if m.sys != nil {
+		m.sys.bytesTx.Add(ctx, bytes, metric.WithAttributes(attrs...))
+	}
+	if m.pub != nil {
+		m.pub.bytesTx.Add(ctx, bytes, m.addPubAttrs(attrs...))
+	}
 }
 
 // RecordDialCount records increments the number of dial attempts.
 func (m *metricRecorder) RecordDialCount(ctx context.Context, a Attributes) {
-	m.mDialCount.Add(ctx, 1,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
-			attribute.String(authType, authTypeValue(a.IAMAuthN)),
-			attribute.Bool(isCacheHit, a.CacheHit),
-			attribute.String(status, a.DialStatus)),
-		))
+	attrs := []attribute.KeyValue{
+		attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
+		attribute.String(authType, authTypeValue(a.IAMAuthN)),
+		attribute.Bool(isCacheHit, a.CacheHit),
+		attribute.String(status, a.DialStatus),
+	}
+	if m.sys != nil {
+		m.sys.dialCount.Add(ctx, 1, metric.WithAttributes(attrs...))
+	}
+	if m.pub != nil {
+		m.pub.dialCount.Add(ctx, 1, m.addPubAttrs(attrs...))
+	}
 }
 
 // RecordDialLatency records a latency measurement for a particular dial
 // attempt.
 func (m *metricRecorder) RecordDialLatency(ctx context.Context, latencyMS int64, a Attributes) {
-	m.mDialLatency.Record(ctx, float64(latencyMS),
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
-		)),
-	)
+	attrs := []attribute.KeyValue{
+		attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
+	}
+	if m.sys != nil {
+		m.sys.dialLatency.Record(ctx, float64(latencyMS), metric.WithAttributes(attrs...))
+	}
+	if m.pub != nil {
+		m.pub.dialLatency.Record(ctx, float64(latencyMS), m.addPubAttrs(attrs...))
+	}
 }
 
 // RecordOpenConnection increments the number of open connections.
 func (m *metricRecorder) RecordOpenConnection(ctx context.Context, a Attributes) {
-	m.mOpenConns.Add(ctx, 1,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
-			attribute.String(authType, authTypeValue(a.IAMAuthN)),
-		)),
-	)
+	attrs := []attribute.KeyValue{
+		attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
+		attribute.String(authType, authTypeValue(a.IAMAuthN)),
+	}
+	if m.sys != nil {
+		m.sys.openConns.Add(ctx, 1, metric.WithAttributes(attrs...))
+	}
+	if m.pub != nil {
+		m.pub.openConns.Add(ctx, 1, m.addPubAttrs(attrs...))
+	}
 }
 
 // RecordClosedConnection decrements the number of open connections.
 func (m *metricRecorder) RecordClosedConnection(ctx context.Context, a Attributes) {
-	m.mOpenConns.Add(ctx, -1,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
-			attribute.String(authType, authTypeValue(a.IAMAuthN)),
-		)),
-	)
+	attrs := []attribute.KeyValue{
+		attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
+		attribute.String(authType, authTypeValue(a.IAMAuthN)),
+	}
+	if m.sys != nil {
+		m.sys.openConns.Add(ctx, -1, metric.WithAttributes(attrs...))
+	}
+	if m.pub != nil {
+		m.pub.openConns.Add(ctx, -1, m.addPubAttrs(attrs...))
+	}
 }
 
-// RecordRefreshCount records the result of a refresh operation.
+// RecordRefreshCount records the result of a refresh operation. When the
+// refresh failed and the error wraps a googleapi.Error, the API error
+// reason(s) are attached as an error_code attribute on the public metric.
+// This preserves a useful detail that was previously available only via the
+// OpenCensus refresh_failure_count metric.
 func (m *metricRecorder) RecordRefreshCount(ctx context.Context, a Attributes) {
-	m.mRefreshCount.Add(ctx, 1,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
-			attribute.String(status, a.RefreshStatus),
-			attribute.String(refreshType, a.RefreshType),
-		)),
-	)
+	sysAttrs := []attribute.KeyValue{
+		attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
+		attribute.String(status, a.RefreshStatus),
+		attribute.String(refreshType, a.RefreshType),
+	}
+	if m.sys != nil {
+		m.sys.refreshCount.Add(ctx, 1, metric.WithAttributes(sysAttrs...))
+	}
+	if m.pub != nil {
+		pubExtra := sysAttrs
+		if a.RefreshStatus == RefreshFailure {
+			if c := apiErrorCode(a.RefreshError); c != "" {
+				pubExtra = append(pubExtra, attribute.String(errorCodeAttr, c))
+			}
+		}
+		m.pub.refreshCount.Add(ctx, 1, m.addPubAttrs(pubExtra...))
+	}
+}
+
+// apiErrorCode returns an error code as given from the AlloyDB Admin API,
+// provided the error wraps a googleapi.Error type. If multiple error codes
+// are returned from the API, then a comma-separated string of all codes is
+// returned.
+func apiErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	var apiErr *googleapi.Error
+	if !errors.As(err, &apiErr) {
+		return ""
+	}
+	var codes []string
+	for _, e := range apiErr.Errors {
+		codes = append(codes, e.Reason)
+	}
+	return strings.Join(codes, ",")
 }
 
 // NullMetricRecorder implements the MetricRecorder interface with no-ops. It

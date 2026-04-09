@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package tel provides telemetry data on the connector's internal operations.
-// The initial version is based on OpenCensus.
+// Package tel provides tracing for the connector's internal operations using
+// OpenTelemetry. The sibling v2 package provides metrics, also via
+// OpenTelemetry.
 package tel

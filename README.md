@@ -361,54 +361,81 @@ For all available options, see the [`alloydbconn.Option` reference][pkg-docs].
 
 ## Observability
 
-The connector exports metrics and traces via [OpenCensus][opencensus]. Configure
-an exporter to send telemetry to your monitoring backend.
+The connector exports metrics and traces via [OpenTelemetry][opentelemetry].
+Whatever exporter you have registered on the global `MeterProvider` and
+`TracerProvider` will receive connector telemetry — no extra configuration is
+required at the connector itself.
+
+> **Migrating from a previous release?** See [`MIGRATION.md`](./MIGRATION.md)
+> for the OpenCensus → OpenTelemetry migration guide.
 
 ### Metrics
 
-| Metric | Description |
-|---|---|
-| `alloydbconn/dial_latency` | Distribution of dialer latencies (ms) |
-| `alloydbconn/open_connections` | Current number of open AlloyDB connections |
-| `alloydbconn/dial_failure_count` | Number of failed dial attempts |
-| `alloydbconn/refresh_success_count` | Number of successful certificate refresh operations |
-| `alloydbconn/refresh_failure_count` | Number of failed refresh operations |
-| `alloydbconn/bytes_sent` | Bytes sent to an AlloyDB instance |
-| `alloydbconn/bytes_received` | Bytes received from an AlloyDB instance |
+The connector records metrics using the meter name
+`cloud.google.com/go/alloydbconn`. All metrics carry the resource attributes
+`project_id`, `location`, `cluster_id`, `instance_id`, and `client_uid` so they
+can be correlated to a specific instance and `Dialer`.
+
+| Metric | Instrument | Description |
+|---|---|---|
+| `alloydbconn.dial_count` | Int64 counter | Number of dial attempts; carries `status`, `auth_type`, `is_cache_hit`, `connector_type` |
+| `alloydbconn.dial_latencies` | Float64 histogram | Distribution of dial latencies in milliseconds |
+| `alloydbconn.open_connections` | Int64 up/down counter | Current number of open AlloyDB connections |
+| `alloydbconn.refresh_count` | Int64 counter | Number of refresh operations; carries `status`, `refresh_type`, and `error_code` on failure |
+| `alloydbconn.bytes_sent_count` | Int64 counter | Bytes sent to an AlloyDB instance |
+| `alloydbconn.bytes_received_count` | Int64 counter | Bytes received from an AlloyDB instance |
+
+In addition to the public metrics above, the connector also exports a parallel
+set of metrics directly to Google Cloud Monitoring under the
+`alloydb.googleapis.com/client/connector/*` prefix. These power the AlloyDB
+client telemetry dashboards. They can be disabled with
+`alloydbconn.WithOptOutOfBuiltInTelemetry()`; the public OpenTelemetry metrics
+above are unaffected by that option.
 
 ### Traces
+
+Spans are emitted via the OpenTelemetry tracer named
+`cloud.google.com/go/alloydbconn`:
 
 - `cloud.google.com/go/alloydbconn.Dial` — the full dial operation
 - `cloud.google.com/go/alloydbconn/internal.InstanceInfo` — instance metadata retrieval
 - `cloud.google.com/go/alloydbconn/internal.Connect` — connection attempt using the ephemeral certificate
-- AlloyDB API client operations
+- `cloud.google.com/go/alloydbconn/internal.RefreshConnection` — certificate refresh
+- `cloud.google.com/go/alloydbconn/internal.FetchMetadata`, `…FetchEphemeralCert` — AlloyDB Admin API calls
 
 ### Example: Cloud Monitoring and Cloud Trace
 
 ```go
 import (
-    "contrib.go.opencensus.io/exporter/stackdriver"
-    "go.opencensus.io/trace"
+    mexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
+    texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
+    "go.opentelemetry.io/otel"
+    sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+    sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func main() {
-    sd, err := stackdriver.NewExporter(stackdriver.Options{
-        ProjectID: "my-project",
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer sd.Flush()
+    ctx := context.Background()
 
-    trace.RegisterExporter(sd)
-    sd.StartMetricsExporter()
-    defer sd.StopMetricsExporter()
+    me, err := mexporter.New(mexporter.WithProjectID("my-project"))
+    if err != nil { log.Fatal(err) }
+    mp := sdkmetric.NewMeterProvider(
+        sdkmetric.WithReader(sdkmetric.NewPeriodicReader(me)),
+    )
+    defer mp.Shutdown(ctx)
+    otel.SetMeterProvider(mp)
+
+    te, err := texporter.New(texporter.WithProjectID("my-project"))
+    if err != nil { log.Fatal(err) }
+    tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(te))
+    defer tp.Shutdown(ctx)
+    otel.SetTracerProvider(tp)
 
     // Use alloydbconn as usual.
 }
 ```
 
-[opencensus]: https://opencensus.io/
+[opentelemetry]: https://opentelemetry.io/
 [Cloud Monitoring]: https://cloud.google.com/monitoring
 [Cloud Trace]: https://cloud.google.com/trace
 

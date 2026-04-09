@@ -268,9 +268,6 @@ func (c adminAPIClient) connectionInfo(
 		tel.AddInstanceName(i.String()),
 	)
 	defer func() {
-		go tel.RecordRefreshResult(
-			context.Background(), i.String(), c.dialerID, err,
-		)
 		refreshEnd(err)
 	}()
 

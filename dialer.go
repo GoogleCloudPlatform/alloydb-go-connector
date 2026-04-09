@@ -115,19 +115,12 @@ type connectionInfoCache interface {
 	io.Closer
 }
 
-// monitoredCache is a wrapper around a connectionInfoCache that tracks the
-// number of connections to the associated instance.
-type monitoredCache struct {
-	openConns *uint64
-	connectionInfoCache
-}
-
 // A Dialer is used to create connections to AlloyDB instance.
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
 	lock           sync.RWMutex
-	cache          map[alloydb.InstanceURI]monitoredCache
+	cache          map[alloydb.InstanceURI]connectionInfoCache
 	keyGenerator   *keyGenerator
 	refreshTimeout time.Duration
 	// closed reports if the dialer has been closed.
@@ -159,8 +152,8 @@ type Dialer struct {
 	// be copied and mutated by the Dial function.
 	defaultDialCfg dialCfg
 
-	// dialerID uniquely identifies a Dialer. Used for monitoring purposes,
-	// *only* when a client has configured OpenCensus exporters.
+	// dialerID uniquely identifies a Dialer. Used as a metric and span
+	// attribute so callers can distinguish between Dialer instances.
 	dialerID        string
 	metricsMu       sync.Mutex
 	metricRecorders map[alloydb.InstanceURI]telv2.MetricRecorder
@@ -205,11 +198,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		opt(&dialCfg)
 	}
 
-	// This is OpenCensus-based metrics, which will eventually be removed in
-	// favor of telv2 (OpenTelemetry-based).
-	if err := tel.InitMetrics(); err != nil {
-		return nil, err
-	}
 	mClient, err := monitoring.NewMetricClient(ctx, cfg.clientOpts...)
 	if err != nil {
 		// Don't fail dialer initialization on metric client errors.
@@ -226,7 +214,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 	d := &Dialer{
 		closed:                  make(chan struct{}),
-		cache:                   make(map[alloydb.InstanceURI]monitoredCache),
+		cache:                   make(map[alloydb.InstanceURI]connectionInfoCache),
 		lazyRefresh:             cfg.lazyRefresh,
 		disableMetadataExchange: cfg.disableMetadataExchange,
 		disableBuiltInMetrics:   cfg.disableBuiltInTelemetry,
@@ -305,8 +293,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		tel.AddDialerID(d.dialerID),
 	)
 	defer func() {
-		go tel.RecordDialError(context.Background(), instance, d.dialerID, err)
-		go mr.RecordDialCount(ctx, attrs)
+		mr.RecordDialCount(ctx, attrs)
 		endDial(err)
 	}()
 
@@ -416,22 +403,10 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	attrs.DialStatus = telv2.DialSuccess
 
 	latency := time.Since(startTime).Milliseconds()
-	// Increment open connections synchronously before returning the
-	// connection to the caller. This prevents a race where the caller
-	// could close the connection before a background goroutine increments
-	// the counter, which would underflow the uint64 and produce incorrect
-	// metric values.
-	n := atomic.AddUint64(cache.openConns, 1)
-	go func() {
-		tel.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
-		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
-		mr.RecordOpenConnection(ctx, attrs)
-		mr.RecordDialLatency(ctx, latency, attrs)
-	}()
+	mr.RecordOpenConnection(ctx, attrs)
+	mr.RecordDialLatency(ctx, latency, attrs)
 
 	return newInstrumentedConn(tlsConn, mr, attrs, func() {
-		n := atomic.AddUint64(cache.openConns, ^uint64(0))
-		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
 		mr.RecordClosedConnection(context.Background(), attrs)
 	}, d.dialerID, inst.String()), nil
 }
@@ -661,10 +636,8 @@ func (i *instrumentedConn) Close() error {
 func (i *instrumentedConn) reportCounters() {
 	bytesRead := i.bytesRead.Swap(0)
 	bytesWritten := i.bytesWritten.Swap(0)
-	tel.RecordBytesReceived(context.Background(), bytesRead, i.instance, i.dialerID)
-	tel.RecordBytesSent(context.Background(), bytesWritten, i.instance, i.dialerID)
-	i.metricRecorder.RecordBytesRxCount(context.Background(), int64(bytesRead), i.attrs)
-	i.metricRecorder.RecordBytesTxCount(context.Background(), int64(bytesWritten), i.attrs)
+	i.metricRecorder.RecordBytesRxCount(context.Background(), bytesRead, i.attrs)
+	i.metricRecorder.RecordBytesTxCount(context.Background(), bytesWritten, i.attrs)
 }
 
 func (i *instrumentedConn) report(ctx context.Context) {
@@ -709,7 +682,7 @@ func (d *Dialer) Close() error {
 
 }
 
-func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceURI, mr telv2.MetricRecorder) (monitoredCache, bool, error) {
+func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceURI, mr telv2.MetricRecorder) (connectionInfoCache, bool, error) {
 	d.lock.RLock()
 	c, ok := d.cache[uri]
 	d.lock.RUnlock()
@@ -721,12 +694,11 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 		if !ok {
 			k, err := d.keyGenerator.rsaKey()
 			if err != nil {
-				return monitoredCache{}, ok, err
+				return nil, ok, err
 			}
-			var cache connectionInfoCache
 			switch {
 			case d.lazyRefresh:
-				cache = alloydb.NewLazyRefreshCache(
+				c = alloydb.NewLazyRefreshCache(
 					uri,
 					d.logger,
 					d.client, k,
@@ -738,17 +710,17 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 				d.logger.Debugf(ctx, "[%v] Connection info cache = lazy", uri.String())
 			case d.staticConnInfo != nil:
 				var err error
-				cache, err = alloydb.NewStaticConnectionInfoCache(
+				c, err = alloydb.NewStaticConnectionInfoCache(
 					uri,
 					d.logger,
 					d.staticConnInfo,
 				)
 				if err != nil {
-					return monitoredCache{}, ok, err
+					return nil, ok, err
 				}
 				d.logger.Debugf(ctx, "[%v] Connection info cache = static", uri.String())
 			default:
-				cache = alloydb.NewRefreshAheadCache(
+				c = alloydb.NewRefreshAheadCache(
 					uri,
 					d.logger,
 					d.client, k,
@@ -759,8 +731,6 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 				)
 				d.logger.Debugf(ctx, "[%v] Connection info cache = refresh ahead", uri.String())
 			}
-			var open uint64
-			c = monitoredCache{openConns: &open, connectionInfoCache: cache}
 			d.cache[uri] = c
 		}
 	}

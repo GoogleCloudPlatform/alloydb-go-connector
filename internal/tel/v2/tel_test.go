@@ -156,14 +156,20 @@ func (nullTokenSource) Token() (*oauth2.Token, error) {
 }
 
 func TestMetricRecorderInitialization(t *testing.T) {
-	// nil metric client should return a null metric recorder
+	// A nil metric client disables the GCP system metric export but still
+	// returns a recorder that records into the global OpenTelemetry meter
+	// provider. The recorder must accept Record* calls without panicking.
 	mr := telv2.NewMetricRecorder(t.Context(), nullLogger{t}, nil, telv2.Config{
 		Enabled:   true,
 		ProjectID: "my-cool-project",
 	})
 
-	if _, ok := mr.(telv2.NullMetricRecorder); !ok {
-		t.Fatalf("got = %T, want = %T", mr, telv2.NullMetricRecorder{})
+	if mr == nil {
+		t.Fatal("expected non-nil MetricRecorder")
+	}
+	mr.RecordDialCount(t.Context(), telv2.Attributes{DialStatus: telv2.DialSuccess})
+	if err := mr.Shutdown(t.Context()); err != nil {
+		t.Fatalf("Shutdown returned error: %v", err)
 	}
 }
 

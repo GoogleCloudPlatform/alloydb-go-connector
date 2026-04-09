@@ -369,9 +369,7 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[inst] = monitoredCache{
-				connectionInfoCache: spy,
-			}
+			d.cache[inst] = spy
 
 			_, err = d.Dial(context.Background(), tc.uri, tc.opts...)
 			if err == nil {
@@ -422,9 +420,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 			},
 		},
 	}
-	d.cache[cn] = monitoredCache{
-		connectionInfoCache: spy,
-	}
+	d.cache[cn] = spy
 
 	_, err = d.Dial(context.Background(), inst)
 	if !errors.Is(err, sentinel) {

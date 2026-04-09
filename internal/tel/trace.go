@@ -17,11 +17,14 @@ package tel
 import (
 	"context"
 
-	"go.opencensus.io/trace"
-	"google.golang.org/api/googleapi"
-	"google.golang.org/genproto/googleapis/rpc/code"
-	"google.golang.org/grpc/status"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
+
+// tracerName is the instrumentation name used for spans created by this
+// package.
+const tracerName = "cloud.google.com/go/alloydbconn"
 
 // EndSpanFunc is a function that ends a span, reporting an error if necessary.
 type EndSpanFunc func(error)
@@ -29,85 +32,38 @@ type EndSpanFunc func(error)
 // Attribute annotates a span with additional data.
 type Attribute struct {
 	key   string
-	value any
-}
-
-func (a Attribute) traceAttr() trace.Attribute {
-	// always use a string attribute for now
-	// if need for additional types arise, this can be expanded.
-	return trace.StringAttribute(a.key, a.value.(string))
+	value string
 }
 
 // AddInstanceName creates an attribute with the AlloyDB instance name.
 func AddInstanceName(name string) Attribute {
-	return Attribute{key: "/alloydb/instance", value: name}
+	return Attribute{key: "alloydb.instance", value: name}
 }
 
 // AddDialerID creates an attribute to identify a particular dialer.
 func AddDialerID(dialerID string) Attribute {
-	return Attribute{key: "/alloydb/dialer_id", value: dialerID}
+	return Attribute{key: "alloydb.dialer_id", value: dialerID}
 }
 
 // StartSpan begins a span with the provided name and returns a context and a
-// function to end the created span.
+// function to end the created span. The span is created via the global
+// OpenTelemetry TracerProvider so that any tracer registered by the caller
+// will receive it.
 func StartSpan(ctx context.Context, name string, attrs ...Attribute) (context.Context, EndSpanFunc) {
-	var span *trace.Span
-	ctx, span = trace.StartSpan(ctx, name)
-	as := make([]trace.Attribute, 0, len(attrs))
-	for _, a := range attrs {
-		as = append(as, a.traceAttr())
+	tracer := otel.GetTracerProvider().Tracer(tracerName)
+	ctx, span := tracer.Start(ctx, name)
+	if len(attrs) > 0 {
+		kvs := make([]attribute.KeyValue, 0, len(attrs))
+		for _, a := range attrs {
+			kvs = append(kvs, attribute.String(a.key, a.value))
+		}
+		span.SetAttributes(kvs...)
 	}
-	span.AddAttributes(as...)
 	return ctx, func(err error) {
 		if err != nil {
-			span.SetStatus(toStatus(err))
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 		}
 		span.End()
-	}
-}
-
-// toStatus interrogates an error and converts it to an appropriate
-// OpenCensus status.
-// Note: this function is borrowed from
-// https://github.com/googleapis/google-cloud-go/blob/master/internal/trace/trace.go
-func toStatus(err error) trace.Status {
-	if err2, ok := err.(*googleapi.Error); ok {
-		return trace.Status{Code: httpStatusCodeToOCCode(err2.Code), Message: err2.Message}
-	}
-	if s, ok := status.FromError(err); ok {
-		return trace.Status{Code: int32(s.Code()), Message: s.Message()}
-	}
-	return trace.Status{Code: int32(code.Code_UNKNOWN), Message: err.Error()}
-}
-
-// Reference: https://github.com/googleapis/googleapis/blob/26b634d2724ac5dd30ae0b0cbfb01f07f2e4050e/google/rpc/code.proto
-func httpStatusCodeToOCCode(httpStatusCode int) int32 {
-	switch httpStatusCode {
-	case 200:
-		return int32(code.Code_OK)
-	case 499:
-		return int32(code.Code_CANCELLED)
-	case 500:
-		return int32(code.Code_UNKNOWN) // Could also be Code_INTERNAL, Code_DATA_LOSS
-	case 400:
-		return int32(code.Code_INVALID_ARGUMENT) // Could also be Code_OUT_OF_RANGE
-	case 504:
-		return int32(code.Code_DEADLINE_EXCEEDED)
-	case 404:
-		return int32(code.Code_NOT_FOUND)
-	case 409:
-		return int32(code.Code_ALREADY_EXISTS) // Could also be Code_ABORTED
-	case 403:
-		return int32(code.Code_PERMISSION_DENIED)
-	case 401:
-		return int32(code.Code_UNAUTHENTICATED)
-	case 429:
-		return int32(code.Code_RESOURCE_EXHAUSTED)
-	case 501:
-		return int32(code.Code_UNIMPLEMENTED)
-	case 503:
-		return int32(code.Code_UNAVAILABLE)
-	default:
-		return int32(code.Code_UNKNOWN)
 	}
 }

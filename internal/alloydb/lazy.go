@@ -99,6 +99,7 @@ func (c *LazyRefreshCache) ConnectionInfo(
 			UserAgent:     c.userAgent,
 			RefreshType:   telv2.RefreshLazyType,
 			RefreshStatus: telv2.RefreshFailure,
+			RefreshError:  err,
 		})
 		return ConnectionInfo{}, err
 	}
