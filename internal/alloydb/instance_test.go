@@ -312,6 +312,206 @@ func TestRefreshDuration(t *testing.T) {
 	}
 }
 
+func TestResultIsReady(t *testing.T) {
+	pending := newPendingResult()
+	if pending.isReady() {
+		t.Fatal("pending result reported ready")
+	}
+	ready := newReadyResult(ConnectionInfo{}, nil)
+	if !ready.isReady() {
+		t.Fatal("ready result reported not ready")
+	}
+}
+
+func TestStoreFillsPendingPlaceholder(t *testing.T) {
+	c := &RefreshAheadCache{current: newPendingResult()}
+	pending := c.current
+
+	wantExp := time.Now().Add(time.Hour)
+	c.store(ConnectionInfo{Expiration: wantExp}, nil)
+
+	if !pending.isReady() {
+		t.Fatal("placeholder was not closed after store")
+	}
+	if c.current != pending {
+		t.Fatal("store replaced the placeholder instead of filling it")
+	}
+	if !c.current.info.Expiration.Equal(wantExp) {
+		t.Fatalf("placeholder expiration: want %v, got %v", wantExp, c.current.info.Expiration)
+	}
+	if c.current.err != nil {
+		t.Fatalf("placeholder unexpectedly has err=%v", c.current.err)
+	}
+}
+
+func TestStoreFillsPendingPlaceholderWithError(t *testing.T) {
+	c := &RefreshAheadCache{current: newPendingResult()}
+	pending := c.current
+
+	wantErr := errors.New("boom")
+	c.store(ConnectionInfo{}, wantErr)
+
+	if !pending.isReady() {
+		t.Fatal("placeholder was not closed after errored store")
+	}
+	if !errors.Is(c.current.err, wantErr) {
+		t.Fatalf("want err=%v, got %v", wantErr, c.current.err)
+	}
+}
+
+func TestStoreSuppressesErrorWhenCurrentValid(t *testing.T) {
+	good := ConnectionInfo{Expiration: time.Now().Add(time.Hour)}
+	c := &RefreshAheadCache{current: newReadyResult(good, nil)}
+
+	c.store(ConnectionInfo{}, errors.New("transient"))
+
+	if c.current.err != nil {
+		t.Fatalf("error was not suppressed: %v", c.current.err)
+	}
+	if !c.current.info.Expiration.Equal(good.Expiration) {
+		t.Fatal("store overwrote a still-valid current result")
+	}
+}
+
+func TestStoreReplacesCurrentWhenExpired(t *testing.T) {
+	expired := ConnectionInfo{Expiration: time.Now().Add(-time.Hour)}
+	c := &RefreshAheadCache{current: newReadyResult(expired, nil)}
+
+	wantErr := errors.New("boom")
+	c.store(ConnectionInfo{}, wantErr)
+
+	if !errors.Is(c.current.err, wantErr) {
+		t.Fatalf("expired current was not replaced: err=%v", c.current.err)
+	}
+}
+
+func TestStoreReplacesCurrentOnSuccess(t *testing.T) {
+	old := ConnectionInfo{Expiration: time.Now().Add(time.Hour)}
+	c := &RefreshAheadCache{current: newReadyResult(old, nil)}
+
+	newExp := time.Now().Add(2 * time.Hour)
+	c.store(ConnectionInfo{Expiration: newExp}, nil)
+
+	if !c.current.info.Expiration.Equal(newExp) {
+		t.Fatalf("successful refresh did not replace current: got %v", c.current.info.Expiration)
+	}
+}
+
+func TestCurrentUsableLocked(t *testing.T) {
+	tcs := []struct {
+		desc string
+		cur  *result
+		want bool
+	}{
+		{"pending current", newPendingResult(), false},
+		{"errored current", newReadyResult(ConnectionInfo{}, errors.New("x")), false},
+		{"expired current", newReadyResult(ConnectionInfo{Expiration: time.Now().Add(-time.Minute)}, nil), false},
+		{"valid current", newReadyResult(ConnectionInfo{Expiration: time.Now().Add(time.Hour)}, nil), true},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			c := &RefreshAheadCache{current: tc.cur}
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if got := c.currentUsableLocked(); got != tc.want {
+				t.Fatalf("want %v, got %v", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestForceRefreshInstallsPendingWhenCurrentUnusable(t *testing.T) {
+	// Cache in a state where run() isn't actually running: we only want
+	// to observe ForceRefresh's effect on c.current and forceCh.
+	c := &RefreshAheadCache{
+		current: newReadyResult(ConnectionInfo{}, errors.New("prior failure")),
+		forceCh: make(chan struct{}, 1),
+		ctx:     context.Background(),
+	}
+	c.ForceRefresh()
+
+	if c.current.isReady() {
+		t.Fatal("ForceRefresh did not install a pending placeholder for an unusable current")
+	}
+	select {
+	case <-c.forceCh:
+	default:
+		t.Fatal("ForceRefresh did not signal the worker")
+	}
+}
+
+func TestForceRefreshLeavesValidCurrentIntact(t *testing.T) {
+	good := newReadyResult(ConnectionInfo{Expiration: time.Now().Add(time.Hour)}, nil)
+	c := &RefreshAheadCache{
+		current: good,
+		forceCh: make(chan struct{}, 1),
+		ctx:     context.Background(),
+	}
+	c.ForceRefresh()
+
+	if c.current != good {
+		t.Fatal("ForceRefresh replaced a still-valid current result")
+	}
+	select {
+	case <-c.forceCh:
+	default:
+		t.Fatal("ForceRefresh did not signal the worker")
+	}
+}
+
+func TestForceRefreshCoalescesSignals(t *testing.T) {
+	c := &RefreshAheadCache{
+		current: newReadyResult(ConnectionInfo{Expiration: time.Now().Add(time.Hour)}, nil),
+		forceCh: make(chan struct{}, 1),
+		ctx:     context.Background(),
+	}
+	// Multiple calls should never block, even though the worker isn't
+	// draining forceCh in this test.
+	for i := 0; i < 5; i++ {
+		c.ForceRefresh()
+	}
+	// Exactly one signal should be pending.
+	select {
+	case <-c.forceCh:
+	default:
+		t.Fatal("expected one pending signal")
+	}
+	select {
+	case <-c.forceCh:
+		t.Fatal("forceCh had more than one pending signal")
+	default:
+	}
+}
+
+func TestConnectionInfoReturnsCtxErrWhenCancelledBeforeReady(t *testing.T) {
+	c := &RefreshAheadCache{
+		current: newPendingResult(),
+		ctx:     context.Background(),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := c.ConnectionInfo(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+}
+
+func TestConnectionInfoReturnsCacheCtxErrWhenClosed(t *testing.T) {
+	cctx, ccancel := context.WithCancel(context.Background())
+	c := &RefreshAheadCache{
+		current: newPendingResult(),
+		ctx:     cctx,
+		cancel:  ccancel,
+	}
+	ccancel()
+
+	_, err := c.ConnectionInfo(context.Background())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+}
+
 func TestRefreshAheadCacheMetrics(t *testing.T) {
 	u := testInstanceURI()
 	inst := mock.NewFakeInstance(u.Project(), u.Region(), u.Cluster(), u.Name())
