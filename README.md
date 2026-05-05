@@ -441,15 +441,10 @@ func connect(ctx context.Context) {
 
 ## Support Policy
 
-### Major Version Lifecycle
-
-This project uses [semantic versioning](https://semver.org/):
-
-| Stage | Description |
-|---|---|
-| **Active** | Receives all new features and security fixes. New major versions are guaranteed active for a minimum of 1 year. |
-| **Deprecated** | Receives security and critical bug fixes only. Supported for 1 year after deprecation. |
-| **Unsupported** | Any major version deprecated for ≥ 1 year. |
+This project follows [semantic versioning](https://semver.org/). We release a new
+version monthly with features, bug fixes, and security updates. If no new
+features are added, we still release a PATCH version with updated dependencies.
+We recommend always using the latest version.
 
 ### Supported Go Versions
 
@@ -458,7 +453,3 @@ Libraries for Go.
 
 [go-policy]: https://github.com/googleapis/google-cloud-go#go-versions-supported
 
-### Release Cadence
-
-This project aims for a monthly release cadence. If no new features or fixes
-are available, a patch release with updated dependencies is published.
