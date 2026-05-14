@@ -665,7 +665,6 @@ func TestDialerDialMetrics(t *testing.T) {
 	defer conn.Close()
 
 	wantAttrs := telv2.Attributes{
-		UserAgent:   "some-ua",
 		IAMAuthN:    false,
 		CacheHit:    false,
 		DialStatus:  "success",

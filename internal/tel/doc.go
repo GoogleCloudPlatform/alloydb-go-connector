@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package tel provides telemetry data on the connector's internal operations.
-// The initial version is based on OpenCensus.
+// Package tel provides tracing for the connector's internal operations using
+// OpenTelemetry. The sibling v2 package provides metrics via OpenTelemetry.
+//
+// This package also continues to emit the connector's original
+// OpenCensus-based metrics so that existing dashboards and alerts can
+// continue to consume them while operators migrate to OpenTelemetry.
+// The OpenCensus emission is scheduled for removal in the release after the
+// next.
 package tel
