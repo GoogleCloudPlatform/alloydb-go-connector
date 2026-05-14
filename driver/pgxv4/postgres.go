@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// This package is deprecated. Use pgxv5 directly instead.
+// This package is deprecated. Use cloud.google.com/go/alloydbconn/driver/postgres instead.
+//
+// Deprecated: Use cloud.google.com/go/alloydbconn/driver/postgres instead.
 package pgxv4
 
 import (
 	"cloud.google.com/go/alloydbconn"
-	"cloud.google.com/go/alloydbconn/driver/pgxv5"
+	"cloud.google.com/go/alloydbconn/driver/postgres"
 )
 
-// RegisterDriver calls through to pgxv5.RegisterDriver. Prefer the pgxv5
-// interface instead of using this one
+// RegisterDriver calls through to postgres.RegisterDriver.
+//
+// Deprecated: Use postgres.RegisterDriver instead.
 func RegisterDriver(name string, opts ...alloydbconn.Option) (func() error, error) {
-	return pgxv5.RegisterDriver(name, opts...)
+	return postgres.RegisterDriver(name, opts...)
 }

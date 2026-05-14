@@ -26,6 +26,7 @@ import (
 	"cloud.google.com/go/alloydbconn"
 	"cloud.google.com/go/alloydbconn/driver/pgxv4"
 	"cloud.google.com/go/alloydbconn/driver/pgxv5"
+	"cloud.google.com/go/alloydbconn/driver/postgres"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -211,6 +212,44 @@ func TestDatabaseSQLConnectPGXV4(t *testing.T) {
 			// connection instead.
 			"host=%s user=%s password=%s dbname=%s sslmode=disable",
 			alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
+		),
+	)
+	if err != nil {
+		_ = cleanup()
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		// best effort
+		_ = cleanup()
+	}()
+
+	var tt time.Time
+	if err := db.QueryRow("SELECT NOW()").Scan(&tt); err != nil {
+		t.Fatal(err)
+	}
+	t.Log(tt)
+}
+
+func TestDatabaseSQLConnectPostgres(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration tests")
+	}
+
+	cleanup, err := postgres.RegisterDriver("alloydb-postgres",
+		alloydbconn.WithIAMAuthN(), alloydbconn.WithOptOutOfBuiltInTelemetry(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := sql.Open(
+		"alloydb-postgres",
+		fmt.Sprintf(
+			// sslmode is disabled, because the Dialer will handle the SSL
+			// connection instead.
+			"host=%s user=%s dbname=%s sslmode=disable",
+			alloydbInstanceName, alloydbIAMUser, alloydbDB,
 		),
 	)
 	if err != nil {

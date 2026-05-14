@@ -62,19 +62,19 @@
 //	    defer conn.Close()
 //	}
 //
-// To use [database/sql], call pgxv5.RegisterDriver with any necessary Dialer
+// To use [database/sql], call postgres.RegisterDriver with any necessary Dialer
 // configuration.
 //
 //	import (
 //	    "database/sql"
 //
 //	    "cloud.google.com/go/alloydbconn"
-//	    "cloud.google.com/go/alloydbconn/driver/pgxv5"
+//	    "cloud.google.com/go/alloydbconn/driver/postgres"
 //	)
 //
 //	func connect() {
 //	    // adjust options as needed
-//	    cleanup, err := pgxv5.RegisterDriver("alloydb")
+//	    cleanup, err := postgres.RegisterDriver("alloydb")
 //	    if err != nil {
 //	        // ... handle error
 //	    }

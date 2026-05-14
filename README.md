@@ -46,13 +46,13 @@ import (
     "fmt"
     "log"
 
-    "cloud.google.com/go/alloydbconn/driver/pgxv5"
+    "cloud.google.com/go/alloydbconn/driver/postgres"
 )
 
 func main() {
     // Register the AlloyDB driver with the name "alloydb"
     // Uses Private IP by default. See Network Options below for details.
-    cleanup, err := pgxv5.RegisterDriver("alloydb")
+    cleanup, err := postgres.RegisterDriver("alloydb")
     if err != nil {
         log.Fatal(err)
     }
@@ -153,14 +153,14 @@ import (
     "fmt"
 
     "cloud.google.com/go/alloydbconn"
-    "cloud.google.com/go/alloydbconn/driver/pgxv5"
+    "cloud.google.com/go/alloydbconn/driver/postgres"
 )
 
 func connect(instURI, user, pass, dbname string) (*sql.DB, func() error, error) {
     // RegisterDriver registers the AlloyDB driver and returns a cleanup
     // function that stops background goroutines. Call cleanup when you are
     // done with the database connection to avoid a goroutine leak.
-    cleanup, err := pgxv5.RegisterDriver("alloydb")
+    cleanup, err := postgres.RegisterDriver("alloydb")
     if err != nil {
         return nil, nil, err
     }
@@ -245,7 +245,7 @@ Pass `WithPublicIP()` to connect over the instance's public IP address.
 **With database/sql:**
 
 ```go
-cleanup, err := pgxv5.RegisterDriver("alloydb",
+cleanup, err := postgres.RegisterDriver("alloydb",
     alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()),
 )
 ```
@@ -265,7 +265,7 @@ Pass `WithPSC()` to connect via [Private Service Connect][psc].
 **With database/sql:**
 
 ```go
-cleanup, err := pgxv5.RegisterDriver("alloydb",
+cleanup, err := postgres.RegisterDriver("alloydb",
     alloydbconn.WithDefaultDialOptions(alloydbconn.WithPSC()),
 )
 ```
@@ -295,7 +295,7 @@ database password.
 
 ```go
 // Pass WithIAMAuthN() to enable automatic IAM authentication.
-cleanup, err := pgxv5.RegisterDriver("alloydb", alloydbconn.WithIAMAuthN())
+cleanup, err := postgres.RegisterDriver("alloydb", alloydbconn.WithIAMAuthN())
 ```
 
 Set the `user` field in your DSN based on your IAM identity type:
@@ -320,7 +320,7 @@ db, err := sql.Open("alloydb", fmt.Sprintf(
 
 ## Configuring the Dialer
 
-Both `pgxv5.RegisterDriver` and `alloydbconn.NewDialer` accept options to
+Both `postgres.RegisterDriver` and `alloydbconn.NewDialer` accept options to
 customize connector behavior.
 
 ### Explicit credentials (uncommon)
@@ -332,7 +332,7 @@ environment.
 **From a service account key file:**
 
 ```go
-cleanup, err := pgxv5.RegisterDriver("alloydb",
+cleanup, err := postgres.RegisterDriver("alloydb",
     alloydbconn.WithCredentialsFile("path/to/service-account-key.json"),
 )
 ```
@@ -340,7 +340,7 @@ cleanup, err := pgxv5.RegisterDriver("alloydb",
 **From a credentials JSON blob:**
 
 ```go
-cleanup, err := pgxv5.RegisterDriver("alloydb",
+cleanup, err := postgres.RegisterDriver("alloydb",
     alloydbconn.WithCredentialsJSON([]byte(`{...}`)),
 )
 ```

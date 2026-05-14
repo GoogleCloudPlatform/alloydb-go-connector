@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/alloydbconn"
-	"cloud.google.com/go/alloydbconn/driver/pgxv5"
+	"cloud.google.com/go/alloydbconn/driver/postgres"
 )
 
 // connectDatabaseSQL establishes a connection to your database using the Go
@@ -45,7 +45,7 @@ func connectDatabaseSQL(
 ) (*sql.DB, func() error, error) {
 	// First, register the AlloyDB driver. Note, the driver's name is arbitrary
 	// and must only match what you use below in sql.Open. Also,
-	// pgxv5.RegisterDriver accepts options to configure credentials, timeouts,
+	// postgres.RegisterDriver accepts options to configure credentials, timeouts,
 	// etc.
 	//
 	// For details, see:
@@ -54,7 +54,7 @@ func connectDatabaseSQL(
 	// The cleanup function will stop the dialer's background refresh
 	// goroutines. Call it when you're done with your database connection to
 	// avoid a goroutine leak.
-	cleanup, err := pgxv5.RegisterDriver("alloydb", opts...)
+	cleanup, err := postgres.RegisterDriver("alloydb", opts...)
 	if err != nil {
 		return nil, cleanup, err
 	}
