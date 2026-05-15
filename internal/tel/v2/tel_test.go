@@ -156,14 +156,20 @@ func (nullTokenSource) Token() (*oauth2.Token, error) {
 }
 
 func TestMetricRecorderInitialization(t *testing.T) {
-	// nil metric client should return a null metric recorder
+	// A nil metric client disables the GCP system metric export but still
+	// returns a recorder that records into the global OpenTelemetry meter
+	// provider. The recorder must accept Record* calls without panicking.
 	mr := telv2.NewMetricRecorder(t.Context(), nullLogger{t}, nil, telv2.Config{
 		Enabled:   true,
 		ProjectID: "my-cool-project",
 	})
 
-	if _, ok := mr.(telv2.NullMetricRecorder); !ok {
-		t.Fatalf("got = %T, want = %T", mr, telv2.NullMetricRecorder{})
+	if mr == nil {
+		t.Fatal("expected non-nil MetricRecorder")
+	}
+	mr.RecordDialCount(t.Context(), telv2.Attributes{DialStatus: telv2.DialSuccess})
+	if err := mr.Shutdown(t.Context()); err != nil {
+		t.Fatalf("Shutdown returned error: %v", err)
 	}
 }
 
@@ -178,6 +184,7 @@ func TestMetricRecorder(t *testing.T) {
 		Location:  "some-location",
 		Cluster:   "some-cluster",
 		Instance:  "some-instance",
+		UserAgent: "alloydb-go-connector/1.2.3",
 	}
 	wantProject := "projects/myproject"
 	wantResourceType := "alloydb.googleapis.com/InstanceClient"
@@ -209,9 +216,17 @@ func TestMetricRecorder(t *testing.T) {
 	}{
 		{
 			desc: "dial_count",
-			cfg:  defaultCfg,
+			cfg: telv2.Config{
+				Enabled:   true,
+				Version:   "1.2.3",
+				ClientID:  "some-uid",
+				ProjectID: "myproject",
+				Location:  "some-location",
+				Cluster:   "some-cluster",
+				Instance:  "some-instance",
+				UserAgent: "alloydb-go-connector/1.11.0 alloy-db-auth-proxy/1.10.1+container",
+			},
 			attrs: telv2.Attributes{
-				UserAgent:  "alloydb-go-connector/1.11.0 alloy-db-auth-proxy/1.10.1+container",
 				IAMAuthN:   true,
 				CacheHit:   true,
 				DialStatus: telv2.DialSuccess,
@@ -231,11 +246,9 @@ func TestMetricRecorder(t *testing.T) {
 			},
 		},
 		{
-			desc: "dial_latencies",
-			cfg:  defaultCfg,
-			attrs: telv2.Attributes{
-				UserAgent: "alloydb-go-connector/1.2.3",
-			},
+			desc:  "dial_latencies",
+			cfg:   defaultCfg,
+			attrs: telv2.Attributes{},
 			action: func(ctx context.Context, mr telv2.MetricRecorder, attrs telv2.Attributes) {
 				mr.RecordDialLatency(ctx, 1, attrs)
 			},
@@ -251,8 +264,7 @@ func TestMetricRecorder(t *testing.T) {
 			desc: "open_connections (inc)",
 			cfg:  defaultCfg,
 			attrs: telv2.Attributes{
-				UserAgent: "alloydb-go-connector/1.2.3",
-				IAMAuthN:  false,
+				IAMAuthN: false,
 			},
 			action: func(ctx context.Context, mr telv2.MetricRecorder, attrs telv2.Attributes) {
 				mr.RecordOpenConnection(ctx, attrs)
@@ -270,8 +282,7 @@ func TestMetricRecorder(t *testing.T) {
 			desc: "open_connections (dec)",
 			cfg:  defaultCfg,
 			attrs: telv2.Attributes{
-				UserAgent: "alloydb-go-connector/1.2.3",
-				IAMAuthN:  false,
+				IAMAuthN: false,
 			},
 			action: func(ctx context.Context, mr telv2.MetricRecorder, attrs telv2.Attributes) {
 				mr.RecordClosedConnection(ctx, attrs)
@@ -286,11 +297,9 @@ func TestMetricRecorder(t *testing.T) {
 			},
 		},
 		{
-			desc: "bytes_sent_count",
-			cfg:  defaultCfg,
-			attrs: telv2.Attributes{
-				UserAgent: "alloydb-go-connector/1.2.3",
-			},
+			desc:  "bytes_sent_count",
+			cfg:   defaultCfg,
+			attrs: telv2.Attributes{},
 			action: func(ctx context.Context, mr telv2.MetricRecorder, attrs telv2.Attributes) {
 				mr.RecordBytesTxCount(ctx, 1, attrs)
 			},
@@ -303,11 +312,9 @@ func TestMetricRecorder(t *testing.T) {
 			},
 		},
 		{
-			desc: "bytes_received_count",
-			cfg:  defaultCfg,
-			attrs: telv2.Attributes{
-				UserAgent: "alloydb-go-connector/1.2.3",
-			},
+			desc:  "bytes_received_count",
+			cfg:   defaultCfg,
+			attrs: telv2.Attributes{},
 			action: func(ctx context.Context, mr telv2.MetricRecorder, attrs telv2.Attributes) {
 				mr.RecordBytesRxCount(ctx, 1, attrs)
 			},
@@ -323,7 +330,6 @@ func TestMetricRecorder(t *testing.T) {
 			desc: "refresh_count",
 			cfg:  defaultCfg,
 			attrs: telv2.Attributes{
-				UserAgent:     "alloydb-go-connector/1.2.3",
 				RefreshStatus: telv2.RefreshSuccess,
 				RefreshType:   telv2.RefreshAheadType,
 			},

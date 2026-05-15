@@ -161,7 +161,6 @@ func TestConnectionInfo(t *testing.T) {
 		nullLogger{},
 		c, rsaKey, 30*time.Second, "dialer-id",
 		false,
-		"some-ua",
 		telv2.NullMetricRecorder{},
 	)
 	if err != nil {
@@ -216,7 +215,6 @@ func TestConnectInfoErrors(t *testing.T) {
 		nullLogger{},
 		c, rsaKey, 0, "dialer-id",
 		false,
-		"some-ua",
 		telv2.NullMetricRecorder{},
 	)
 	if err != nil {
@@ -252,7 +250,6 @@ func TestClose(t *testing.T) {
 		nullLogger{},
 		c, rsaKey, 30, "dialer-ider",
 		false,
-		"some-ua",
 		telv2.NullMetricRecorder{},
 	)
 	if err != nil {
@@ -328,7 +325,6 @@ func TestRefreshAheadCacheMetrics(t *testing.T) {
 				mock.CreateEphemeralSuccess(inst, 1),
 			},
 			wantAttrs: telv2.Attributes{
-				UserAgent:     "some-ua",
 				RefreshType:   "refresh_ahead",
 				RefreshStatus: "success",
 			},
@@ -337,7 +333,6 @@ func TestRefreshAheadCacheMetrics(t *testing.T) {
 			desc:     "refresh count failure",
 			requests: []*mock.Request{}, // no requests will result in 500s
 			wantAttrs: telv2.Attributes{
-				UserAgent:     "some-ua",
 				RefreshType:   "refresh_ahead",
 				RefreshStatus: "failure",
 			},
@@ -369,7 +364,6 @@ func TestRefreshAheadCacheMetrics(t *testing.T) {
 				nullLogger{},
 				c, rsaKey, 30*time.Second, "dialer-id",
 				false,
-				"some-ua",
 				mockRecorder,
 			)
 			cache.ConnectionInfo(context.Background())

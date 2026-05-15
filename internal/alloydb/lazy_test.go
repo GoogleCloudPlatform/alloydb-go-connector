@@ -53,7 +53,6 @@ func TestLazyRefreshCacheConnectionInfo(t *testing.T) {
 		testInstanceURI(), nullLogger{}, c,
 		rsaKey, 30*time.Second, "",
 		false,
-		"some-ua",
 		telv2.NullMetricRecorder{},
 	)
 
@@ -98,7 +97,6 @@ func TestLazyRefreshCacheForceRefresh(t *testing.T) {
 		testInstanceURI(), nullLogger{}, c,
 		rsaKey, 30*time.Second, "",
 		false,
-		"some-ua",
 		telv2.NullMetricRecorder{},
 	)
 
@@ -125,6 +123,9 @@ type mockMetricRecorder struct {
 func (m *mockMetricRecorder) RecordRefreshCount(_ context.Context, a telv2.Attributes) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// RefreshError carries the underlying refresh error and varies by run.
+	// Strip it so equality comparison in Verify focuses on attribute values.
+	a.RefreshError = nil
 	m.gotAttrs = a
 }
 
@@ -157,7 +158,6 @@ func TestLazyRefreshCacheMetrics(t *testing.T) {
 				mock.CreateEphemeralSuccess(inst, 1),
 			},
 			wantAttrs: telv2.Attributes{
-				UserAgent:     "some-ua",
 				RefreshType:   "lazy",
 				RefreshStatus: "success",
 			},
@@ -166,7 +166,6 @@ func TestLazyRefreshCacheMetrics(t *testing.T) {
 			desc:     "refresh count success",
 			requests: []*mock.Request{}, // no requests will result in 500s
 			wantAttrs: telv2.Attributes{
-				UserAgent:     "some-ua",
 				RefreshType:   "lazy",
 				RefreshStatus: "failure",
 			},
@@ -198,7 +197,6 @@ func TestLazyRefreshCacheMetrics(t *testing.T) {
 				testInstanceURI(), nullLogger{}, c,
 				rsaKey, 30*time.Second, "",
 				false,
-				"some-ua",
 				mockRecorder,
 			)
 

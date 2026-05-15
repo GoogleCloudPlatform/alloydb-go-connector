@@ -159,8 +159,8 @@ type Dialer struct {
 	// be copied and mutated by the Dial function.
 	defaultDialCfg dialCfg
 
-	// dialerID uniquely identifies a Dialer. Used for monitoring purposes,
-	// *only* when a client has configured OpenCensus exporters.
+	// dialerID uniquely identifies a Dialer. Used as a metric and span
+	// attribute so callers can distinguish between Dialer instances.
 	dialerID        string
 	metricsMu       sync.Mutex
 	metricRecorders map[alloydb.InstanceURI]telv2.MetricRecorder
@@ -262,6 +262,7 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst alloydb.InstanceURI) t
 		Location:  inst.Region(),
 		Cluster:   inst.Cluster(),
 		Instance:  inst.Name(),
+		UserAgent: d.userAgent,
 	}
 	mr := telv2.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
 	d.metricRecorders[inst] = mr
@@ -293,7 +294,6 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		endDial   tel.EndSpanFunc
 		attrs     = telv2.Attributes{
 			IAMAuthN:    cfg.iamAuthN,
-			UserAgent:   d.userAgent,
 			RefreshType: telv2.RefreshAheadType,
 		}
 	)
@@ -305,8 +305,8 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		tel.AddDialerID(d.dialerID),
 	)
 	defer func() {
-		go tel.RecordDialError(context.Background(), instance, d.dialerID, err)
-		go mr.RecordDialCount(ctx, attrs)
+		mr.RecordDialCount(ctx, attrs)
+		tel.RecordDialError(ctx, instance, d.dialerID, err)
 		endDial(err)
 	}()
 
@@ -732,7 +732,6 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
 					d.disableMetadataExchange,
-					d.userAgent,
 					mr,
 				)
 				d.logger.Debugf(ctx, "[%v] Connection info cache = lazy", uri.String())
@@ -754,7 +753,6 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
 					d.disableMetadataExchange,
-					d.userAgent,
 					mr,
 				)
 				d.logger.Debugf(ctx, "[%v] Connection info cache = refresh ahead", uri.String())

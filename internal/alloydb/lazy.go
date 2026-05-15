@@ -34,7 +34,6 @@ type LazyRefreshCache struct {
 	mu             sync.Mutex
 	needsRefresh   bool
 	cached         ConnectionInfo
-	userAgent      string
 	metricRecorder telv2.MetricRecorder
 }
 
@@ -47,14 +46,12 @@ func NewLazyRefreshCache(
 	_ time.Duration,
 	dialerID string,
 	disableMetadataExchange bool,
-	userAgent string,
 	mr telv2.MetricRecorder,
 ) *LazyRefreshCache {
 	return &LazyRefreshCache{
 		uri:            uri,
 		logger:         l,
 		r:              newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
-		userAgent:      userAgent,
 		metricRecorder: mr,
 	}
 }
@@ -96,14 +93,13 @@ func (c *LazyRefreshCache) ConnectionInfo(
 			err,
 		)
 		go c.metricRecorder.RecordRefreshCount(ctx, telv2.Attributes{
-			UserAgent:     c.userAgent,
 			RefreshType:   telv2.RefreshLazyType,
 			RefreshStatus: telv2.RefreshFailure,
+			RefreshError:  err,
 		})
 		return ConnectionInfo{}, err
 	}
 	go c.metricRecorder.RecordRefreshCount(ctx, telv2.Attributes{
-		UserAgent:     c.userAgent,
 		RefreshType:   telv2.RefreshLazyType,
 		RefreshStatus: telv2.RefreshSuccess,
 	})

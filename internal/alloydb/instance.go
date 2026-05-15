@@ -180,7 +180,6 @@ type RefreshAheadCache struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	userAgent      string
 	metricRecorder telv2.MetricRecorder
 }
 
@@ -194,7 +193,6 @@ func NewRefreshAheadCache(
 	refreshTimeout time.Duration,
 	dialerID string,
 	disableMetadataExchange bool,
-	userAgent string,
 	mr telv2.MetricRecorder,
 ) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -206,7 +204,6 @@ func NewRefreshAheadCache(
 		refreshTimeout: refreshTimeout,
 		ctx:            ctx,
 		cancel:         cancel,
-		userAgent:      userAgent,
 		metricRecorder: mr,
 	}
 	// For the initial refresh operation, set cur = next so that connection
@@ -362,9 +359,9 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 				i.cur = r
 			}
 			go i.metricRecorder.RecordRefreshCount(context.Background(), telv2.Attributes{
-				UserAgent:     i.userAgent,
 				RefreshType:   telv2.RefreshAheadType,
 				RefreshStatus: telv2.RefreshFailure,
+				RefreshError:  r.err,
 			})
 			return
 		}
@@ -381,7 +378,6 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		)
 		i.next = i.scheduleRefresh(t)
 		go i.metricRecorder.RecordRefreshCount(context.Background(), telv2.Attributes{
-			UserAgent:     i.userAgent,
 			RefreshType:   telv2.RefreshAheadType,
 			RefreshStatus: telv2.RefreshSuccess,
 		})
