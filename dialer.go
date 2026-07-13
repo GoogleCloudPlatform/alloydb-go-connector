@@ -140,11 +140,6 @@ type Dialer struct {
 	// ahead cache assumes a background goroutine may run consistently.
 	lazyRefresh bool
 
-	// disableMetadataExchange is a temporary addition to help clients who
-	// cannot use the metadata exchange yet. In future versions, this field
-	// should be removed.
-	disableMetadataExchange bool
-
 	// disableBuiltInMetrics turns the internal metric export into a no-op.
 	disableBuiltInMetrics bool
 
@@ -225,24 +220,23 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, err
 	}
 	d := &Dialer{
-		closed:                  make(chan struct{}),
-		cache:                   make(map[alloydb.InstanceURI]monitoredCache),
-		lazyRefresh:             cfg.lazyRefresh,
-		disableMetadataExchange: cfg.disableMetadataExchange,
-		disableBuiltInMetrics:   cfg.disableBuiltInTelemetry,
-		staticConnInfo:          cfg.staticConnInfo,
-		keyGenerator:            g,
-		refreshTimeout:          cfg.refreshTimeout,
-		client:                  client,
-		mClient:                 mClient,
-		logger:                  cfg.logger,
-		defaultDialCfg:          dialCfg,
-		dialerID:                dialerID,
-		metricRecorders:         map[alloydb.InstanceURI]telv2.MetricRecorder{},
-		dialFunc:                cfg.dialFunc,
-		iamAuthNTokenProvider:   cfg.iamAuthNTokenProvider,
-		userAgent:               userAgent,
-		buffer:                  newBuffer(),
+		closed:                make(chan struct{}),
+		cache:                 make(map[alloydb.InstanceURI]monitoredCache),
+		lazyRefresh:           cfg.lazyRefresh,
+		disableBuiltInMetrics: cfg.disableBuiltInTelemetry,
+		staticConnInfo:        cfg.staticConnInfo,
+		keyGenerator:          g,
+		refreshTimeout:        cfg.refreshTimeout,
+		client:                client,
+		mClient:               mClient,
+		logger:                cfg.logger,
+		defaultDialCfg:        dialCfg,
+		dialerID:              dialerID,
+		metricRecorders:       map[alloydb.InstanceURI]telv2.MetricRecorder{},
+		dialFunc:              cfg.dialFunc,
+		iamAuthNTokenProvider: cfg.iamAuthNTokenProvider,
+		userAgent:             userAgent,
+		buffer:                newBuffer(),
 	}
 	return d, nil
 }
@@ -403,15 +397,13 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	d.logger.Debugf(ctx, "[%v] Connected securely to %v", inst.String(), hostPort)
 
-	if !d.disableMetadataExchange {
-		// The metadata exchange must occur after the TLS connection is established
-		// to avoid leaking sensitive information.
-		err = d.metadataExchange(ctx, tlsConn, cfg.iamAuthN, inst.String())
-		if err != nil {
-			_ = tlsConn.Close() // best effort close attempt
-			attrs.DialStatus = telv2.DialMDXError
-			return nil, err
-		}
+	// The metadata exchange must occur after the TLS connection is established
+	// to avoid leaking sensitive information.
+	err = d.metadataExchange(ctx, tlsConn, cfg.iamAuthN, inst.String())
+	if err != nil {
+		_ = tlsConn.Close() // best effort close attempt
+		attrs.DialStatus = telv2.DialMDXError
+		return nil, err
 	}
 	attrs.DialStatus = telv2.DialSuccess
 
@@ -731,7 +723,6 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 					d.logger,
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
-					d.disableMetadataExchange,
 					d.userAgent,
 					mr,
 				)
@@ -753,7 +744,6 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 					d.logger,
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
-					d.disableMetadataExchange,
 					d.userAgent,
 					mr,
 				)

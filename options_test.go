@@ -34,10 +34,6 @@ func TestNewDialerConfig_IncompatibleOptions(t *testing.T) {
 		opts []Option
 	}{
 		{
-			desc: "WithOptOutOfAdvancedConnectionCheck and WithIAMAuthN",
-			opts: []Option{WithOptOutOfAdvancedConnectionCheck(), WithIAMAuthN()},
-		},
-		{
 			desc: "WithCredentialsFile and WithCredentialsJSON",
 			opts: []Option{WithCredentialsFile("/some/file"), WithCredentialsJSON(nil)},
 		},
