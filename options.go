@@ -58,7 +58,6 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 	}
 
 	badPairs := map[bool]string{
-		d.disableMetadataExchange && d.useIAMAuthN:          "incompatible options: WithOptOutOfAdvancedConnectionCheck cannot be used with WithIAMAuthN",
 		d.credentialsFile != "" && d.credentialsJSON != nil: "incompatible options: WithCredentialsFile cannot be used with WithCredentialsJSON",
 		d.credentialsFile != "" && d.tokenProvider != nil:   "incompatible options: WithCredentialsFile cannot be used with WithTokenSource",
 		d.credentialsJSON != nil && d.tokenProvider != nil:  "incompatible options: WithCredentialsJSON cannot be used with WithTokenSource",
@@ -192,9 +191,6 @@ type dialerConfig struct {
 	// above.
 	iamAuthNTokenProviderOverride auth.TokenProvider
 
-	// disableMetadataExchange is a temporary addition and will be removed in
-	// future versions.
-	disableMetadataExchange bool
 	// disableBuiltInTelemetry disables the internal metric exporter.
 	disableBuiltInTelemetry bool
 
@@ -415,22 +411,13 @@ func WithStaticConnectionInfo(r io.Reader) Option {
 	}
 }
 
-// WithOptOutOfAdvancedConnectionCheck disables the dataplane permission check.
-// It is intended only for clients who are running in an environment where the
-// workload's IP address is otherwise unknown and cannot be allow-listed in a
-// VPC Service Control security perimeter. This option is incompatible with IAM
-// Authentication.
+// WithOptOutOfAdvancedConnectionCheck is a no-op.
 //
-// NOTE: This option is for internal usage only and is meant to ease the
-// migration when the advanced check will be required on the server. In future
-// versions this will revert to a no-op and should not be used. If you think
-// you need this option, open an issue on
-// https://github.com/GoogleCloudPlatform/alloydb-go-connector for design
-// advice.
+// Deprecated: In the past this was used to help internal clients migrate
+// to connections using the metadata exchange. The migration is complete
+// and now this method is a no-op.
 func WithOptOutOfAdvancedConnectionCheck() Option {
-	return func(d *dialerConfig) {
-		d.disableMetadataExchange = true
-	}
+	return func(_ *dialerConfig) {}
 }
 
 // WithOptOutOfBuiltInTelemetry disables the internal metric export. By

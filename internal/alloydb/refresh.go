@@ -121,7 +121,6 @@ func fetchClientCertificate(
 	cl *alloydbadmin.AlloyDBAdminClient,
 	inst InstanceURI,
 	key *rsa.PrivateKey,
-	disableMetadataExchange bool,
 ) (cc *clientCertificate, err error) {
 	var end tel.EndSpanFunc
 	ctx, end = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.FetchEphemeralCert")
@@ -139,7 +138,7 @@ func fetchClientCertificate(
 		),
 		PublicKey:           buf.String(),
 		CertDuration:        durationpb.New(time.Second * 3600),
-		UseMetadataExchange: !disableMetadataExchange,
+		UseMetadataExchange: true,
 	}
 	resp, err := cl.GenerateClientCertificate(ctx, req)
 	if err != nil {
@@ -226,13 +225,11 @@ func newAdminAPIClient(
 	client *alloydbadmin.AlloyDBAdminClient,
 	key *rsa.PrivateKey,
 	dialerID string,
-	disableMetadataExchange bool,
 ) adminAPIClient {
 	return adminAPIClient{
-		client:                  client,
-		key:                     key,
-		dialerID:                dialerID,
-		disableMetadataExchange: disableMetadataExchange,
+		client:   client,
+		key:      key,
+		dialerID: dialerID,
 	}
 }
 
@@ -245,9 +242,6 @@ type adminAPIClient struct {
 	key *rsa.PrivateKey
 	// dialerID is the unique ID of the associated dialer.
 	dialerID string
-	// disableMetadataExchange is a temporary addition to ease the migration to
-	// when the metadata exchange is required.
-	disableMetadataExchange bool
 }
 
 // ConnectionInfo holds all the data necessary to connect to an instance.
@@ -292,7 +286,7 @@ func (c adminAPIClient) connectionInfo(
 	certCh := make(chan certRes, 1)
 	go func() {
 		defer close(certCh)
-		cc, err := fetchClientCertificate(ctx, c.client, i, c.key, c.disableMetadataExchange)
+		cc, err := fetchClientCertificate(ctx, c.client, i, c.key)
 		certCh <- certRes{cc: cc, err: err}
 	}()
 

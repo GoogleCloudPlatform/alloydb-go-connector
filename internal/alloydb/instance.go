@@ -193,7 +193,6 @@ func NewRefreshAheadCache(
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
 	dialerID string,
-	disableMetadataExchange bool,
 	userAgent string,
 	mr telv2.MetricRecorder,
 ) *RefreshAheadCache {
@@ -202,7 +201,7 @@ func NewRefreshAheadCache(
 		instanceURI:    instance,
 		logger:         l,
 		l:              rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
-		r:              newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
+		r:              newAdminAPIClient(client, key, dialerID),
 		refreshTimeout: refreshTimeout,
 		ctx:            ctx,
 		cancel:         cancel,
