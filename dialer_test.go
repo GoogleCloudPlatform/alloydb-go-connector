@@ -572,6 +572,102 @@ func TestDialerClose(t *testing.T) {
 	}
 }
 
+// TestDialerWithUniverseDomainOption verifies NewDialer succeeds when WithUniverseDomain is used.
+func TestDialerWithUniverseDomainOption(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeInstance("my-project", "my-region", "my-cluster", "my-instance")
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	stop := mock.StartServerProxy(t, inst)
+	defer func() {
+		stop()
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx,
+		option.WithHTTPClient(mc),
+		option.WithEndpoint(url),
+		option.WithUniverseDomain("my-universe.cloud"),
+	)
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, got: %v", err)
+	}
+	d, err := NewDialer(
+		ctx,
+		WithTokenSource(stubTokenSource{}),
+		WithUniverseDomain("my-universe.cloud"),
+		WithOptOutOfBuiltInTelemetry(),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, got: %v", err)
+	}
+	d.client = c
+	conn, err := d.Dial(ctx, testInstanceURI)
+	if err != nil {
+		t.Fatalf("expected Dial to succeed, got: %v", err)
+	}
+	defer conn.Close()
+	data, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("expected ReadAll to succeed, got: %v", err)
+	}
+	if string(data) != "my-instance" {
+		t.Fatalf("expected known response 'my-instance', got %v", string(data))
+	}
+}
+
+// TestDialerWithUniverseDomainEnvVar verifies NewDialer resolves the domain via GOOGLE_CLOUD_UNIVERSE_DOMAIN.
+func TestDialerWithUniverseDomainEnvVar(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("GOOGLE_CLOUD_UNIVERSE_DOMAIN", "sovereign-cloud.de")
+	inst := mock.NewFakeInstance("my-project", "my-region", "my-cluster", "my-instance")
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	stop := mock.StartServerProxy(t, inst)
+	defer func() {
+		stop()
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx,
+		option.WithHTTPClient(mc),
+		option.WithEndpoint(url),
+		option.WithUniverseDomain("sovereign-cloud.de"),
+	)
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, got: %v", err)
+	}
+	d, err := NewDialer(
+		ctx,
+		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, got: %v", err)
+	}
+	d.client = c
+	conn, err := d.Dial(ctx, testInstanceURI)
+	if err != nil {
+		t.Fatalf("expected Dial to succeed, got: %v", err)
+	}
+	defer conn.Close()
+	data, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("expected ReadAll to succeed, got: %v", err)
+	}
+	if string(data) != "my-instance" {
+		t.Fatalf("expected known response 'my-instance', got %v", string(data))
+	}
+}
+
 type mockMetricRecorder struct {
 	mu          sync.Mutex
 	gotAttrs    telv2.Attributes

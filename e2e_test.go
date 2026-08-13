@@ -50,6 +50,8 @@ var (
 	alloydbPass = os.Getenv("ALLOYDB_PASS")
 	// Name of the database to connect to.
 	alloydbDB = os.Getenv("ALLOYDB_DB")
+	// Name of universe domain
+	alloydbUniverseDomain = os.Getenv("GOOGLE_CLOUD_UNIVERSE_DOMAIN")
 )
 
 func requireAlloyDBVars(t *testing.T) {
@@ -86,7 +88,7 @@ func TestPgxConnect(t *testing.T) {
 				return connectPgx(
 					ctx, alloydbInstanceName,
 					alloydbUser, alloydbPass, alloydbDB,
-					alloydbconn.WithOptOutOfBuiltInTelemetry(),
+					alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 				)
 			},
 		},
@@ -96,7 +98,7 @@ func TestPgxConnect(t *testing.T) {
 				return connectPgxWithPublicIP(
 					ctx, alloydbInstanceName,
 					alloydbUser, alloydbPass, alloydbDB,
-					alloydbconn.WithOptOutOfBuiltInTelemetry(),
+					alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 				)
 			},
 		},
@@ -106,7 +108,7 @@ func TestPgxConnect(t *testing.T) {
 				return connectPgxWithPSC(
 					ctx, alloydbPSCInstanceName,
 					alloydbUser, alloydbPass, alloydbDB,
-					alloydbconn.WithOptOutOfBuiltInTelemetry(),
+					alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 				)
 			},
 		},
@@ -117,7 +119,7 @@ func TestPgxConnect(t *testing.T) {
 					ctx, alloydbInstanceName,
 					alloydbUser, alloydbPass, alloydbDB,
 					alloydbconn.WithOptOutOfAdvancedConnectionCheck(),
-					alloydbconn.WithOptOutOfBuiltInTelemetry(),
+					alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 				)
 			},
 		},
@@ -174,7 +176,7 @@ func TestDatabaseSQLConnect(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			db, cleanup, err := tc.f(
 				alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
-				alloydbconn.WithOptOutOfBuiltInTelemetry(),
+				alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 			)
 			if err != nil {
 				_ = cleanup()
@@ -200,7 +202,7 @@ func TestDatabaseSQLConnectPGXV4(t *testing.T) {
 		t.Skip("skipping integration tests")
 	}
 
-	cleanup, err := pgxv4.RegisterDriver("alloydb-v4", alloydbconn.WithOptOutOfBuiltInTelemetry())
+	cleanup, err := pgxv4.RegisterDriver("alloydb-v4", alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +239,7 @@ func TestDatabaseSQLConnectPostgres(t *testing.T) {
 	}
 
 	cleanup, err := postgres.RegisterDriver("alloydb-postgres",
-		alloydbconn.WithIAMAuthN(), alloydbconn.WithOptOutOfBuiltInTelemetry(),
+		alloydbconn.WithIAMAuthN(), alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +277,7 @@ func TestDatabaseSQLConnectPGXV5(t *testing.T) {
 	}
 
 	cleanup, err := pgxv5.RegisterDriver("alloydb-v5",
-		alloydbconn.WithIAMAuthN(), alloydbconn.WithOptOutOfBuiltInTelemetry(),
+		alloydbconn.WithIAMAuthN(), alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -361,6 +363,7 @@ func TestAutoIAMAuthN(t *testing.T) {
 			opts: []alloydbconn.Option{
 				alloydbconn.WithIAMAuthN(),
 				alloydbconn.WithOptOutOfBuiltInTelemetry(),
+				alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 			},
 			wantIAMAuthN: true,
 		},
@@ -368,6 +371,7 @@ func TestAutoIAMAuthN(t *testing.T) {
 			desc: "dialer with IAM authn off, dial on",
 			opts: []alloydbconn.Option{
 				alloydbconn.WithOptOutOfBuiltInTelemetry(),
+				alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 			},
 			dialOpts: []alloydbconn.DialOption{
 				alloydbconn.WithDialIAMAuthN(true),
@@ -379,6 +383,7 @@ func TestAutoIAMAuthN(t *testing.T) {
 			opts: []alloydbconn.Option{
 				alloydbconn.WithIAMAuthN(),
 				alloydbconn.WithOptOutOfBuiltInTelemetry(),
+				alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 			},
 			dialOpts: []alloydbconn.DialOption{
 				alloydbconn.WithDialIAMAuthN(false),
