@@ -99,6 +99,65 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	}
 }
 
+func TestDialerPSCFallback(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+		mock.WithPSC("manual.alloydb.goog."),
+		mock.WithPSCAuto("auto.alloydb.goog."),
+	)
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	stop := mock.StartServerProxy(t, inst)
+	defer func() {
+		stop()
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+
+	var dialCounts int
+	conn, err := d.Dial(ctx, testInstanceURI, WithPSC(), WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialCounts++
+		if strings.Contains(addr, "manual.alloydb.goog") {
+			return nil, errors.New("simulated dial error for manual")
+		}
+		if strings.Contains(addr, "auto.alloydb.goog") {
+			return net.Dial(network, "127.0.0.1:5433")
+		}
+		return nil, fmt.Errorf("unexpected dial address: %v", addr)
+	}))
+	if err != nil {
+		t.Fatalf("expected Dial to succeed via fallback, but got error: %v", err)
+	}
+	defer conn.Close()
+
+	if dialCounts != 2 {
+		t.Fatalf("expected exactly 2 dial attempts (one fail, one fallback), got %d", dialCounts)
+	}
+
+	data, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("expected ReadAll to succeed, got error %v", err)
+	}
+	if string(data) != "my-instance" {
+		t.Fatalf("expected known response from the server, but got %v", string(data))
+	}
+}
+
 func writeStaticInfo(t *testing.T, i mock.FakeAlloyDBInstance) io.Reader {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

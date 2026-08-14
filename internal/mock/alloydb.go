@@ -58,6 +58,13 @@ func WithPSC(addr string) Option {
 	}
 }
 
+// WithPSCAuto sets the PSC Auto DNS address to addr.
+func WithPSCAuto(addr string) Option {
+	return func(f *FakeAlloyDBInstance) {
+		f.ipAddrs["PSCAuto"] = addr
+	}
+}
+
 // WithServerName sets the name that server uses to identify itself in the TLS
 // handshake.
 func WithServerName(name string) Option {
