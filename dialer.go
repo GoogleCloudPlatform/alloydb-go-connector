@@ -188,8 +188,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 
 	cOpts := append(cfg.alloydbClientOpts, cfg.clientOpts...)
 	// If universe domain was resolved via env var rather than explicit WithUniverseDomain option:
-	if cfg.universeDomain == "" && cfg.getClientUniverseDomain() != defaultUniverseDomain {
-		cOpts = append(cOpts, option.WithUniverseDomain(cfg.getClientUniverseDomain()))
+	if cfg.universeDomain == "" && cfg.clientUniverseDomain() != defaultUniverseDomain {
+		cOpts = append(cOpts, option.WithUniverseDomain(cfg.clientUniverseDomain()))
 	}
 
 	client, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, cOpts...)

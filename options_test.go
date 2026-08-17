@@ -144,59 +144,38 @@ func TestWithUniverseDomain(t *testing.T) {
 	if cfg.universeDomain != want {
 		t.Errorf("got %q, want %q", cfg.universeDomain, want)
 	}
-	if got := cfg.getClientUniverseDomain(); got != want {
-		t.Errorf("getClientUniverseDomain() = %q, want %q", got, want)
+	if got := cfg.clientUniverseDomain(); got != want {
+		t.Errorf("clientUniverseDomain() = %q, want %q", got, want)
 	}
 }
 
-// TestUniverseDomainResolutionPrecedence verifies the 3-tier fallback order:
-// 1. Explicit Option -> 2. Environment Variable -> 3. Default "googleapis.com"
+// TestUniverseDomainResolutionPrecedence verifies the fallback order:
+// 1. Explicit Option -> 2. Default "googleapis.com"
 func TestUniverseDomainResolutionPrecedence(t *testing.T) {
 	tcs := []struct {
 		desc       string
 		opts       []Option
-		envValue   string
 		wantDomain string
 	}{
 		{
-			desc:       "default fallback when neither option nor env var is set",
+			desc:       "default fallback when option not set",
 			opts:       []Option{mockCreds},
-			envValue:   "",
 			wantDomain: defaultUniverseDomain, // "googleapis.com"
-		},
-		{
-			desc:       "resolves from GOOGLE_CLOUD_UNIVERSE_DOMAIN env var",
-			opts:       []Option{mockCreds},
-			envValue:   "env-universe.cloud",
-			wantDomain: "env-universe.cloud",
 		},
 		{
 			desc:       "resolves from explicit WithUniverseDomain option",
 			opts:       []Option{WithUniverseDomain("option-universe.cloud"), mockCreds},
-			envValue:   "",
-			wantDomain: "option-universe.cloud",
-		},
-		{
-			desc:       "explicit option overrides environment variable",
-			opts:       []Option{WithUniverseDomain("option-universe.cloud"), mockCreds},
-			envValue:   "env-universe.cloud",
 			wantDomain: "option-universe.cloud",
 		},
 	}
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
-			// t.Setenv automatically restores previous env state on test completion
-			if tc.envValue != "" {
-				t.Setenv(universeDomainEnvVar, tc.envValue)
-			} else {
-				t.Setenv(universeDomainEnvVar, "")
-			}
 			cfg, err := newDialerConfig(tc.opts...)
 			if err != nil {
 				t.Fatalf("newDialerConfig failed: %v", err)
 			}
-			if got := cfg.getClientUniverseDomain(); got != tc.wantDomain {
-				t.Errorf("getClientUniverseDomain() = %q, want %q", got, tc.wantDomain)
+			if got := cfg.clientUniverseDomain(); got != tc.wantDomain {
+				t.Errorf("clientUniverseDomain() = %q, want %q", got, tc.wantDomain)
 			}
 		})
 	}
@@ -233,8 +212,8 @@ func TestUniverseDomainWithCredentialsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newDialerConfig failed: %v", err)
 	}
-	if cfg.getClientUniverseDomain() != wantUniverseDomain {
-		t.Errorf("got %q, want %q", cfg.getClientUniverseDomain(), wantUniverseDomain)
+	if cfg.clientUniverseDomain() != wantUniverseDomain {
+		t.Errorf("got %q, want %q", cfg.clientUniverseDomain(), wantUniverseDomain)
 	}
 }
 
@@ -301,8 +280,8 @@ func TestNewDialerConfig_WrapsCredentialsWithUniverseDomain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newDialerConfig failed: %v", err)
 	}
-	if cfg.getClientUniverseDomain() != wantDomain {
-		t.Errorf("getClientUniverseDomain() = %q, want %q", cfg.getClientUniverseDomain(), wantDomain)
+	if cfg.clientUniverseDomain() != wantDomain {
+		t.Errorf("clientUniverseDomain() = %q, want %q", cfg.clientUniverseDomain(), wantDomain)
 	}
 	// Verify the wrapped credential used for dialer IAM AuthN provider matches the universe domain
 	wrappedCreds := WithUniverseDomainCredentials(gduCreds, wantDomain)

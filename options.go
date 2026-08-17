@@ -44,8 +44,6 @@ const (
 
 	// Default GDU API Domain.
 	defaultUniverseDomain = "googleapis.com"
-	// Universe Domain, either GDU or TPC.
-	universeDomainEnvVar = "GOOGLE_CLOUD_UNIVERSE_DOMAIN"
 )
 
 // An Option is an option for configuring a Dialer.
@@ -86,43 +84,43 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{CloudPlatformScope},
 			CredentialsJSON: b,
-			UniverseDomain:  d.getClientUniverseDomain(),
+			UniverseDomain:  d.clientUniverseDomain(),
 		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(WithUniverseDomainCredentials(c, d.getClientUniverseDomain())))
+		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(WithUniverseDomainCredentials(c, d.clientUniverseDomain())))
 		// Now rebuild credentials with the Login Scope
 		c, err = credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{AlloyDBLoginScope},
 			CredentialsJSON: b,
-			UniverseDomain:  d.getClientUniverseDomain(),
+			UniverseDomain:  d.clientUniverseDomain(),
 		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		d.iamAuthNTokenProvider = WithUniverseDomainCredentials(c, d.getClientUniverseDomain()).TokenProvider
+		d.iamAuthNTokenProvider = WithUniverseDomainCredentials(c, d.clientUniverseDomain()).TokenProvider
 	case d.credentialsJSON != nil:
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{CloudPlatformScope},
 			CredentialsJSON: d.credentialsJSON,
-			UniverseDomain:  d.getClientUniverseDomain(),
+			UniverseDomain:  d.clientUniverseDomain(),
 		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(WithUniverseDomainCredentials(c, d.getClientUniverseDomain())))
+		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(WithUniverseDomainCredentials(c, d.clientUniverseDomain())))
 
 		// Now rebuild credentials with the Login Scope
 		c, err = credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{AlloyDBLoginScope},
 			CredentialsJSON: d.credentialsJSON,
-			UniverseDomain:  d.getClientUniverseDomain(),
+			UniverseDomain:  d.clientUniverseDomain(),
 		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		d.iamAuthNTokenProvider = WithUniverseDomainCredentials(c, d.getClientUniverseDomain()).TokenProvider
+		d.iamAuthNTokenProvider = WithUniverseDomainCredentials(c, d.clientUniverseDomain()).TokenProvider
 	case d.tokenProvider != nil:
 		c := auth.NewCredentials(&auth.CredentialsOptions{
 			TokenProvider: d.tokenProvider,
@@ -130,7 +128,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
 		d.iamAuthNTokenProvider = d.tokenProvider
 	case d.credentials != nil:
-		c := WithUniverseDomainCredentials(d.credentials, d.getClientUniverseDomain())
+		c := WithUniverseDomainCredentials(d.credentials, d.clientUniverseDomain())
 		d.iamAuthNTokenProvider = c.TokenProvider
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
 	default:
@@ -138,20 +136,20 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		// default to Application Default Credentials.
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:         []string{CloudPlatformScope},
-			UniverseDomain: d.getClientUniverseDomain(),
+			UniverseDomain: d.clientUniverseDomain(),
 		})
 		if err != nil {
 			return nil, err
 		}
-		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(WithUniverseDomainCredentials(c, d.getClientUniverseDomain())))
+		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(WithUniverseDomainCredentials(c, d.clientUniverseDomain())))
 		c, err = credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:         []string{AlloyDBLoginScope},
-			UniverseDomain: d.getClientUniverseDomain(),
+			UniverseDomain: d.clientUniverseDomain(),
 		})
 		if err != nil {
 			return nil, err
 		}
-		d.iamAuthNTokenProvider = WithUniverseDomainCredentials(c, d.getClientUniverseDomain()).TokenProvider
+		d.iamAuthNTokenProvider = WithUniverseDomainCredentials(c, d.clientUniverseDomain()).TokenProvider
 	}
 
 	if d.iamAuthNTokenProviderOverride != nil {
@@ -173,18 +171,14 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 	return d, nil
 }
 
-// getClientUniverseDomain returns the default service domain for a given Cloud
+// clientUniverseDomain returns the default service domain for a given Cloud
 // universe, with the following precedence:
 //
 // 1. A non-empty option.WithUniverseDomain or similar client option.
-// 2. A non-empty environment variable GOOGLE_CLOUD_UNIVERSE_DOMAIN.
-// 3. The default value "googleapis.com".
-func (d *dialerConfig) getClientUniverseDomain() string {
+// 2. The default value "googleapis.com".
+func (d *dialerConfig) clientUniverseDomain() string {
 	if d.universeDomain != "" {
 		return d.universeDomain
-	}
-	if envUD := os.Getenv(universeDomainEnvVar); envUD != "" {
-		return envUD
 	}
 	return defaultUniverseDomain
 }
