@@ -63,12 +63,13 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 	}
 
 	badPairs := map[bool]string{
-		d.credentialsFile != "" && d.credentialsJSON != nil: "incompatible options: WithCredentialsFile cannot be used with WithCredentialsJSON",
-		d.credentialsFile != "" && d.tokenProvider != nil:   "incompatible options: WithCredentialsFile cannot be used with WithTokenSource",
-		d.credentialsJSON != nil && d.tokenProvider != nil:  "incompatible options: WithCredentialsJSON cannot be used with WithTokenSource",
-		d.credentials != nil && d.credentialsFile != "":     "incompatible options: WithCredentials cannot be used with WithCredentialsFile",
-		d.credentials != nil && d.credentialsJSON != nil:    "incompatible options: WithCredentials cannot be used with WithCredentialsJSON",
-		d.credentials != nil && d.tokenProvider != nil:      "incompatible options: WithCredentials cannot be used with WithTokenSource",
+		d.credentialsFile != "" && d.credentialsJSON != nil:              "incompatible options: WithCredentialsFile cannot be used with WithCredentialsJSON",
+		d.credentialsFile != "" && d.tokenProvider != nil:                "incompatible options: WithCredentialsFile cannot be used with WithTokenSource",
+		d.credentialsJSON != nil && d.tokenProvider != nil:               "incompatible options: WithCredentialsJSON cannot be used with WithTokenSource",
+		d.credentials != nil && d.credentialsFile != "":                  "incompatible options: WithCredentials cannot be used with WithCredentialsFile",
+		d.credentials != nil && d.credentialsJSON != nil:                 "incompatible options: WithCredentials cannot be used with WithCredentialsJSON",
+		d.credentials != nil && d.tokenProvider != nil:                   "incompatible options: WithCredentials cannot be used with WithTokenSource",
+		d.adminAPIEndpoint != "" && d.universeDomain != "googleapis.com": "incompatible options: WithAdminAPIEndpoint cannot be used with TPC UniverseDomain",
 	}
 	for bad, msg := range badPairs {
 		if bad {
@@ -83,7 +84,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
-			Scopes:          []string{CloudPlatformScope, AlloyDBLoginScope},
+			Scopes:          []string{CloudPlatformScope},
 			CredentialsJSON: b,
 			UniverseDomain:  d.getClientUniverseDomain(),
 		})
@@ -93,7 +94,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(WithUniverseDomainCredentials(c, d.getClientUniverseDomain())))
 		// Now rebuild credentials with the Login Scope
 		c, err = credentials.DetectDefault(&credentials.DetectOptions{
-			Scopes:          []string{CloudPlatformScope, AlloyDBLoginScope},
+			Scopes:          []string{AlloyDBLoginScope},
 			CredentialsJSON: b,
 			UniverseDomain:  d.getClientUniverseDomain(),
 		})
@@ -103,7 +104,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		d.iamAuthNTokenProvider = WithUniverseDomainCredentials(c, d.getClientUniverseDomain()).TokenProvider
 	case d.credentialsJSON != nil:
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
-			Scopes:          []string{CloudPlatformScope, AlloyDBLoginScope},
+			Scopes:          []string{CloudPlatformScope},
 			CredentialsJSON: d.credentialsJSON,
 			UniverseDomain:  d.getClientUniverseDomain(),
 		})
@@ -114,7 +115,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 
 		// Now rebuild credentials with the Login Scope
 		c, err = credentials.DetectDefault(&credentials.DetectOptions{
-			Scopes:          []string{CloudPlatformScope, AlloyDBLoginScope},
+			Scopes:          []string{AlloyDBLoginScope},
 			CredentialsJSON: d.credentialsJSON,
 			UniverseDomain:  d.getClientUniverseDomain(),
 		})
@@ -136,7 +137,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		// If a credentials file, credentials JSON, or a token source was not provided,
 		// default to Application Default Credentials.
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
-			Scopes:         []string{AlloyDBLoginScope},
+			Scopes:         []string{CloudPlatformScope},
 			UniverseDomain: d.getClientUniverseDomain(),
 		})
 		if err != nil {

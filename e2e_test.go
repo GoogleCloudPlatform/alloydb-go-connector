@@ -50,7 +50,7 @@ var (
 	alloydbPass = os.Getenv("ALLOYDB_PASS")
 	// Name of the database to connect to.
 	alloydbDB = os.Getenv("ALLOYDB_DB")
-	// Name of universe domain
+	// Name of universe domain.
 	alloydbUniverseDomain = os.Getenv("GOOGLE_CLOUD_UNIVERSE_DOMAIN")
 )
 
