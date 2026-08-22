@@ -123,14 +123,8 @@ func TestDialerPSCFallback(t *testing.T) {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
 
-	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
-	if err != nil {
-		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
-	}
-	d.client = c
-
 	var dialCounts int
-	conn, err := d.Dial(ctx, testInstanceURI, WithPSC(), WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry(), WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialCounts++
 		if strings.Contains(addr, "manual.alloydb.goog") {
 			return nil, errors.New("simulated dial error for manual")
@@ -140,6 +134,12 @@ func TestDialerPSCFallback(t *testing.T) {
 		}
 		return nil, fmt.Errorf("unexpected dial address: %v", addr)
 	}))
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+
+	conn, err := d.Dial(ctx, testInstanceURI, WithPSC())
 	if err != nil {
 		t.Fatalf("expected Dial to succeed via fallback, but got error: %v", err)
 	}

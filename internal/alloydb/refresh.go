@@ -84,8 +84,8 @@ func fetchInstanceInfo(
 	if addr := resp.GetPscDnsName(); addr != "" {
 		ipAddrs[PSC] = addr
 	}
-	if autoAddrs := resp.GetPscAutoDnsNames(); len(autoAddrs) > 0 {
-		ipAddrs[PSCAuto] = autoAddrs[0]
+	if autoAddr := resp.GetPscAutoDnsName(); autoAddr != "" {
+		ipAddrs[PSCAuto] = autoAddr
 	}
 
 	if len(ipAddrs) == 0 {

@@ -64,7 +64,7 @@ func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
 	p := fmt.Sprintf("/v1alpha/projects/%s/locations/%s/clusters/%s/instances/%s/connectionInfo",
 		i.project, i.region, i.cluster, i.name)
 
-	res := map[string]any{}
+	res := map[string]string{}
 	for ipType, addr := range i.ipAddrs {
 		if ipType == "PRIVATE" {
 			res["ipAddress"] = addr
@@ -77,7 +77,7 @@ func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
 			res["psc_dns_name"] = addr
 		}
 		if ipType == "PSCAuto" {
-			res["psc_auto_dns_names"] = []string{addr}
+			res["psc_auto_dns_name"] = addr
 		}
 	}
 	res["instanceUid"] = i.uid
