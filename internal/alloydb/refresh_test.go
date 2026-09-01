@@ -31,6 +31,7 @@ func TestRefresh(t *testing.T) {
 	wantPrivateIP := "10.0.0.1"
 	wantPublicIP := "127.0.0.1"
 	wantPSC := "x.y.alloydb.goog"
+	wantPSCAuto := "x.y.alloydb.goog."
 	wantExpiry := time.Now().Add(time.Hour).UTC().Round(time.Second)
 	wantInstURI := "projects/my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
 	cn, err := ParseInstURI(wantInstURI)
@@ -42,6 +43,7 @@ func TestRefresh(t *testing.T) {
 		mock.WithPrivateIP(wantPrivateIP),
 		mock.WithPublicIP(wantPublicIP),
 		mock.WithPSC(wantPSC),
+		mock.WithPSCAuto(wantPSCAuto),
 		mock.WithCertExpiry(wantExpiry),
 	)
 	mc, url, cleanup := mock.HTTPClient(
@@ -91,6 +93,13 @@ func TestRefresh(t *testing.T) {
 	}
 	if wantPSC != gotPSC {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPSC, gotPSC)
+	}
+	gotPSCAuto, ok := res.IPAddrs[PSCAuto]
+	if !ok {
+		t.Fatal("metadata IP addresses did not include PSC Auto address")
+	}
+	if wantPSCAuto != gotPSCAuto {
+		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPSCAuto, gotPSCAuto)
 	}
 	if got := res.ClientCert.Leaf; got == nil {
 		t.Fatal("leaf certificate should not be nil")
