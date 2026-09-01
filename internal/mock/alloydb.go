@@ -200,6 +200,7 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 		IsCA:                  true,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
+		DNSNames:              []string{f.serverName},
 		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1)},
 	}
 	signedServer, err := x509.CreateCertificate(

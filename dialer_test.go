@@ -105,6 +105,7 @@ func TestDialerPSCFallback(t *testing.T) {
 		"my-project", "my-region", "my-cluster", "my-instance",
 		mock.WithPSC("manual.alloydb.goog."),
 		mock.WithPSCAuto("auto.alloydb.goog."),
+		mock.WithServerName("manual.alloydb.goog."),
 	)
 	mc, url, cleanup := mock.HTTPClient(
 		mock.InstanceGetSuccess(inst, 1),
