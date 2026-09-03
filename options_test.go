@@ -163,6 +163,11 @@ func TestUniverseDomainResolutionPrecedence(t *testing.T) {
 			wantDomain: defaultUniverseDomain, // "googleapis.com"
 		},
 		{
+			desc:       "setting WithAdminAPIEndpoint without universe domain",
+			opts:       []Option{mockCreds, WithAdminAPIEndpoint("alloydb.googleapis.com")},
+			wantDomain: defaultUniverseDomain, // "googleapis.com"
+		},
+		{
 			desc:       "resolves from explicit WithUniverseDomain option",
 			opts:       []Option{WithUniverseDomain("option-universe.cloud"), mockCreds},
 			wantDomain: "option-universe.cloud",
