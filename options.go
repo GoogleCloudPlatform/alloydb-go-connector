@@ -61,13 +61,13 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 	}
 
 	badPairs := map[bool]string{
-		d.credentialsFile != "" && d.credentialsJSON != nil:              "incompatible options: WithCredentialsFile cannot be used with WithCredentialsJSON",
-		d.credentialsFile != "" && d.tokenProvider != nil:                "incompatible options: WithCredentialsFile cannot be used with WithTokenSource",
-		d.credentialsJSON != nil && d.tokenProvider != nil:               "incompatible options: WithCredentialsJSON cannot be used with WithTokenSource",
-		d.credentials != nil && d.credentialsFile != "":                  "incompatible options: WithCredentials cannot be used with WithCredentialsFile",
-		d.credentials != nil && d.credentialsJSON != nil:                 "incompatible options: WithCredentials cannot be used with WithCredentialsJSON",
-		d.credentials != nil && d.tokenProvider != nil:                   "incompatible options: WithCredentials cannot be used with WithTokenSource",
-		d.adminAPIEndpoint != "" && d.universeDomain != "googleapis.com": "incompatible options: WithAdminAPIEndpoint cannot be used with TPC UniverseDomain",
+		d.credentialsFile != "" && d.credentialsJSON != nil:                      "incompatible options: WithCredentialsFile cannot be used with WithCredentialsJSON",
+		d.credentialsFile != "" && d.tokenProvider != nil:                        "incompatible options: WithCredentialsFile cannot be used with WithTokenSource",
+		d.credentialsJSON != nil && d.tokenProvider != nil:                       "incompatible options: WithCredentialsJSON cannot be used with WithTokenSource",
+		d.credentials != nil && d.credentialsFile != "":                          "incompatible options: WithCredentials cannot be used with WithCredentialsFile",
+		d.credentials != nil && d.credentialsJSON != nil:                         "incompatible options: WithCredentials cannot be used with WithCredentialsJSON",
+		d.credentials != nil && d.tokenProvider != nil:                           "incompatible options: WithCredentials cannot be used with WithTokenSource",
+		d.adminAPIEndpoint != "" && d.clientUniverseDomain() != "googleapis.com": "incompatible options: WithAdminAPIEndpoint cannot be used with TPC UniverseDomain",
 	}
 	for bad, msg := range badPairs {
 		if bad {
