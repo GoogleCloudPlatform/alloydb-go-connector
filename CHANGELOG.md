@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.19.0...v1.19.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* allow WithAdminAPIEndpoint without WithUniverseDomain ([#816](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/816)) ([fbabf68](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/fbabf68e16ea3f72f1412a4af5a74db23dcfc8c6))
+
 ## [1.19.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.18.6...v1.19.0) (2026-08-27)
 
 
