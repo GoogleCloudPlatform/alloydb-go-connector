@@ -125,7 +125,7 @@ func TestDialerPSCFallback(t *testing.T) {
 	}
 
 	var dialCounts int
-	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry(), WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry(), WithDialFunc(func(_ context.Context, network, addr string) (net.Conn, error) {
 		dialCounts++
 		if strings.Contains(addr, "manual.alloydb.goog") {
 			return nil, errors.New("simulated dial error for manual")
