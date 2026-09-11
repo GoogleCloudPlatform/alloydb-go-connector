@@ -37,6 +37,7 @@ import (
 	"cloud.google.com/go/alloydbconn/internal/tel"
 	"cloud.google.com/go/auth"
 	"github.com/google/uuid"
+	"google.golang.org/api/option"
 	"google.golang.org/protobuf/proto"
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
@@ -186,6 +187,11 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 
 	cOpts := append(cfg.alloydbClientOpts, cfg.clientOpts...)
+	// If set, add WithUniverseDomain option.
+	if cfg.universeDomain == "" && cfg.clientUniverseDomain() != defaultUniverseDomain {
+		cOpts = append(cOpts, option.WithUniverseDomain(cfg.clientUniverseDomain()))
+	}
+
 	client, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, cOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AlloyDB Admin API client: %v", err)
