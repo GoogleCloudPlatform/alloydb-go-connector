@@ -99,6 +99,63 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	}
 }
 
+func TestDialerPSC(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+		mock.WithPSC("manual.alloydb.goog."),
+		mock.WithPSCAuto("auto.alloydb.goog."),
+		mock.WithServerName("manual.alloydb.goog."),
+	)
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	stop := mock.StartServerProxy(t, inst)
+	defer func() {
+		stop()
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+
+	var dialCounts int
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry(), WithDialFunc(func(_ context.Context, network, addr string) (net.Conn, error) {
+		dialCounts++
+		if strings.Contains(addr, "manual.alloydb.goog") {
+			return net.Dial(network, "127.0.0.1:5433")
+		}
+		return nil, fmt.Errorf("unexpected dial address: %v", addr)
+	}))
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+
+	conn, err := d.Dial(ctx, testInstanceURI, WithPSC())
+	if err != nil {
+		t.Fatalf("expected Dial to succeed via manual PSC, but got error: %v", err)
+	}
+	defer conn.Close()
+
+	if dialCounts != 1 {
+		t.Fatalf("expected exactly 1 dial attempt (manual PSC succeeded without fallback), got %d", dialCounts)
+	}
+
+	data, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("expected ReadAll to succeed, got error %v", err)
+	}
+	if string(data) != "my-instance" {
+		t.Fatalf("expected known response from the server, but got %v", string(data))
+	}
+}
+
 func TestDialerPSCFallback(t *testing.T) {
 	ctx := context.Background()
 	inst := mock.NewFakeInstance(
