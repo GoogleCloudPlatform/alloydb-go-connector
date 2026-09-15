@@ -367,10 +367,30 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	conn, err = f(ctx, "tcp", hostPort)
 	if err != nil {
 		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", inst.String(), hostPort, err)
-		// refresh the instance info in case it caused the connection failure
-		cache.ForceRefresh()
-		attrs.DialStatus = telv2.DialTCPError
-		return nil, errtype.NewDialError("failed to dial", inst.String(), err)
+		// If dialing the manual PSC DNS name fails, attempt to fall back to the
+		// automated PSC DNS name if available.
+		if cfg.ipType == alloydb.PSC {
+			autoAddr, ok := ci.IPAddrs[alloydb.PSCAuto]
+			if !ok {
+				// Instance does not have an automated PSC DNS name configured;
+				// skip fallback and return the original dial error.
+				cache.ForceRefresh()
+				attrs.DialStatus = telv2.DialTCPError
+				return nil, errtype.NewDialError("failed to dial", inst.String(), err)
+			}
+			hostPort = net.JoinHostPort(autoAddr, serverProxyPort)
+			d.logger.Debugf(ctx, "[%v] Fallback dialing %v", inst.String(), hostPort)
+			conn, err = f(ctx, "tcp", hostPort)
+			if err != nil {
+				d.logger.Debugf(ctx, "[%v] Fallback dialing %v failed: %v", inst.String(), hostPort, err)
+			}
+		}
+		if err != nil {
+			// refresh the instance info in case it caused the connection failure
+			cache.ForceRefresh()
+			attrs.DialStatus = telv2.DialTCPError
+			return nil, errtype.NewDialError("failed to dial", inst.String(), err)
+		}
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
