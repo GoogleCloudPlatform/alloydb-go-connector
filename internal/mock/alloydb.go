@@ -55,6 +55,7 @@ func WithPrivateIP(addr string) Option {
 func WithPSC(addr string) Option {
 	return func(f *FakeAlloyDBInstance) {
 		f.ipAddrs["PSC"] = addr
+		f.dnsNames = append(f.dnsNames, addr)
 	}
 }
 
@@ -62,6 +63,7 @@ func WithPSC(addr string) Option {
 func WithPSCAuto(addr string) Option {
 	return func(f *FakeAlloyDBInstance) {
 		f.ipAddrs["PSCAuto"] = addr
+		f.dnsNames = append(f.dnsNames, addr)
 	}
 }
 
@@ -70,6 +72,14 @@ func WithPSCAuto(addr string) Option {
 func WithServerName(name string) Option {
 	return func(f *FakeAlloyDBInstance) {
 		f.serverName = name
+		f.dnsNames = append(f.dnsNames, name)
+	}
+}
+
+// WithDNSNames sets the DNS Subject Alternative Names (SANs) on the server certificate.
+func WithDNSNames(names ...string) Option {
+	return func(f *FakeAlloyDBInstance) {
+		f.dnsNames = names
 	}
 }
 
@@ -90,6 +100,7 @@ type FakeAlloyDBInstance struct {
 	ipAddrs    map[string]string
 	uid        string
 	serverName string
+	dnsNames   []string
 	certExpiry time.Time
 
 	rootCACert *x509.Certificate
@@ -200,7 +211,7 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 		IsCA:                  true,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
-		DNSNames:              []string{f.serverName},
+		DNSNames:              f.dnsNames,
 		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1)},
 	}
 	signedServer, err := x509.CreateCertificate(

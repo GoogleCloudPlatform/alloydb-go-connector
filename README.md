@@ -260,7 +260,7 @@ config.ConnConfig.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, e
 
 ### Private Service Connect (PSC)
 
-Pass `WithPSC()` to connect via [Private Service Connect][psc].
+Pass `WithPSC()` to connect via [Private Service Connect][psc]. When `WithPSC()` is specified, the Dialer attempts to connect using the manual PSC DNS name first, and automatically falls back to the instance's automatic PSC DNS name if the manual one is absent or unreachable.
 
 **With database/sql:**
 
