@@ -344,19 +344,8 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 			return nil, err
 		}
 	}
-	// Candidate addresses in priority order. For PSC, try the manual PSC DNS
-	// name first, and fall back to the automatic PSC DNS name if the manual
-	// one is absent or unreachable.
-	var addrs []string
-	if addr, ok := ci.IPAddrs[cfg.ipType]; ok {
-		addrs = append(addrs, addr)
-	}
-	if cfg.ipType == alloydb.PSC {
-		if autoAddr, ok := ci.IPAddrs[alloydb.PSCAuto]; ok {
-			addrs = append(addrs, autoAddr)
-		}
-	}
-	if len(addrs) == 0 {
+	addr, ok := ci.IPAddrs[cfg.ipType]
+	if !ok {
 		d.removeCached(ctx, inst, cache, err)
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", cfg.ipType),
@@ -374,10 +363,17 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		f = cfg.dialFunc
 	}
 
-	var (
-		addr    string
-		dialErr error
-	)
+	// Candidate addresses in priority order. For PSC-enabled instances, the API
+	// always populates psc_dns_name, and may also populate psc_auto_dns_name.
+	// Fall back to the automatic PSC DNS name if the manual one can't be reached.
+	addrs := []string{addr}
+	if cfg.ipType == alloydb.PSC {
+		if autoAddr, ok := ci.IPAddrs[alloydb.PSCAuto]; ok {
+			addrs = append(addrs, autoAddr)
+		}
+	}
+
+	var dialErr error
 	for _, a := range addrs {
 		hostPort := net.JoinHostPort(a, serverProxyPort)
 		d.logger.Debugf(ctx, "[%v] Dialing %v", inst.String(), hostPort)

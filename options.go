@@ -545,7 +545,7 @@ func WithPrivateIP() DialOption {
 // If an instance is configured with both a manual PSC DNS name and an
 // automatic PSC DNS name, the Dialer attempts to connect using the manual PSC
 // DNS name first, and falls back to the automatic PSC DNS name if the manual
-// one is absent or unreachable.
+// one is unreachable.
 func WithPSC() DialOption {
 	return func(cfg *dialCfg) {
 		cfg.ipType = alloydb.PSC

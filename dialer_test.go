@@ -172,21 +172,19 @@ func TestDialerPSC(t *testing.T) {
 			wantDialCounts: 2,
 		},
 		{
-			desc: "instance has only the auto DNS name",
+			desc: "instance missing manual PSC DNS name fails config check",
 			instOpts: []mock.Option{
 				mock.WithPSCAuto("auto.alloydb.goog."),
 			},
 			dialOpts: []DialOption{WithPSC()},
 			dialFunc: func(_ context.CancelFunc, dialCounts *int) func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return func(_ context.Context, network, addr string) (net.Conn, error) {
+				return func(_ context.Context, _, _ string) (net.Conn, error) {
 					*dialCounts++
-					if strings.Contains(addr, "auto.alloydb.goog") {
-						return net.Dial(network, "127.0.0.1:5433")
-					}
-					return nil, fmt.Errorf("unexpected dial address: %v", addr)
+					return nil, errors.New("should not dial")
 				}
 			},
-			wantDialCounts: 1,
+			wantDialCounts: 0,
+			wantErrSubstrs: []string{`instance does not have IP of type "PSC"`},
 		},
 		{
 			desc: "manual fails and no PSCAuto present returns original error",
