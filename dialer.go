@@ -373,9 +373,12 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		}
 	}
 
-	var dialErr error
+	var (
+		hostPort string
+		dialErr  error
+	)
 	for _, a := range addrs {
-		hostPort := net.JoinHostPort(a, serverProxyPort)
+		hostPort = net.JoinHostPort(a, serverProxyPort)
 		d.logger.Debugf(ctx, "[%v] Dialing %v", inst.String(), hostPort)
 		conn, err = f(ctx, "tcp", hostPort)
 		if err == nil {
@@ -394,7 +397,6 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		attrs.DialStatus = telv2.DialTCPError
 		return nil, errtype.NewDialError("failed to dial", inst.String(), dialErr)
 	}
-	hostPort := net.JoinHostPort(addr, serverProxyPort)
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
 			attrs.DialStatus = telv2.DialTCPError
