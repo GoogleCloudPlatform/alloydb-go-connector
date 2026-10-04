@@ -29,7 +29,34 @@ Guidelines](https://opensource.google/conduct/).
 
 ## Testing
 
-NOTE: Be sure to run the following commands in the same VPC as the AlloyDB instance
+Run unit tests without an AlloyDB instance using `go test -short ./...`.
 
-1. Set the environment variables. You can see an example of the environment variables needed by running `cat .envrc.example`
-1. Run the tests by using: `go test`
+For integration tests, configure the environment variables in `.envrc.example`
+and Google Cloud credentials with access to the test instance. Most integration
+tests use public IP, so the instance named by `ALLOYDB_INSTANCE_NAME` must have
+public IP enabled. IAM authentication tests also require the configured IAM
+database user. Credential-option tests require `GOOGLE_APPLICATION_CREDENTIALS`
+to point to a credentials JSON file.
+
+To run outside the instance's VPC:
+
+```sh
+./scripts/test_system.sh --skip-private-ip
+```
+
+This skips private-IP connector tests, direct-connection tests, and Private
+Service Connect (PSC) tests. `ALLOYDB_INSTANCE_IP` and
+`ALLOYDB_PSC_INSTANCE_URI` are not required for this run. To run only the root
+package directly, use `go test -v . -skip-private-ip`. The custom flag is defined
+only in the root package; use the script to run all packages with this option.
+
+To include private-network coverage, run from a network with access to the
+instance's private IP and the PSC instance, configure `ALLOYDB_INSTANCE_IP` and
+`ALLOYDB_PSC_INSTANCE_URI`, and run:
+
+```sh
+./scripts/test_system.sh
+```
+
+Private-network tests remain enabled by default. `-short` skips all integration
+tests regardless of the `-skip-private-ip` setting.
