@@ -53,7 +53,7 @@ A normal connection follows this sequence:
    authentication data when enabled. The resulting instrumented `net.Conn` is
    returned to the database driver.
 
-Reuse dialers across connections. Close pools/connections and call `Dialer.Close`
+**Connector best practices:** Reuse dialers across connections. Close pools/connections and call `Dialer.Close`
 or the registered driver's cleanup function when finished so background refresh
 and telemetry work can stop. Connector examples use `sslmode=disable` because
 the connector already establishes TLS.
