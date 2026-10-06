@@ -11,6 +11,16 @@ connecting applications to Google Cloud AlloyDB. It handles IAM authorization,
 short-lived client certificates, and TLS 1.3 connections, with optional automatic
 IAM database authentication. Applications use it with `database/sql` or pgx.
 
+The connector exists to make strong connection security easier to operate.
+Standard PostgreSQL drivers support TLS encryption and, when configured,
+certificate verification, but do not manage AlloyDB's IAM integration or client
+certificate lifecycle. The connector verifies the server certificate and
+presents a short-lived client certificate for the AlloyDB server-side proxy to
+verify, providing mutual TLS. It combines this with Cloud IAM authorization and
+automatic client certificate issuance and rotation. These capabilities are
+especially useful in high-security environments that require verified identities,
+centrally controlled access, and minimal manual certificate management.
+
 The connector supplies secure connections; the PostgreSQL driver handles the
 database protocol, and `database/sql` or `pgxpool` manages connection pooling.
 It does not create network connectivity. Private IP is the default and requires
