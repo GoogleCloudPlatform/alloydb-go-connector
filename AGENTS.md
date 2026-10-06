@@ -58,7 +58,7 @@ or the registered driver's cleanup function when finished so background refresh
 and telemetry work can stop. Connector examples use `sslmode=disable` because
 the connector already establishes TLS.
 
-## How to Run the Tests
+## Testing
 
 Run commands from the repository root with a Go toolchain compatible with
 `go.mod`. Go downloads module dependencies as needed. The shell scripts require
