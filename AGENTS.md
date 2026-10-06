@@ -137,6 +137,31 @@ pull requests from forks and Dependabot.
 
 ## Contribution Guidelines
 
+- Search existing issues and PRs before starting work. Open an issue first for
+  a new feature, public API change, substantial refactor, or a bug whose solution
+  needs discussion. Describe the use case or reproduction and proposed approach
+  so maintainers can help establish scope. Small, well-understood bug fixes,
+  documentation corrections, and test improvements can go directly to a PR;
+  link any related issue and explain the change. Use `SECURITY.md` for security
+  reports rather than a public issue.
+- Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+  for commit messages: `type(optional-scope): short description`.
+  [Release Please](https://github.com/googleapis/release-please) parses these
+  messages to prepare version bumps and release notes; this repository's
+  configuration is in `.github/release-please.yml`. Use `feat` for new features,
+  `fix` for bug fixes, and appropriate types such as `docs`, `test`, `refactor`,
+  `ci`, or `chore` for other work. For example:
+
+  ```text
+  feat: add a new dial option
+  fix(alloydb): refresh expired client certificates before dialing
+  docs: clarify integration test prerequisites
+  ```
+
+  Mark breaking changes with `!` before the colon or a `BREAKING CHANGE:` footer
+  and explain the migration required. Use the same format for PR titles and
+  ensure the final squash-merge commit preserves the intended type and breaking
+  change information.
 - Read the relevant implementation and nearby tests before editing. Keep
   changes focused and preserve unrelated work already present in the checkout.
 - Preserve public API compatibility and the distinction between dialer-level
