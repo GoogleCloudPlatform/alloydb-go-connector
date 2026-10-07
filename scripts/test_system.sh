@@ -18,23 +18,4 @@ set -euo pipefail
 
 command -v go >/dev/null 2>&1 || { echo "go not found. Install from: https://go.dev/dl/" >&2; exit 1; }
 
-if [[ $# -eq 0 ]]; then
-  go test -v -race -cover ./...
-elif [[ $# -eq 1 && "$1" == "--skip-private-ip" ]]; then
-  # Only the root package defines the custom integration-test flag.
-  go test -v -race -cover . -skip-private-ip
-  root_package=$(go list .)
-  all_packages=$(go list ./...)
-  packages=()
-  while IFS= read -r package; do
-    if [[ "$package" != "$root_package" ]]; then
-      packages+=("$package")
-    fi
-  done <<< "$all_packages"
-  if [[ ${#packages[@]} -gt 0 ]]; then
-    go test -v -race -cover "${packages[@]}"
-  fi
-else
-  echo "Usage: $0 [--skip-private-ip]" >&2
-  exit 1
-fi
+go test -v -race -cover ./...

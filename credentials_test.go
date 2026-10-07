@@ -112,7 +112,6 @@ func TestAuthenticationOptions(t *testing.T) {
 			ctx := context.Background()
 
 			opts := []alloydbconn.Option{
-				alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()),
 				alloydbconn.WithIAMAuthN(),
 				alloydbconn.WithOptOutOfBuiltInTelemetry(),
 			}
