@@ -41,7 +41,7 @@ for the tested versions and platforms.
 | --- | --- |
 | `dialer.go` | Public `NewDialer`, `Dial`, and `Close` lifecycle; per-instance caches, TCP/TLS connections, metadata exchange, and connection instrumentation. |
 | `options.go` | Functional configuration options: `Option` configures a dialer; `DialOption` configures individual connections or their defaults. Includes credentials, IAM authentication, network selection, and refresh strategy. |
-| `internal/alloydb/` | Instance URI parsing, AlloyDB Admin API calls, certificate handling, and connection-info caches. `instance.go` implements refresh-ahead caching, `lazy.go` refreshes on demand, and `static.go` supplies development-only static data without refreshing it. |
+| `internal/alloydb/` | `refresh.go` implements AlloyDB Admin API calls and certificate handling. `instance.go` parses instance URIs and implements refresh-ahead caching, `lazy.go` refreshes on demand, and `static.go` supplies development-only static data without refreshing it. |
 | `driver/postgres/` | Preferred `database/sql` adapter, built on pgx v5. `RegisterDriver` returns a cleanup function. |
 | `driver/pgxv4/`, `driver/pgxv5/` | Deprecated compatibility wrappers that delegate to `driver/postgres`; retain compatibility when making changes. |
 | `internal/tel/`, `internal/tel/v2/` | Existing OpenCensus metrics/traces and OpenTelemetry-based built-in Cloud Monitoring metrics, respectively. |
