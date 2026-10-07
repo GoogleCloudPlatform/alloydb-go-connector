@@ -80,6 +80,13 @@ func requirePrivateNetwork(t *testing.T) {
 	}
 }
 
+func requirePSCVars(t *testing.T) {
+	t.Helper()
+	if alloydbPSCInstanceName == "" {
+		t.Fatal("'ALLOYDB_PSC_INSTANCE_URI' env var not set")
+	}
+}
+
 func requireDirectAlloyDBVars(t *testing.T) {
 	t.Helper()
 	switch "" {
@@ -99,6 +106,7 @@ func TestPgxConnect(t *testing.T) {
 	tcs := []struct {
 		desc           string
 		privateNetwork bool
+		requireVars    func(*testing.T)
 		f              func(ctx context.Context) (*pgxpool.Pool, func() error, error)
 	}{
 		{
@@ -125,10 +133,8 @@ func TestPgxConnect(t *testing.T) {
 		{
 			desc:           "PSC",
 			privateNetwork: true,
+			requireVars:    requirePSCVars,
 			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
-				if alloydbPSCInstanceName == "" {
-					return nil, func() error { return nil }, fmt.Errorf("'ALLOYDB_PSC_INSTANCE_URI' env var not set")
-				}
 				return connectPgxWithPSC(
 					ctx, alloydbPSCInstanceName,
 					alloydbUser, alloydbPass, alloydbDB,
@@ -155,6 +161,9 @@ func TestPgxConnect(t *testing.T) {
 				requirePrivateNetwork(t)
 			}
 			requireAlloyDBVars(t)
+			if tc.requireVars != nil {
+				tc.requireVars(t)
+			}
 			ctx := t.Context()
 			pool, cleanup, err := tc.f(ctx)
 			if err != nil {
@@ -443,7 +452,8 @@ func TestAutoIAMAuthN(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			ctx := context.Background()
 
-			opts := append(tc.opts, alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()))
+			opts := append([]alloydbconn.Option{}, tc.opts...)
+			opts = append(opts, alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()))
 			d, err := alloydbconn.NewDialer(ctx, opts...)
 			if err != nil {
 				t.Fatalf("failed to init Dialer: %v", err)
