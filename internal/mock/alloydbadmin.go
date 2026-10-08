@@ -76,6 +76,9 @@ func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
 		if ipType == "PSC" {
 			res["psc_dns_name"] = addr
 		}
+		if ipType == "PSCAuto" {
+			res["psc_auto_dns_name"] = addr
+		}
 	}
 	res["instanceUid"] = i.uid
 	jsonString, err := json.Marshal(res)

@@ -358,19 +358,44 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	var connectEnd tel.EndSpanFunc
 	ctx, connectEnd = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.Connect")
 	defer func() { connectEnd(err) }()
-	hostPort := net.JoinHostPort(addr, serverProxyPort)
 	f := d.dialFunc
 	if cfg.dialFunc != nil {
 		f = cfg.dialFunc
 	}
-	d.logger.Debugf(ctx, "[%v] Dialing %v", inst.String(), hostPort)
-	conn, err = f(ctx, "tcp", hostPort)
-	if err != nil {
+
+	// Candidate addresses in priority order. For PSC-enabled instances, the API
+	// always populates psc_dns_name, and may also populate psc_auto_dns_name.
+	// Fall back to the automatic PSC DNS name if the manual one can't be reached.
+	addrs := []string{addr}
+	if cfg.ipType == alloydb.PSC {
+		if autoAddr, ok := ci.IPAddrs[alloydb.PSCAuto]; ok {
+			addrs = append(addrs, autoAddr)
+		}
+	}
+
+	var (
+		hostPort string
+		dialErr  error
+	)
+	for _, a := range addrs {
+		hostPort = net.JoinHostPort(a, serverProxyPort)
+		d.logger.Debugf(ctx, "[%v] Dialing %v", inst.String(), hostPort)
+		conn, err = f(ctx, "tcp", hostPort)
+		if err == nil {
+			addr = a // ensure the TLS ServerName matches the endpoint we reached
+			break
+		}
 		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", inst.String(), hostPort, err)
+		dialErr = errors.Join(dialErr, err)
+		if ctx.Err() != nil {
+			break // don't burn a fallback attempt on a dead context
+		}
+	}
+	if err != nil {
 		// refresh the instance info in case it caused the connection failure
 		cache.ForceRefresh()
 		attrs.DialStatus = telv2.DialTCPError
-		return nil, errtype.NewDialError("failed to dial", inst.String(), err)
+		return nil, errtype.NewDialError("failed to dial", inst.String(), dialErr)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
