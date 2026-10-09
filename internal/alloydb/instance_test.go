@@ -73,6 +73,24 @@ func TestParseInstURI(t *testing.T) {
 				name:    "name",
 			},
 		},
+		{
+			desc: "short AIDE instance URI",
+			in:   "projects/proj/instances/name",
+			want: InstanceURI{
+				project: "proj",
+				region:  "us-central1",
+				name:    "name",
+			},
+		},
+		{
+			desc: "regional instance URI",
+			in:   "projects/proj/locations/reg/instances/name",
+			want: InstanceURI{
+				project: "proj",
+				region:  "reg",
+				name:    "name",
+			},
+		},
 	}
 
 	for _, tc := range tcs {

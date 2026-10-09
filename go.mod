@@ -52,3 +52,5 @@ require (
 	google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 )
+
+replace cloud.google.com/go/alloydb => /usr/local/google/home/hessjc/projects/workspaces/aide/build/alloydb-go-sdk

@@ -52,7 +52,9 @@ var (
 	// 'projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>'
 	// Additionally, we have to support legacy "domain-scoped" projects
 	// (e.g. "google.com:PROJECT")
-	instURIRegex = regexp.MustCompile("projects/([^:]+(:[^:]+)?)/locations/([^:]+)/clusters/([^:]+)/instances/([^:]+)")
+	instURIRegex = regexp.MustCompile("^projects/([^:]+(:[^:]+)?)/locations/([^:]+)/clusters/([^:]+)/instances/([^:]+)$")
+	regionalInstURIRegex = regexp.MustCompile("^projects/([^:]+(:[^:]+)?)/locations/([^:]+)/instances/([^:]+)$")
+	shortInstURIRegex = regexp.MustCompile("^projects/([^:]+(:[^:]+)?)/instances/([^:]+)$")
 )
 
 // InstanceURI represents an AlloyDB instance.
@@ -85,6 +87,9 @@ func (i InstanceURI) Name() string {
 
 // URI returns the full URI specifying an instance.
 func (i *InstanceURI) URI() string {
+	if i.cluster == "" {
+		return fmt.Sprintf("projects/%s/instances/%s", i.project, i.name)
+	}
 	return fmt.Sprintf(
 		"projects/%s/locations/%s/clusters/%s/instances/%s",
 		i.project, i.region, i.cluster, i.name,
@@ -93,28 +98,43 @@ func (i *InstanceURI) URI() string {
 
 // String returns a short-hand representation of an instance URI.
 func (i *InstanceURI) String() string {
+	if i.cluster == "" {
+		return fmt.Sprintf("%s.%s", i.project, i.name)
+	}
 	return fmt.Sprintf("%s.%s.%s.%s", i.project, i.region, i.cluster, i.name)
 }
 
 // ParseInstURI initializes a new InstanceURI struct.
 func ParseInstURI(cn string) (InstanceURI, error) {
 	b := []byte(cn)
-	m := instURIRegex.FindSubmatch(b)
-	if m == nil {
-		err := errtype.NewConfigError(
-			"invalid instance URI, expected projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
-			cn,
-		)
-		return InstanceURI{}, err
+	if m := instURIRegex.FindSubmatch(b); m != nil {
+		return InstanceURI{
+			project: string(m[1]),
+			region:  string(m[3]),
+			cluster: string(m[4]),
+			name:    string(m[5]),
+		}, nil
+	}
+	if m := regionalInstURIRegex.FindSubmatch(b); m != nil {
+		return InstanceURI{
+			project: string(m[1]),
+			region:  string(m[3]),
+			name:    string(m[4]),
+		}, nil
+	}
+	if m := shortInstURIRegex.FindSubmatch(b); m != nil {
+		return InstanceURI{
+			project: string(m[1]),
+			region:  "us-central1",
+			name:    string(m[3]),
+		}, nil
 	}
 
-	c := InstanceURI{
-		project: string(m[1]),
-		region:  string(m[3]),
-		cluster: string(m[4]),
-		name:    string(m[5]),
-	}
-	return c, nil
+	err := errtype.NewConfigError(
+		"invalid instance URI, expected projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>",
+		cn,
+	)
+	return InstanceURI{}, err
 }
 
 // refreshOperation is a pending result of a refresh operation of data used to

@@ -24,6 +24,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	mathrand "math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -34,10 +36,13 @@ import (
 	"cloud.google.com/go/alloydbconn/debug"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
+	"cloud.google.com/go/alloydbconn/internal/sqldataclient"
 	"cloud.google.com/go/alloydbconn/internal/tel"
 	"cloud.google.com/go/auth"
 	"github.com/google/uuid"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
@@ -123,14 +128,23 @@ type monitoredCache struct {
 	connectionInfoCache
 }
 
+type sqlDataConnState struct {
+	mu             sync.Mutex
+	allowed        bool
+	cooldownUntil  time.Time
+	backoffCounter int
+	lastErr        error
+}
+
 // A Dialer is used to create connections to AlloyDB instance.
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
-	lock           sync.RWMutex
-	cache          map[alloydb.InstanceURI]monitoredCache
-	keyGenerator   *keyGenerator
-	refreshTimeout time.Duration
+	lock             sync.RWMutex
+	cache            map[alloydb.InstanceURI]monitoredCache
+	sqlDataConnState map[alloydb.InstanceURI]*sqlDataConnState
+	keyGenerator     *keyGenerator
+	refreshTimeout   time.Duration
 	// closed reports if the dialer has been closed.
 	closed chan struct{}
 
@@ -166,7 +180,12 @@ type Dialer struct {
 	dialFunc func(cxt context.Context, network, addr string) (net.Conn, error)
 
 	iamAuthNTokenProvider auth.TokenProvider
+	tokenProvider         auth.TokenProvider
 	userAgent             string
+
+	sqlDataDialer                   sqldataclient.Dialer
+	sqlDataEndpoint                 string
+	resourceExhaustedCooldownPeriod time.Duration
 
 	buffer *buffer
 }
@@ -225,24 +244,45 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	var sqlDataDialer sqldataclient.Dialer
+	if cfg.sqlDataDialer != nil {
+		sqlDataDialer = cfg.sqlDataDialer
+	} else {
+		sqlDataDialer = sqldataclient.NewGrpcDialer(
+			cfg.sqlDataEndpoint,
+			cfg.tokenProvider,
+			cfg.quotaProject,
+			cfg.logger,
+			false,
+			cfg.sqlDataStreamTimeout,
+			strings.Join(cfg.userAgents, " "),
+		)
+	}
+
 	d := &Dialer{
-		closed:                make(chan struct{}),
-		cache:                 make(map[alloydb.InstanceURI]monitoredCache),
-		lazyRefresh:           cfg.lazyRefresh,
-		disableBuiltInMetrics: cfg.disableBuiltInTelemetry,
-		staticConnInfo:        cfg.staticConnInfo,
-		keyGenerator:          g,
-		refreshTimeout:        cfg.refreshTimeout,
-		client:                client,
-		mClient:               mClient,
-		logger:                cfg.logger,
-		defaultDialCfg:        dialCfg,
-		dialerID:              dialerID,
-		metricRecorders:       map[alloydb.InstanceURI]telv2.MetricRecorder{},
-		dialFunc:              cfg.dialFunc,
-		iamAuthNTokenProvider: cfg.iamAuthNTokenProvider,
-		userAgent:             userAgent,
-		buffer:                newBuffer(),
+		closed:                          make(chan struct{}),
+		cache:                           make(map[alloydb.InstanceURI]monitoredCache),
+		sqlDataConnState:                make(map[alloydb.InstanceURI]*sqlDataConnState),
+		lazyRefresh:                     cfg.lazyRefresh,
+		disableBuiltInMetrics:           cfg.disableBuiltInTelemetry,
+		staticConnInfo:                  cfg.staticConnInfo,
+		keyGenerator:                    g,
+		refreshTimeout:                  cfg.refreshTimeout,
+		client:                          client,
+		mClient:                         mClient,
+		logger:                          cfg.logger,
+		defaultDialCfg:                  dialCfg,
+		dialerID:                        dialerID,
+		metricRecorders:                 map[alloydb.InstanceURI]telv2.MetricRecorder{},
+		dialFunc:                        cfg.dialFunc,
+		iamAuthNTokenProvider:           cfg.iamAuthNTokenProvider,
+		tokenProvider:                   cfg.tokenProvider,
+		userAgent:                       userAgent,
+		sqlDataDialer:                   sqlDataDialer,
+		sqlDataEndpoint:                 cfg.sqlDataEndpoint,
+		resourceExhaustedCooldownPeriod: cfg.resourceExhaustedCooldownPeriod,
+		buffer:                          newBuffer(),
 	}
 	return d, nil
 }
@@ -310,6 +350,130 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		endDial(err)
 	}()
 
+	// When using SQLData connections, there is no need to retrieve connection
+	// info and instead we may proceed immediately to connecting.
+	if cfg.ipType == alloydb.SQLData {
+		d.lock.RLock()
+		state, ok := d.sqlDataConnState[inst]
+		d.lock.RUnlock()
+		if !ok {
+			d.lock.Lock()
+			state, ok = d.sqlDataConnState[inst]
+			if !ok {
+				state = &sqlDataConnState{allowed: true}
+				d.sqlDataConnState[inst] = state
+			}
+			d.lock.Unlock()
+		}
+
+		state.mu.Lock()
+		if !state.allowed {
+			state.mu.Unlock()
+		} else {
+			cooldownUntil := state.cooldownUntil
+			lastErr := state.lastErr
+			state.mu.Unlock()
+
+			if time.Now().Before(cooldownUntil) {
+				return nil, errtype.NewResourceExhaustedError("cooldown active", inst.String(), lastErr)
+			}
+
+			// Attempt to connect AlloyDbDataService
+			sdcConn, sdcErr := d.connectSQLDataService(ctx, inst, cfg, startTime, mr, &attrs)
+			if sdcErr == nil {
+				// Connection succeeded, return the connection.
+				return sdcConn, nil
+			}
+			// Connection failed.
+			if !isPreconditionFailed(sdcErr) {
+				return nil, sdcErr
+			}
+			// sdcErr is a PreconditionFailed error. Fall back to direct IP connection.
+		}
+	}
+
+	return d.connectInstanceIP(ctx, inst, cfg, startTime, mr, &attrs)
+}
+
+// connectSQLDataService dials a connection through the AlloyDbDataService.
+func (d *Dialer) connectSQLDataService(
+	ctx context.Context,
+	inst alloydb.InstanceURI,
+	cfg dialCfg,
+	startTime time.Time,
+	mr telv2.MetricRecorder,
+	attrs *telv2.Attributes,
+) (net.Conn, error) {
+	onResourceExhausted := func(err error) {
+		d.lock.RLock()
+		state, ok := d.sqlDataConnState[inst]
+		d.lock.RUnlock()
+		if !ok {
+			return
+		}
+		state.mu.Lock()
+		// Maximum backoff counter is 5.
+		if state.backoffCounter < 5 {
+			state.backoffCounter++
+		}
+		backoff := cooldownBackoff(d.resourceExhaustedCooldownPeriod, state.backoffCounter)
+		state.cooldownUntil = time.Now().Add(backoff)
+		state.lastErr = err
+		state.mu.Unlock()
+	}
+
+	onSuccess := func() {
+		d.lock.RLock()
+		state, ok := d.sqlDataConnState[inst]
+		d.lock.RUnlock()
+		if !ok {
+			return
+		}
+		state.mu.Lock()
+		state.backoffCounter = 0
+		state.cooldownUntil = time.Time{}
+		state.mu.Unlock()
+	}
+
+	conn, err := d.sqlDataDialer.ConnectSQLDataService(ctx, inst, cfg.iamAuthN)
+	if err != nil {
+		if isResourceExhaustedError(err) {
+			onResourceExhausted(err)
+		}
+		return nil, err
+	}
+
+	// This creates a fallback connection, and marks the connection
+	// as permanently needing to fallback to direct IP.
+	fb := func() (net.Conn, error) {
+		d.lock.RLock()
+		state, ok := d.sqlDataConnState[inst]
+		d.lock.RUnlock()
+		if ok {
+			state.mu.Lock()
+			state.allowed = false
+			state.mu.Unlock()
+		}
+		return d.connectInstanceIP(ctx, inst, cfg, startTime, mr, attrs)
+	}
+
+	fc := newFallbackConn(conn, isSQLDataUnsupportedError, fb)
+	return &resourceExhaustedTrackingConn{
+		Conn:                fc,
+		onResourceExhausted: onResourceExhausted,
+		onSuccess:           onSuccess,
+	}, nil
+}
+
+// connectInstanceIP dials the IP address of the instance using a normal net.Conn.
+func (d *Dialer) connectInstanceIP(
+	ctx context.Context,
+	inst alloydb.InstanceURI,
+	cfg dialCfg,
+	startTime time.Time,
+	mr telv2.MetricRecorder,
+	attrs *telv2.Attributes,
+) (conn net.Conn, err error) {
 	var endInfo tel.EndSpanFunc
 	ctx, endInfo = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.InstanceInfo")
 	cache, cacheHit, err := d.connectionInfoCache(ctx, inst, mr)
@@ -344,7 +508,20 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 			return nil, err
 		}
 	}
-	addr, ok := ci.IPAddrs[cfg.ipType]
+
+	var addr string
+	var ok bool
+	if cfg.ipType == alloydb.SQLData || cfg.ipType == alloydb.AutoIP {
+		for _, ipType := range []string{alloydb.PrivateIP, alloydb.PSC, alloydb.PublicIP} {
+			if a, exists := ci.IPAddrs[ipType]; exists {
+				addr = a
+				ok = true
+				break
+			}
+		}
+	} else {
+		addr, ok = ci.IPAddrs[cfg.ipType]
+	}
 	if !ok {
 		d.removeCached(ctx, inst, cache, err)
 		err := errtype.NewConfigError(
@@ -422,16 +599,20 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	n := atomic.AddUint64(cache.openConns, 1)
 	go func() {
 		tel.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
-		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
-		mr.RecordOpenConnection(ctx, attrs)
-		mr.RecordDialLatency(ctx, latency, attrs)
+		tel.RecordDialLatency(ctx, instanceName(inst), d.dialerID, latency)
+		mr.RecordOpenConnection(ctx, *attrs)
+		mr.RecordDialLatency(ctx, latency, *attrs)
 	}()
 
-	return newInstrumentedConn(tlsConn, mr, attrs, func() {
+	return newInstrumentedConn(tlsConn, mr, *attrs, func() {
 		n := atomic.AddUint64(cache.openConns, ^uint64(0))
 		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
-		mr.RecordClosedConnection(context.Background(), attrs)
+		mr.RecordClosedConnection(context.Background(), *attrs)
 	}, d.dialerID, inst.String()), nil
+}
+
+func instanceName(inst alloydb.InstanceURI) string {
+	return inst.URI()
 }
 
 // removeCached stops all background refreshes and deletes the connection
@@ -692,6 +873,10 @@ func (d *Dialer) Close() error {
 	for _, i := range d.cache {
 		_ = i.Close()
 	}
+	if err := d.sqlDataDialer.Close(); err != nil {
+		d.logger.Debugf(context.Background(),
+			"failed to close SQL data connection: %v", err)
+	}
 	d.lock.Unlock()
 
 	d.metricsMu.Lock()
@@ -762,3 +947,65 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 	}
 	return c, ok, nil
 }
+
+func isSQLDataUnsupportedError(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.FailedPrecondition &&
+			strings.HasPrefix(s.Message(), "unsupported instance edition")
+	}
+	return false
+}
+
+func isPreconditionFailed(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.FailedPrecondition
+	}
+	return false
+}
+
+func isResourceExhaustedError(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.ResourceExhausted
+	}
+	return false
+}
+
+type resourceExhaustedTrackingConn struct {
+	net.Conn
+	onResourceExhausted func(error)
+	onSuccess           func()
+	firstReadDone       bool
+	mu                  sync.Mutex
+}
+
+func (c *resourceExhaustedTrackingConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if err == nil {
+		c.mu.Lock()
+		if !c.firstReadDone {
+			c.firstReadDone = true
+			c.mu.Unlock()
+			c.onSuccess()
+		} else {
+			c.mu.Unlock()
+		}
+	} else if isResourceExhaustedError(err) {
+		c.onResourceExhausted(err)
+	}
+	return n, err
+}
+
+func (c *resourceExhaustedTrackingConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	if err != nil && isResourceExhaustedError(err) {
+		c.onResourceExhausted(err)
+	}
+	return n, err
+}
+
+func cooldownBackoff(base time.Duration, attempt int) time.Duration {
+	const multi = 1.618
+	exp := float64(attempt-1) + mathrand.Float64()
+	return time.Duration(float64(base) * math.Pow(multi, exp))
+}
+

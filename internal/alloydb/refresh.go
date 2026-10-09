@@ -40,6 +40,10 @@ const (
 	PrivateIP = "PRIVATE"
 	// PSC designates PSC-based connections.
 	PSC = "PSC"
+	// AutoIP designates automatic IP selection on fallback.
+	AutoIP = "AUTO"
+	// SQLData designates connections via AlloyDbDataService.
+	SQLData = "SQL_DATA"
 )
 
 type instanceInfo struct {

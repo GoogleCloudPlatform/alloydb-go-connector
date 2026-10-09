@@ -28,6 +28,7 @@ import (
 	"cloud.google.com/go/alloydbconn/debug"
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
+	"cloud.google.com/go/alloydbconn/internal/sqldataclient"
 	"cloud.google.com/go/auth"
 	"cloud.google.com/go/auth/credentials"
 	"cloud.google.com/go/auth/oauth2adapt"
@@ -51,10 +52,13 @@ type Option func(d *dialerConfig)
 
 func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 	d := &dialerConfig{
-		refreshTimeout: alloydb.RefreshTimeout,
-		dialFunc:       proxy.Dial,
-		logger:         nullLogger{},
-		userAgents:     []string{userAgent},
+		refreshTimeout:                  alloydb.RefreshTimeout,
+		dialFunc:                        proxy.Dial,
+		logger:                          nullLogger{},
+		userAgents:                      []string{userAgent},
+		sqlDataEndpoint:                 "alloydb.googleapis.com:443",
+		sqlDataStreamTimeout:            2 * time.Hour,
+		resourceExhaustedCooldownPeriod: 5 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -89,7 +93,9 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(WithUniverseDomainCredentials(c, d.clientUniverseDomain())))
+		udCreds := WithUniverseDomainCredentials(c, d.clientUniverseDomain())
+		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(udCreds))
+		d.tokenProvider = udCreds.TokenProvider
 		// Now rebuild credentials with the Login Scope
 		c, err = credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{AlloyDBLoginScope},
@@ -109,7 +115,9 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
 		}
-		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(WithUniverseDomainCredentials(c, d.clientUniverseDomain())))
+		udCreds := WithUniverseDomainCredentials(c, d.clientUniverseDomain())
+		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(udCreds))
+		d.tokenProvider = udCreds.TokenProvider
 
 		// Now rebuild credentials with the Login Scope
 		c, err = credentials.DetectDefault(&credentials.DetectOptions{
@@ -129,6 +137,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		d.iamAuthNTokenProvider = d.tokenProvider
 	case d.credentials != nil:
 		c := WithUniverseDomainCredentials(d.credentials, d.clientUniverseDomain())
+		d.tokenProvider = c.TokenProvider
 		d.iamAuthNTokenProvider = c.TokenProvider
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
 	default:
@@ -141,7 +150,9 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		if err != nil {
 			return nil, err
 		}
-		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(WithUniverseDomainCredentials(c, d.clientUniverseDomain())))
+		udCreds := WithUniverseDomainCredentials(c, d.clientUniverseDomain())
+		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(udCreds))
+		d.tokenProvider = udCreds.TokenProvider
 		c, err = credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:         []string{AlloyDBLoginScope},
 			UniverseDomain: d.clientUniverseDomain(),
@@ -162,6 +173,10 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 
 	if d.adminAPIEndpoint != "" {
 		d.alloydbClientOpts = append(d.alloydbClientOpts, option.WithEndpoint(d.adminAPIEndpoint))
+	}
+
+	if d.quotaProject != "" {
+		d.clientOpts = append(d.clientOpts, option.WithQuotaProject(d.quotaProject))
 	}
 
 	userAgent := strings.Join(d.userAgents, " ")
@@ -201,6 +216,12 @@ type dialerConfig struct {
 	lazyRefresh      bool
 	adminAPIEndpoint string
 	universeDomain   string
+	quotaProject     string
+
+	sqlDataEndpoint                 string
+	sqlDataDialer                   sqldataclient.Dialer
+	sqlDataStreamTimeout            time.Duration
+	resourceExhaustedCooldownPeriod time.Duration
 
 	credentials           *auth.Credentials
 	tokenProvider         auth.TokenProvider
@@ -486,6 +507,44 @@ func WithOptOutOfBuiltInTelemetry() Option {
 	}
 }
 
+// WithQuotaProject returns an Option that specifies the project used for quota and billing purposes.
+func WithQuotaProject(p string) Option {
+	return func(d *dialerConfig) {
+		d.quotaProject = p
+	}
+}
+
+// WithSQLDataEndpoint allows callers to override the default endpoint for the
+// AlloyDB Data API. Typically, this is for development only and should be ignored
+// otherwise.
+func WithSQLDataEndpoint(endpoint string) Option {
+	return func(d *dialerConfig) {
+		d.sqlDataEndpoint = endpoint
+	}
+}
+
+// WithSQLDataDialer allows callers to override the default dialer for the AlloyDbDataService
+// with an alternate dialer.
+func WithSQLDataDialer(dialer sqldataclient.Dialer) Option {
+	return func(d *dialerConfig) {
+		d.sqlDataDialer = dialer
+	}
+}
+
+// WithSQLDataStreamTimeout sets the maximum time allowed for a stream to AlloyDbDataService.
+func WithSQLDataStreamTimeout(timeout time.Duration) Option {
+	return func(d *dialerConfig) {
+		d.sqlDataStreamTimeout = timeout
+	}
+}
+
+// WithResourceExhaustedCooldownPeriod sets the cooldown period after a ResourceExhausted error.
+func WithResourceExhaustedCooldownPeriod(period time.Duration) Option {
+	return func(d *dialerConfig) {
+		d.resourceExhaustedCooldownPeriod = period
+	}
+}
+
 // A DialOption is an option for configuring how a Dialer's Dial call is
 // executed.
 type DialOption func(d *dialCfg)
@@ -547,6 +606,15 @@ func WithPSC() DialOption {
 	}
 }
 
+// WithSQLData returns a DialOption that routes traffic through the AlloyDB Data API
+// endpoint. This dial option allows the dialer to reach the target instance
+// when there is not a direct network path.
+func WithSQLData() DialOption {
+	return func(cfg *dialCfg) {
+		cfg.ipType = alloydb.SQLData
+	}
+}
+
 // WithDialIAMAuthN allows calls to Dial to enable or disable IAM AuthN on a
 // one-off basis, regardless whether the dialer itself is configured with IAM
 // AuthN. There is no performance penalty to using this option.
@@ -555,3 +623,4 @@ func WithDialIAMAuthN(enabled bool) DialOption {
 		cfg.iamAuthN = enabled
 	}
 }
+
