@@ -451,7 +451,8 @@ func WithLazyRefresh() Option {
 //	        "ipAddress": "<PSA-based private IP address>",
 //	        "publicIpAddress": "<public IP address>",
 //	        "pscInstanceConfig": {
-//	            "pscDnsName": "<PSC DNS name>"
+//	            "pscDnsName": "<PSC DNS name>",
+//	            "pscAutoDnsName": "<optional automatic PSC DNS name>"
 //	        },
 //	        "pemCertificateChain": [
 //	            "<client cert>", "<intermediate cert>", "<CA cert>"
