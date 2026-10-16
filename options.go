@@ -451,7 +451,8 @@ func WithLazyRefresh() Option {
 //	        "ipAddress": "<PSA-based private IP address>",
 //	        "publicIpAddress": "<public IP address>",
 //	        "pscInstanceConfig": {
-//	            "pscDnsName": "<PSC DNS name>"
+//	            "pscDnsName": "<PSC DNS name>",
+//	            "pscAutoDnsName": "<optional automatic PSC DNS name>"
 //	        },
 //	        "pemCertificateChain": [
 //	            "<client cert>", "<intermediate cert>", "<CA cert>"
@@ -541,6 +542,11 @@ func WithPrivateIP() DialOption {
 
 // WithPSC returns a DialOption that specifies a PSC endpoint will be used to
 // connect.
+//
+// If an instance is configured with both a manual PSC DNS name and an
+// automatic PSC DNS name, the Dialer attempts to connect using the manual PSC
+// DNS name first, and falls back to the automatic PSC DNS name if the manual
+// one is unreachable.
 func WithPSC() DialOption {
 	return func(cfg *dialCfg) {
 		cfg.ipType = alloydb.PSC
