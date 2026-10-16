@@ -305,8 +305,12 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		tel.AddDialerID(d.dialerID),
 	)
 	defer func() {
+		// The OpenCensus record may block on a full worker channel, so keep
+		// it off the dial path. The OpenTelemetry record is a sync.Map
+		// lookup plus an atomic add, so record it inline to guarantee it
+		// lands before Dial returns.
 		go tel.RecordDialError(context.Background(), instance, d.dialerID, err)
-		go mr.RecordDialCount(ctx, attrs)
+		mr.RecordDialCount(ctx, attrs)
 		endDial(err)
 	}()
 
@@ -417,14 +421,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	// Increment open connections synchronously before returning the
 	// connection to the caller. This prevents a race where the caller
 	// could close the connection before a background goroutine increments
-	// the counter, which would underflow the uint64 and produce incorrect
-	// metric values.
+	// the counters, which would underflow the uint64 and make the
+	// open_connections up/down counter go negative.
 	n := atomic.AddUint64(cache.openConns, 1)
+	mr.RecordOpenConnection(ctx, attrs)
+	mr.RecordDialLatency(ctx, latency, attrs)
 	go func() {
 		tel.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
 		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
-		mr.RecordOpenConnection(ctx, attrs)
-		mr.RecordDialLatency(ctx, latency, attrs)
 	}()
 
 	return newInstrumentedConn(tlsConn, mr, attrs, func() {
