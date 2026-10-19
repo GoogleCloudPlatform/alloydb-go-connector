@@ -748,3 +748,99 @@ func TestDialerDialMetrics(t *testing.T) {
 	}
 	mockRecorder.Verify(t, wantAttrs)
 }
+
+// openConnsRecorder mimics the cumulative, non-monotonic sum the OTel SDK
+// keeps for the open_connections up/down counter, so that a decrement
+// arriving before its matching increment shows up as a negative value.
+type openConnsRecorder struct {
+	telv2.NullMetricRecorder // no-ops for everything but open/close
+
+	mu      sync.Mutex
+	value   int64
+	minimum int64
+}
+
+func (o *openConnsRecorder) RecordOpenConnection(context.Context, telv2.Attributes) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.value++
+}
+
+func (o *openConnsRecorder) RecordClosedConnection(context.Context, telv2.Attributes) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.value--
+	o.minimum = min(o.minimum, o.value)
+}
+
+func (o *openConnsRecorder) read() (value, minimum int64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.value, o.minimum
+}
+
+// TestDialRecordsOpenConnectionBeforeReturning ensures the open_connections
+// up/down counter is incremented on the synchronous path. If the increment
+// happens in a background goroutine, a caller that closes the connection
+// immediately records the decrement first, and the exporter ships a negative
+// value for that interval.
+func TestDialRecordsOpenConnectionBeforeReturning(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+	)
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	stop := mock.StartServerProxy(t, inst)
+	defer func() {
+		stop()
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+
+	d, err := NewDialer(ctx,
+		WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+
+	uri, err := alloydb.ParseInstURI(testInstanceURI)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	rec := &openConnsRecorder{}
+	// Seed the recorder cache so Dial reports to the test recorder.
+	d.metricsMu.Lock()
+	d.metricRecorders[uri] = rec
+	d.metricsMu.Unlock()
+
+	for range 50 {
+		conn, err := d.Dial(ctx, testInstanceURI)
+		if err != nil {
+			t.Fatalf("expected Dial to succeed, but got error: %v", err)
+		}
+		if got, _ := rec.read(); got != 1 {
+			t.Fatalf("open connections after Dial = %v, want 1", got)
+		}
+		if err := conn.Close(); err != nil {
+			t.Fatalf("expected Close to succeed, but got error: %v", err)
+		}
+	}
+
+	got, minimum := rec.read()
+	if minimum < 0 {
+		t.Errorf("open connections reached %v, want no value below 0", minimum)
+	}
+	if got != 0 {
+		t.Errorf("open connections after closing all conns = %v, want 0", got)
+	}
+}
