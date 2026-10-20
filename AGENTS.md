@@ -39,16 +39,13 @@ for the tested versions and platforms.
 
 | Location | Responsibility |
 | --- | --- |
-| `dialer.go` | Public `NewDialer`, `Dial`, and `Close` lifecycle; per-instance caches, TCP/TLS connections, metadata exchange, and connection instrumentation. |
-| `options.go` | Functional configuration options: `Option` configures a dialer; `DialOption` configures individual connections or their defaults. Includes credentials, IAM authentication, network selection, and refresh strategy. |
-| `internal/alloydb/` | `refresh.go` implements AlloyDB Admin API calls and certificate handling. `instance.go` parses instance URIs and implements refresh-ahead caching, `lazy.go` refreshes on demand, and `static.go` supplies development-only static data without refreshing it. |
-| `driver/postgres/` | Preferred `database/sql` adapter, built on pgx v5. `RegisterDriver` returns a cleanup function. |
-| `driver/pgxv4/`, `driver/pgxv5/` | Deprecated compatibility wrappers that delegate to `driver/postgres`; retain compatibility when making changes. |
-| `internal/tel/`, `internal/tel/v2/` | Existing OpenCensus metrics/traces and OpenTelemetry-based built-in Cloud Monitoring metrics, respectively. |
-| `debug/`, `errtype/` | Public logging interfaces and structured configuration, refresh, and dial errors. |
-| `internal/mock/` | Fake AlloyDB instances, Admin API responses, and a local server proxy for tests. |
-| Root `*_test.go` files | Unit tests, live integration tests, and connection examples/helpers for `database/sql` and `pgxpool`. |
-| `scripts/`, `.github/workflows/` | Local formatting, lint, and test commands plus CI configuration. |
+| Core dialer | Public dialer lifecycle; per-instance caches, TCP/TLS connections, metadata exchange, and connection instrumentation. |
+| Configuration | Functional options for credentials, IAM authentication, network selection, and certificate refresh behavior. |
+| AlloyDB integration | AlloyDB Admin API integration, certificate lifecycle, instance metadata, and connection-info caching. |
+| Database drivers | Preferred `database/sql` adapter built on pgx v5, plus deprecated pgx compatibility adapters. |
+| Telemetry | OpenCensus metrics/traces and OpenTelemetry-based built-in Cloud Monitoring metrics. |
+| Supporting packages | Public debug logging, structured connector errors, and test fakes for AlloyDB instances and the local server proxy. |
+| Tests and automation | Unit and live integration tests, formatting and lint commands, and CI workflows. |
 
 A normal connection follows this sequence:
 
@@ -97,8 +94,9 @@ Keep `-short` when running locally without cloud infrastructure. Plain
 
 ### Integration tests
 
-Use `.envrc.example` as the configuration template. Set values in your local
-environment or an ignored `.envrc` file and load them before running tests.
+See the [end-to-end tests](e2e_test.go) for the authoritative list of required
+environment variables, test cases, and connection modes. Set those values in
+your local environment or an ignored `.envrc` file before running tests.
 
 - Set `ALLOYDB_INSTANCE_NAME`, `ALLOYDB_DB`, `ALLOYDB_USER`, `ALLOYDB_PASS`, and
   `ALLOYDB_IAM_USER`. The named instance needs public IP enabled for public-IP
@@ -108,32 +106,18 @@ environment or an ignored `.envrc` file and load them before running tests.
   roles. Credential-option tests additionally require
   `GOOGLE_APPLICATION_CREDENTIALS` to point to a credentials JSON file; a local
   ADC login alone does not satisfy that test requirement.
-- For the full suite, also set `ALLOYDB_INSTANCE_IP` and
-  `ALLOYDB_PSC_INSTANCE_URI` and run from a network that can reach both the
-  private IP and the PSC instance.
+- Set `ALLOYDB_PSC_INSTANCE_URI` for the PSC test and run from a network that
+  can reach the private IP and PSC instance.
 
 ```sh
-# Run without private-network access, using the public-IP test instance.
-./scripts/test_system.sh --skip-private-ip
-
-# Run the full suite, including private IP, PSC, and direct connections.
+# Run the integration suite, including private IP, public IP, PSC, and direct connections.
 ./scripts/test_system.sh
 ```
 
-Both script modes enable race detection and coverage. `--skip-private-ip` skips
-private-IP connector tests, PSC tests, and direct-connection tests; it does not
-remove the need for cloud credentials or a live public-IP instance. The
-underlying custom Go test flag is defined only in the root package:
-
-```sh
-go test -v . -skip-private-ip
-```
-
-Use the script to apply this mode across all packages rather than passing the
-custom flag to `go test ./...`. `-short` skips all integration tests regardless
-of the private-IP flag. CI runs unit tests across macOS, Windows, and Linux;
-live integration tests run on a configured Linux runner and are skipped for
-pull requests from forks and Dependabot.
+The script enables race detection and coverage. `-short` skips all integration
+tests. CI runs unit tests across macOS, Windows, and Linux; live integration
+tests run on a configured Linux runner and are skipped for pull requests from
+forks and Dependabot.
 
 ## Contribution Guidelines
 
@@ -158,15 +142,13 @@ pull requests from forks and Dependabot.
   docs: clarify integration test prerequisites
   ```
 
-  Mark breaking changes with `!` before the colon or a `BREAKING CHANGE:` footer
-  and explain the migration required. Use the same format for PR titles and
-  ensure the final squash-merge commit preserves the intended type and breaking
-  change information.
 - Read the relevant implementation and nearby tests before editing. Keep
   changes focused and preserve unrelated work already present in the checkout.
 - Preserve public API compatibility and the distinction between dialer-level
   and per-connection options. Add Go doc comments for exported symbols and
-  update `README.md` or `doc.go` when usage changes.
+  update `README.md` or package documentation when usage changes. Breaking
+  changes to the public API are unacceptable; maintain compatibility for
+  existing users.
 - Follow existing context, error-wrapping, locking, and cleanup patterns.
   Changes to dialing or refresh logic should account for cancellation,
   certificate expiry, concurrent callers, and resource cleanup. Keep the
