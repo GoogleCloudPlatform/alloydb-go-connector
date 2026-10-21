@@ -435,3 +435,72 @@ func TestAutoIAMAuthN(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteEndpointReadWrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration tests")
+	}
+	endpointDNS := os.Getenv("ALLOYDB_WRITE_ENDPOINT")
+	if endpointDNS == "" {
+		t.Skip("ALLOYDB_WRITE_ENDPOINT not set")
+	}
+
+	opts := []alloydbconn.Option{
+		alloydbconn.WithDNSResolver(),
+		alloydbconn.WithOptOutOfBuiltInTelemetry(),
+	}
+	if apiEndpoint := os.Getenv("ALLOYDB_ADMIN_API_ENDPOINT"); apiEndpoint != "" {
+		opts = append(opts, alloydbconn.WithAdminAPIEndpoint(apiEndpoint))
+	}
+
+	ctx := t.Context()
+	pool, cleanup, err := connectPgx(
+		ctx, endpointDNS,
+		alloydbUser, alloydbPass, alloydbDB,
+		opts...,
+	)
+	if err != nil {
+		_ = cleanup()
+		t.Fatal(err)
+	}
+	defer func() {
+		pool.Close()
+		_ = cleanup()
+	}()
+
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS write_endpoint_e2e_test (
+			id SERIAL PRIMARY KEY,
+			val TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		t.Fatalf("CREATE TABLE failed: %v", err)
+	}
+	defer func() {
+		_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS write_endpoint_e2e_test")
+	}()
+
+	var insertedID int
+	err = pool.QueryRow(
+		ctx,
+		"INSERT INTO write_endpoint_e2e_test (val) VALUES ($1) RETURNING id",
+		"hello-write-endpoint",
+	).Scan(&insertedID)
+	if err != nil {
+		t.Fatalf("INSERT failed: %v", err)
+	}
+
+	var gotVal string
+	err = pool.QueryRow(
+		ctx,
+		"SELECT val FROM write_endpoint_e2e_test WHERE id = $1",
+		insertedID,
+	).Scan(&gotVal)
+	if err != nil {
+		t.Fatalf("SELECT failed: %v", err)
+	}
+	if gotVal != "hello-write-endpoint" {
+		t.Fatalf("got %q, want %q", gotVal, "hello-write-endpoint")
+	}
+}
