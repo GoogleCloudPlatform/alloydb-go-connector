@@ -1,8 +1,10 @@
 export ALLOYDB_DB="some-db"
 export ALLOYDB_USER="some-user"
 export ALLOYDB_PASS="some-password"
+# This instance must have public IP enabled for the integration tests.
 export ALLOYDB_INSTANCE_NAME="projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>"
-export ALLOYDB_INSTANCE_IP="some-IP-address"
 export ALLOYDB_IAM_USER="some-user@my-project.iam"
 export ALLOYDB_IMPERSONATED_USER="some-impersonated-IAM-user"
+# Required only when running without -skip-private-ip / --skip-private-ip.
+export ALLOYDB_INSTANCE_IP="some-private-IP-address"
 export ALLOYDB_PSC_INSTANCE_URI="projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>"
