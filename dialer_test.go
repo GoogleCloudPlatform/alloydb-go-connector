@@ -207,6 +207,158 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	}
 }
 
+const testWriteEndpoint = "my-endpoint.global.alloydb-psa.goog"
+
+// fakeNetResolver returns canned TXT records for any name.
+type fakeNetResolver struct {
+	records []string
+	err     error
+}
+
+func (f *fakeNetResolver) LookupTXT(context.Context, string) ([]string, error) {
+	return f.records, f.err
+}
+
+// newDNSTestDialer creates a Dialer wired to a fake Admin API serving inst
+// and a fake DNS resolver whose TXT record points at inst.
+func newDNSTestDialer(t *testing.T, inst mock.FakeAlloyDBInstance) *Dialer {
+	t.Helper()
+	ctx := context.Background()
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	stop := mock.StartServerProxy(t, inst)
+	t.Cleanup(func() {
+		stop()
+		if err := cleanup(); err != nil {
+			t.Errorf("%v", err)
+		}
+	})
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+	d, err := NewDialer(ctx,
+		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
+		WithDNSResolver(),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+	d.resolver = alloydb.NewDNSResolver(&fakeNetResolver{records: []string{inst.String()}})
+	t.Cleanup(func() { _ = d.Close() })
+	return d
+}
+
+func TestDialerCanConnectWithDNSName(t *testing.T) {
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+		mock.WithDNSNames(testWriteEndpoint),
+	)
+	d := newDNSTestDialer(t, inst)
+
+	// Equivalent DNS spellings (trailing dot, uppercase) must resolve and
+	// share a single cache entry: the fake Admin API only serves one refresh.
+	for _, name := range []string{testWriteEndpoint, testWriteEndpoint + ".", "MY-ENDPOINT.Global.AlloyDB-PSA.goog"} {
+		t.Run(name, func(t *testing.T) {
+			conn, err := d.Dial(context.Background(), name)
+			if err != nil {
+				t.Fatalf("expected Dial to succeed, but got error: %v", err)
+			}
+			defer conn.Close()
+			data, err := io.ReadAll(conn)
+			if err != nil {
+				t.Fatalf("expected ReadAll to succeed, got error %v", err)
+			}
+			if string(data) != "my-instance" {
+				t.Fatalf("expected known response from the server, but got %v", string(data))
+			}
+		})
+	}
+
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	if n := len(d.cache); n != 1 {
+		t.Errorf("len(d.cache) = %d, want 1", n)
+	}
+}
+
+func TestDialerDNSNameRequiresMatchingCertSAN(t *testing.T) {
+	// The server cert does not carry the write endpoint name, so TLS
+	// verification against the DNS name must fail.
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+	)
+	d := newDNSTestDialer(t, inst)
+
+	_, err := d.Dial(context.Background(), testWriteEndpoint)
+	var dialErr *errtype.DialError
+	if !errors.As(err, &dialErr) {
+		t.Fatalf("want %T, got = %v", dialErr, err)
+	}
+}
+
+func TestDialerDNSNameErrors(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("DNS names are rejected without WithDNSResolver", func(t *testing.T) {
+		d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
+		if err != nil {
+			t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+		}
+		defer d.Close()
+		_, err = d.Dial(ctx, testWriteEndpoint)
+		var cfgErr *errtype.ConfigError
+		if !errors.As(err, &cfgErr) {
+			t.Fatalf("want %T, got = %v", cfgErr, err)
+		}
+	})
+
+	t.Run("DNS lookup failure returns RefreshError", func(t *testing.T) {
+		d, err := NewDialer(ctx,
+			WithTokenSource(stubTokenSource{}),
+			WithOptOutOfBuiltInTelemetry(),
+			WithDNSResolver(),
+		)
+		if err != nil {
+			t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+		}
+		defer d.Close()
+		d.resolver = alloydb.NewDNSResolver(&fakeNetResolver{err: errors.New("dns down")})
+		_, err = d.Dial(ctx, testWriteEndpoint)
+		var refErr *errtype.RefreshError
+		if !errors.As(err, &refErr) {
+			t.Fatalf("want %T, got = %v", refErr, err)
+		}
+	})
+}
+
+func TestWithDNSResolverSelectsResolver(t *testing.T) {
+	ctx := context.Background()
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if want := alloydb.NewURIResolver(); d.resolver != want {
+		t.Errorf("default resolver = %T, want %T", d.resolver, want)
+	}
+
+	d2, err := NewDialer(ctx,
+		WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry(), WithDNSResolver())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d2.Close()
+	if want := alloydb.NewDNSResolver(net.DefaultResolver); d2.resolver != want {
+		t.Errorf("WithDNSResolver() resolver = %v, want %v", d2.resolver, want)
+	}
+}
+
 func TestDialWithUnavailableServerErrors(t *testing.T) {
 	ctx := context.Background()
 	inst := mock.NewFakeInstance(
