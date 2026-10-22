@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.3](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.19.2...v1.19.3) (2026-10-22)
+
+
+### Bug Fixes
+
+* record OpenTelemetry dial metrics synchronously ([#820](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/820)) ([d1ec337](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/d1ec3379f825a33c47518c173f4430e96d8e22c0))
+
 ## [1.19.2](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.19.1...v1.19.2) (2026-10-14)
 
 
