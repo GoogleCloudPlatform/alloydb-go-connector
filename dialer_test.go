@@ -207,6 +207,270 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	}
 }
 
+const testWriteEndpoint = "my-endpoint.global.alloydb-psa.goog"
+
+// fakeNetResolver returns canned TXT records for any name.
+type fakeNetResolver struct {
+	mu      sync.Mutex
+	records []string
+	err     error
+}
+
+func (f *fakeNetResolver) LookupTXT(context.Context, string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.records, f.err
+}
+
+func (f *fakeNetResolver) setRecords(records ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.records = records
+}
+
+// newDNSTestDialer creates a Dialer wired to a fake Admin API serving inst
+// and a fake DNS resolver whose TXT record points at inst.
+func newDNSTestDialer(t *testing.T, inst mock.FakeAlloyDBInstance) *Dialer {
+	t.Helper()
+	ctx := context.Background()
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	stop := mock.StartServerProxy(t, inst)
+	t.Cleanup(func() {
+		stop()
+		if err := cleanup(); err != nil {
+			t.Errorf("%v", err)
+		}
+	})
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+	d, err := NewDialer(ctx,
+		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
+		WithDNSResolver(),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+	d.resolver = alloydb.NewDNSResolver(&fakeNetResolver{records: []string{inst.String()}})
+	t.Cleanup(func() { _ = d.Close() })
+	return d
+}
+
+func TestDialerCanConnectWithDNSName(t *testing.T) {
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+		mock.WithDNSNames(testWriteEndpoint),
+	)
+	d := newDNSTestDialer(t, inst)
+
+	// Equivalent DNS spellings (trailing dot, uppercase) must resolve and
+	// share a single cache entry: the fake Admin API only serves one refresh.
+	for _, name := range []string{testWriteEndpoint, testWriteEndpoint + ".", "MY-ENDPOINT.Global.AlloyDB-PSA.goog"} {
+		t.Run(name, func(t *testing.T) {
+			conn, err := d.Dial(context.Background(), name)
+			if err != nil {
+				t.Fatalf("expected Dial to succeed, but got error: %v", err)
+			}
+			defer conn.Close()
+			data, err := io.ReadAll(conn)
+			if err != nil {
+				t.Fatalf("expected ReadAll to succeed, got error %v", err)
+			}
+			if string(data) != "my-instance" {
+				t.Fatalf("expected known response from the server, but got %v", string(data))
+			}
+		})
+	}
+
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	if n := len(d.cache); n != 1 {
+		t.Errorf("len(d.cache) = %d, want 1", n)
+	}
+}
+
+func TestDialerDNSNameSwitchoverReplacesCache(t *testing.T) {
+	ctx := context.Background()
+	inst1 := mock.NewFakeInstance(
+		"my-project", "my-region-1", "my-cluster-1", "my-instance-1",
+		mock.WithDNSNames(testWriteEndpoint),
+	)
+	inst2 := mock.NewFakeInstance(
+		"my-project", "my-region-2", "my-cluster-2", "my-instance-2",
+		mock.WithDNSNames(testWriteEndpoint),
+	)
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst1, 1),
+		mock.CreateEphemeralSuccess(inst1, 1),
+		mock.InstanceGetSuccess(inst2, 1),
+		mock.CreateEphemeralSuccess(inst2, 1),
+	)
+	t.Cleanup(func() {
+		if err := cleanup(); err != nil {
+			t.Errorf("%v", err)
+		}
+	})
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+
+	netRes := &fakeNetResolver{records: []string{inst1.String()}}
+	d, err := NewDialer(ctx,
+		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
+		WithDNSResolver(),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+	d.resolver = alloydb.NewDNSResolver(netRes)
+	t.Cleanup(func() { _ = d.Close() })
+
+	// 1. Dial before switchover -> connects to inst1.
+	stop1 := mock.StartServerProxy(t, inst1)
+	conn1, err := d.Dial(ctx, testWriteEndpoint)
+	if err != nil {
+		stop1()
+		t.Fatalf("expected Dial to inst1 to succeed, got: %v", err)
+	}
+	data1, err := io.ReadAll(conn1)
+	_ = conn1.Close()
+	stop1()
+	if err != nil {
+		t.Fatalf("ReadAll(conn1) failed: %v", err)
+	}
+	if string(data1) != "my-instance-1" {
+		t.Fatalf("got %q, want %q", string(data1), "my-instance-1")
+	}
+
+	// Wrap the cached entry in a spy so we can verify it is closed when the
+	// TXT record points to a new instance.
+	key := createKey(alloydb.DialTarget{DomainName: testWriteEndpoint})
+	d.lock.Lock()
+	oldEntry, ok := d.cache[key]
+	if !ok {
+		d.lock.Unlock()
+		t.Fatalf("expected cache entry for %v", key)
+	}
+	spyOld := &spyConnectionInfoCache{connectionInfoCache: oldEntry.connectionInfoCache}
+	oldEntry.connectionInfoCache = spyOld
+	d.cache[key] = oldEntry
+	d.lock.Unlock()
+
+	// 2. Simulate switchover: TXT record now points to inst2.
+	netRes.setRecords(inst2.String())
+	stop2 := mock.StartServerProxy(t, inst2)
+	defer stop2()
+
+	conn2, err := d.Dial(ctx, testWriteEndpoint)
+	if err != nil {
+		t.Fatalf("expected Dial to inst2 to succeed, got: %v", err)
+	}
+	defer conn2.Close()
+	data2, err := io.ReadAll(conn2)
+	if err != nil {
+		t.Fatalf("ReadAll(conn2) failed: %v", err)
+	}
+	if string(data2) != "my-instance-2" {
+		t.Fatalf("got %q, want %q", string(data2), "my-instance-2")
+	}
+
+	if !spyOld.CloseWasCalled() {
+		t.Error("expected old cache to be closed when TXT record changed")
+	}
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	if n := len(d.cache); n != 1 {
+		t.Errorf("len(d.cache) = %d, want 1", n)
+	}
+	wantURI2, _ := alloydb.ParseInstURI(inst2.String())
+	if got := d.cache[key].uri; got != wantURI2 {
+		t.Errorf("cached URI = %v, want %v", got, wantURI2)
+	}
+}
+
+func TestDialerDNSNameRequiresMatchingCertSAN(t *testing.T) {
+	// The server cert does not carry the write endpoint name, so TLS
+	// verification against the DNS name must fail.
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+	)
+	d := newDNSTestDialer(t, inst)
+
+	_, err := d.Dial(context.Background(), testWriteEndpoint)
+	var dialErr *errtype.DialError
+	if !errors.As(err, &dialErr) {
+		t.Fatalf("want %T, got = %v", dialErr, err)
+	}
+}
+
+func TestDialerDNSNameErrors(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("DNS names are rejected without WithDNSResolver", func(t *testing.T) {
+		d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
+		if err != nil {
+			t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+		}
+		defer d.Close()
+		_, err = d.Dial(ctx, testWriteEndpoint)
+		var cfgErr *errtype.ConfigError
+		if !errors.As(err, &cfgErr) {
+			t.Fatalf("want %T, got = %v", cfgErr, err)
+		}
+	})
+
+	t.Run("DNS lookup failure returns RefreshError", func(t *testing.T) {
+		d, err := NewDialer(ctx,
+			WithTokenSource(stubTokenSource{}),
+			WithOptOutOfBuiltInTelemetry(),
+			WithDNSResolver(),
+		)
+		if err != nil {
+			t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+		}
+		defer d.Close()
+		d.resolver = alloydb.NewDNSResolver(&fakeNetResolver{err: errors.New("dns down")})
+		_, err = d.Dial(ctx, testWriteEndpoint)
+		var refErr *errtype.RefreshError
+		if !errors.As(err, &refErr) {
+			t.Fatalf("want %T, got = %v", refErr, err)
+		}
+	})
+}
+
+func TestWithDNSResolverSelectsResolver(t *testing.T) {
+	ctx := context.Background()
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if want := alloydb.NewURIResolver(); d.resolver != want {
+		t.Errorf("default resolver = %T, want %T", d.resolver, want)
+	}
+
+	d2, err := NewDialer(ctx,
+		WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry(), WithDNSResolver())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d2.Close()
+	if want := alloydb.NewDNSResolver(net.DefaultResolver); d2.resolver != want {
+		t.Errorf("WithDNSResolver() resolver = %v, want %v", d2.resolver, want)
+	}
+}
+
 func TestDialWithUnavailableServerErrors(t *testing.T) {
 	ctx := context.Background()
 	inst := mock.NewFakeInstance(
@@ -345,10 +609,12 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			// Manually populate the internal cache with a spy
 			inst, _ := alloydb.ParseInstURI(tc.uri)
+			key := createKey(alloydb.DialTarget{URI: inst})
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[inst] = monitoredCache{
+			d.cache[key] = monitoredCache{
+				uri:                 inst,
 				connectionInfoCache: spy,
 			}
 
@@ -364,7 +630,7 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 
 			// Now verify that bad connection name has been deleted from map.
 			d.lock.RLock()
-			_, ok := d.cache[inst]
+			_, ok := d.cache[key]
 			d.lock.RUnlock()
 			if ok {
 				t.Fatal("connection info was not removed from cache")
@@ -387,6 +653,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 	sentinel := errors.New("connect info failed")
 	inst := testInstanceURI
 	cn, _ := alloydb.ParseInstURI(inst)
+	key := createKey(alloydb.DialTarget{URI: cn})
 	spy := &spyConnectionInfoCache{
 		connectInfoCalls: []connectionInfoResp{
 			// First call returns expired certificate
@@ -401,7 +668,8 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 			},
 		},
 	}
-	d.cache[cn] = monitoredCache{
+	d.cache[key] = monitoredCache{
+		uri:                 cn,
 		connectionInfoCache: spy,
 	}
 
@@ -423,7 +691,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 
 	// Now verify that bad connection name has been deleted from map.
 	d.lock.RLock()
-	_, ok := d.cache[cn]
+	_, ok := d.cache[key]
 	d.lock.RUnlock()
 	if ok {
 		t.Fatal("bad instance was not removed from the cache")
