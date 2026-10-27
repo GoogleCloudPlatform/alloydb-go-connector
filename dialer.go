@@ -119,9 +119,99 @@ type connectionInfoCache interface {
 // monitoredCache is a wrapper around a connectionInfoCache that tracks the
 // number of connections to the associated instance.
 type monitoredCache struct {
-	uri       alloydb.InstanceURI
-	openConns *uint64
+	openConnsCount atomic.Uint64
+	target         alloydb.DialTarget
+	resolver       alloydb.InstanceResolver
+	logger         debug.ContextLogger
+
+	// ctx is canceled when the cache is closed. Connections dialed by domain
+	// name are bound to it, so closing the cache (e.g. because the domain
+	// name now points at another instance) closes those connections too.
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	connectionInfoCache
+}
+
+func newMonitoredCache(
+	cache connectionInfoCache,
+	target alloydb.DialTarget,
+	failoverPeriod time.Duration,
+	resolver alloydb.InstanceResolver,
+	logger debug.ContextLogger,
+) *monitoredCache {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &monitoredCache{
+		target:              target,
+		resolver:            resolver,
+		logger:              logger,
+		ctx:                 ctx,
+		cancel:              cancel,
+		connectionInfoCache: cache,
+	}
+	if target.HasDomainName() && failoverPeriod > 0 {
+		go func() {
+			t := time.NewTicker(failoverPeriod)
+			defer t.Stop()
+			for {
+				select {
+				case <-t.C:
+					c.checkDomainName()
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+	return c
+}
+
+func (c *monitoredCache) isClosed() bool {
+	return c.ctx.Err() != nil
+}
+
+// Close stops the refresh cycle and the domain name check, and closes every
+// connection that was dialed by domain name through this cache.
+func (c *monitoredCache) Close() error {
+	c.cancel()
+	return c.connectionInfoCache.Close()
+}
+
+func (c *monitoredCache) checkDomainName() {
+	ctx := c.ctx // canceled by Close, which aborts an in-flight lookup
+	newTarget, err := c.resolver.Resolve(ctx, c.target.DomainName)
+	if ctx.Err() != nil {
+		return // closed while resolving
+	}
+	if err != nil {
+		// Resolve returns two categories of errors:
+		// 1. ConfigError (non-transient): The TXT record is missing, duplicated, or
+		//    contains an invalid instance URI. Close all connections.
+		// 2. RefreshError (transient): A temporary DNS lookup or network failure.
+		//    Keep existing connections alive and retry on the next tick.
+		var (
+			cfgErr     *errtype.ConfigError
+			refreshErr *errtype.RefreshError
+		)
+		switch {
+		case errors.As(err, &cfgErr):
+			c.logger.Debugf(ctx, "[%v] Domain name failed with non-transient configuration error, closing all connections: %v",
+				c.target.String(), err)
+			_ = c.Close()
+		case errors.As(err, &refreshErr):
+			c.logger.Debugf(ctx, "[%v] Domain name did not resolve (transient error), keeping connections: %v",
+				c.target.String(), err)
+		default:
+			c.logger.Debugf(ctx, "[%v] Domain name failed to resolve, keeping connections: %v",
+				c.target.String(), err)
+		}
+		return
+	}
+	if newTarget.URI != c.target.URI {
+		c.logger.Debugf(ctx, "[%v] Domain name target changed from %v to %v, closing all connections",
+			c.target.DomainName, c.target.URI.String(), newTarget.URI.String())
+		_ = c.Close()
+	}
 }
 
 type cacheKey struct {
@@ -141,9 +231,10 @@ func createKey(t alloydb.DialTarget) cacheKey {
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
 	lock           sync.RWMutex
-	cache          map[cacheKey]monitoredCache
+	cache          map[cacheKey]*monitoredCache
 	keyGenerator   *keyGenerator
 	refreshTimeout time.Duration
+	failoverPeriod time.Duration
 	// closed reports if the dialer has been closed.
 	closed chan struct{}
 
@@ -249,12 +340,13 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 	d := &Dialer{
 		closed:                make(chan struct{}),
-		cache:                 make(map[cacheKey]monitoredCache),
+		cache:                 make(map[cacheKey]*monitoredCache),
 		lazyRefresh:           cfg.lazyRefresh,
 		disableBuiltInMetrics: cfg.disableBuiltInTelemetry,
 		staticConnInfo:        cfg.staticConnInfo,
 		keyGenerator:          g,
 		refreshTimeout:        cfg.refreshTimeout,
+		failoverPeriod:        cfg.failoverPeriod,
 		client:                client,
 		mClient:               mClient,
 		logger:                cfg.logger,
@@ -460,7 +552,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	// could close the connection before a background goroutine increments
 	// the counters, which would underflow the uint64 and make the
 	// open_connections up/down counter go negative.
-	n := atomic.AddUint64(cache.openConns, 1)
+	n := cache.openConnsCount.Add(1)
 	mr.RecordOpenConnection(ctx, attrs)
 	mr.RecordDialLatency(ctx, latency, attrs)
 	go func() {
@@ -468,18 +560,36 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
 
-	return newInstrumentedConn(tlsConn, mr, attrs, func() {
-		n := atomic.AddUint64(cache.openConns, ^uint64(0))
+	// A connection dialed by domain name lives no longer than its cache: when
+	// the cache closes (e.g. the domain name now points at another instance),
+	// the connection closes itself.
+	connCtx := context.Background()
+	if target.HasDomainName() {
+		connCtx = cache.ctx
+	}
+	iConn := newInstrumentedConn(connCtx, tlsConn, mr, attrs, func() {
+		n := cache.openConnsCount.Add(^uint64(0))
 		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
 		mr.RecordClosedConnection(context.Background(), attrs)
-	}, d.dialerID, inst.String()), nil
+	}, d.dialerID, inst.String())
+
+	if target.HasDomainName() && cache.isClosed() {
+		// The cache was closed while this Dial was in flight, so the conn
+		// likely points at the old instance.
+		_ = iConn.Close()
+		attrs.DialStatus = telv2.DialCacheError
+		return nil, errtype.NewDialError(
+			"domain name target changed during dial, retry", inst.String(), nil)
+	}
+
+	return iConn, nil
 }
 
 // removeCached stops all background refreshes and deletes the connection
 // info cache from the map of caches.
 func (d *Dialer) removeCached(
 	ctx context.Context,
-	t alloydb.DialTarget, c connectionInfoCache, err error,
+	t alloydb.DialTarget, c *monitoredCache, err error,
 ) {
 	d.logger.Debugf(
 		ctx,
@@ -487,10 +597,13 @@ func (d *Dialer) removeCached(
 		t.String(),
 		err,
 	)
+	key := createKey(t)
 	d.lock.Lock()
-	defer d.lock.Unlock()
-	c.Close()
-	delete(d.cache, createKey(t))
+	if cachedC, ok := d.cache[key]; ok && cachedC == c {
+		delete(d.cache, key)
+	}
+	d.lock.Unlock()
+	_ = c.Close()
 }
 
 func invalidClientCert(
@@ -631,9 +744,10 @@ func (b *buffer) put(buf *[]byte) {
 }
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
-// decrement the number of open connects and record the result.
-func newInstrumentedConn(conn net.Conn, mr telv2.MetricRecorder, a telv2.Attributes, closeFunc func(), dialerID, instance string) *instrumentedConn {
-	ctx, cancel := context.WithCancel(context.Background())
+// decrement the number of open connects and record the result. If parent is
+// canceled, the connection closes itself.
+func newInstrumentedConn(parent context.Context, conn net.Conn, mr telv2.MetricRecorder, a telv2.Attributes, closeFunc func(), dialerID, instance string) *instrumentedConn {
+	ctx, cancel := context.WithCancel(parent)
 	c := &instrumentedConn{
 		Conn:           conn,
 		closeFunc:      closeFunc,
@@ -654,6 +768,7 @@ func newInstrumentedConn(conn net.Conn, mr telv2.MetricRecorder, a telv2.Attribu
 type instrumentedConn struct {
 	net.Conn
 	closeOnce      sync.Once
+	closed         atomic.Bool
 	closeFunc      func()
 	dialerID       string
 	instance       string
@@ -685,11 +800,17 @@ func (i *instrumentedConn) Write(b []byte) (int, error) {
 	return bytesWritten, err
 }
 
+// isClosed returns true if this connection has been closed.
+func (i *instrumentedConn) isClosed() bool {
+	return i.closed.Load()
+}
+
 // Close delegates to the underlying net.Conn interface and reports the close.
 // It is safe to call Close multiple times; the closeFunc and final metric
 // report will only execute once.
 func (i *instrumentedConn) Close() error {
 	i.closeOnce.Do(func() {
+		i.closed.Store(true)
 		i.stopReporter()
 		i.reportCounters()
 		i.closeFunc()
@@ -713,6 +834,11 @@ func (i *instrumentedConn) report(ctx context.Context) {
 		case <-i.reportTicker.C:
 			i.reportCounters()
 		case <-ctx.Done():
+			// Either Close was called, or the parent context (the cache of a
+			// domain name) was canceled. In the latter case, close the conn.
+			if !i.isClosed() {
+				_ = i.Close()
+			}
 			return
 		}
 	}
@@ -748,27 +874,29 @@ func (d *Dialer) Close() error {
 
 }
 
-func (d *Dialer) connectionInfoCache(ctx context.Context, target alloydb.DialTarget, mr telv2.MetricRecorder) (monitoredCache, bool, error) {
+func (d *Dialer) connectionInfoCache(ctx context.Context, target alloydb.DialTarget, mr telv2.MetricRecorder) (*monitoredCache, bool, error) {
 	key := createKey(target)
 	uri := target.URI
 	d.lock.RLock()
 	c, ok := d.cache[key]
 	d.lock.RUnlock()
-	if !ok || c.uri != uri {
+	if !ok || c.isClosed() || c.target.URI != uri {
 		d.lock.Lock()
 		defer d.lock.Unlock()
 		// Recheck to ensure instance wasn't created between locks
 		c, ok = d.cache[key]
-		if ok && c.uri != uri {
-			d.logger.Debugf(ctx, "[%v] Domain name target changed from %v to %v, closing old cache",
-				target.DomainName, c.uri.String(), uri.String())
-			_ = c.Close()
+		if ok && (c.isClosed() || c.target.URI != uri) {
+			if !c.isClosed() {
+				d.logger.Debugf(ctx, "[%v] Domain name target changed from %v to %v, closing old cache",
+					target.DomainName, c.target.URI.String(), uri.String())
+				_ = c.Close()
+			}
 			ok = false
 		}
 		if !ok {
 			k, err := d.keyGenerator.rsaKey()
 			if err != nil {
-				return monitoredCache{}, ok, err
+				return nil, ok, err
 			}
 			var cache connectionInfoCache
 			switch {
@@ -790,7 +918,7 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, target alloydb.DialTar
 					d.staticConnInfo,
 				)
 				if err != nil {
-					return monitoredCache{}, ok, err
+					return nil, ok, err
 				}
 				d.logger.Debugf(ctx, "[%v] Connection info cache = static", uri.String())
 			default:
@@ -804,8 +932,7 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, target alloydb.DialTar
 				)
 				d.logger.Debugf(ctx, "[%v] Connection info cache = refresh ahead", uri.String())
 			}
-			var open uint64
-			c = monitoredCache{uri: uri, openConns: &open, connectionInfoCache: cache}
+			c = newMonitoredCache(cache, target, d.failoverPeriod, d.resolver, d.logger)
 			d.cache[key] = c
 		}
 	}

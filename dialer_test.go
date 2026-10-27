@@ -228,6 +228,20 @@ func (f *fakeNetResolver) setRecords(records ...string) {
 	f.records = records
 }
 
+// waitForClose reports whether the dialer closes conn within 10s. Connections
+// dialed by domain name close asynchronously after their cache is closed.
+func waitForClose(t *testing.T, conn net.Conn) bool {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if conn.(*instrumentedConn).isClosed() {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
 // newDNSTestDialer creates a Dialer wired to a fake Admin API serving inst
 // and a fake DNS resolver whose TXT record points at inst.
 func newDNSTestDialer(t *testing.T, inst mock.FakeAlloyDBInstance) *Dialer {
@@ -328,6 +342,7 @@ func TestDialerDNSNameSwitchoverReplacesCache(t *testing.T) {
 		WithTokenSource(stubTokenSource{}),
 		WithOptOutOfBuiltInTelemetry(),
 		WithDNSResolver(),
+		WithFailoverPeriod(0), // test on-Dial replacement deterministically
 	)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
@@ -336,7 +351,7 @@ func TestDialerDNSNameSwitchoverReplacesCache(t *testing.T) {
 	d.resolver = alloydb.NewDNSResolver(netRes)
 	t.Cleanup(func() { _ = d.Close() })
 
-	// 1. Dial before switchover -> connects to inst1.
+	// 1. Dial before switchover -> connects to inst1 (keep conn1 open).
 	stop1 := mock.StartServerProxy(t, inst1)
 	conn1, err := d.Dial(ctx, testWriteEndpoint)
 	if err != nil {
@@ -344,7 +359,6 @@ func TestDialerDNSNameSwitchoverReplacesCache(t *testing.T) {
 		t.Fatalf("expected Dial to inst1 to succeed, got: %v", err)
 	}
 	data1, err := io.ReadAll(conn1)
-	_ = conn1.Close()
 	stop1()
 	if err != nil {
 		t.Fatalf("ReadAll(conn1) failed: %v", err)
@@ -364,7 +378,6 @@ func TestDialerDNSNameSwitchoverReplacesCache(t *testing.T) {
 	}
 	spyOld := &spyConnectionInfoCache{connectionInfoCache: oldEntry.connectionInfoCache}
 	oldEntry.connectionInfoCache = spyOld
-	d.cache[key] = oldEntry
 	d.lock.Unlock()
 
 	// 2. Simulate switchover: TXT record now points to inst2.
@@ -388,14 +401,74 @@ func TestDialerDNSNameSwitchoverReplacesCache(t *testing.T) {
 	if !spyOld.CloseWasCalled() {
 		t.Error("expected old cache to be closed when TXT record changed")
 	}
+	if !waitForClose(t, conn1) {
+		t.Error("expected open conn1 to inst1 to be closed when TXT record changed")
+	}
 	d.lock.RLock()
 	defer d.lock.RUnlock()
 	if n := len(d.cache); n != 1 {
 		t.Errorf("len(d.cache) = %d, want 1", n)
 	}
 	wantURI2, _ := alloydb.ParseInstURI(inst2.String())
-	if got := d.cache[key].uri; got != wantURI2 {
+	if got := d.cache[key].target.URI; got != wantURI2 {
 		t.Errorf("cached URI = %v, want %v", got, wantURI2)
+	}
+}
+
+func TestDialerDNSNameFailoverTickerClosesConnections(t *testing.T) {
+	ctx := context.Background()
+	inst1 := mock.NewFakeInstance(
+		"my-project", "my-region-1", "my-cluster-1", "my-instance-1",
+		mock.WithDNSNames(testWriteEndpoint),
+	)
+	inst2 := mock.NewFakeInstance(
+		"my-project", "my-region-2", "my-cluster-2", "my-instance-2",
+		mock.WithDNSNames(testWriteEndpoint),
+	)
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst1, 1),
+		mock.CreateEphemeralSuccess(inst1, 1),
+	)
+	t.Cleanup(func() {
+		if err := cleanup(); err != nil {
+			t.Errorf("%v", err)
+		}
+	})
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+
+	netRes := &fakeNetResolver{records: []string{inst1.String()}}
+	d, err := NewDialer(ctx,
+		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
+		WithDNSResolver(),
+		WithFailoverPeriod(50*time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+	d.resolver = alloydb.NewDNSResolver(netRes)
+	t.Cleanup(func() { _ = d.Close() })
+
+	stop1 := mock.StartServerProxy(t, inst1)
+	defer stop1()
+
+	conn1, err := d.Dial(ctx, testWriteEndpoint)
+	if err != nil {
+		t.Fatalf("expected Dial to inst1 to succeed, got: %v", err)
+	}
+	defer conn1.Close()
+
+	// Update DNS TXT record to point to inst2 without calling Dial.
+	netRes.setRecords(inst2.String())
+
+	// Wait for the background failover ticker to detect the change and close conn1.
+	if !waitForClose(t, conn1) {
+		t.Fatal("expected failover ticker to close open connection after TXT record change")
 	}
 }
 
@@ -609,14 +682,12 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			// Manually populate the internal cache with a spy
 			inst, _ := alloydb.ParseInstURI(tc.uri)
-			key := createKey(alloydb.DialTarget{URI: inst})
+			target := alloydb.DialTarget{URI: inst}
+			key := createKey(target)
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[key] = monitoredCache{
-				uri:                 inst,
-				connectionInfoCache: spy,
-			}
+			d.cache[key] = newMonitoredCache(spy, target, 0, d.resolver, d.logger)
 
 			_, err = d.Dial(context.Background(), tc.uri, tc.opts...)
 			if err == nil {
@@ -653,7 +724,8 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 	sentinel := errors.New("connect info failed")
 	inst := testInstanceURI
 	cn, _ := alloydb.ParseInstURI(inst)
-	key := createKey(alloydb.DialTarget{URI: cn})
+	target := alloydb.DialTarget{URI: cn}
+	key := createKey(target)
 	spy := &spyConnectionInfoCache{
 		connectInfoCalls: []connectionInfoResp{
 			// First call returns expired certificate
@@ -668,10 +740,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 			},
 		},
 	}
-	d.cache[key] = monitoredCache{
-		uri:                 cn,
-		connectionInfoCache: spy,
-	}
+	d.cache[key] = newMonitoredCache(spy, target, 0, d.resolver, d.logger)
 
 	_, err = d.Dial(context.Background(), inst)
 	if !errors.Is(err, sentinel) {
