@@ -160,6 +160,7 @@ func TestConnectionInfo(t *testing.T) {
 		testInstanceURI(),
 		nullLogger{},
 		c, rsaKey, 30*time.Second, "dialer-id",
+		false,
 		"some-ua",
 		telv2.NullMetricRecorder{},
 	)
@@ -214,6 +215,7 @@ func TestConnectInfoErrors(t *testing.T) {
 		testInstanceURI(),
 		nullLogger{},
 		c, rsaKey, 0, "dialer-id",
+		false,
 		"some-ua",
 		telv2.NullMetricRecorder{},
 	)
@@ -249,6 +251,7 @@ func TestClose(t *testing.T) {
 		testInstanceURI(),
 		nullLogger{},
 		c, rsaKey, 30, "dialer-ider",
+		false,
 		"some-ua",
 		telv2.NullMetricRecorder{},
 	)
@@ -365,6 +368,7 @@ func TestRefreshAheadCacheMetrics(t *testing.T) {
 				u,
 				nullLogger{},
 				c, rsaKey, 30*time.Second, "dialer-id",
+				false,
 				"some-ua",
 				mockRecorder,
 			)

@@ -61,6 +61,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 	}
 
 	badPairs := map[bool]string{
+		d.disableMetadataExchange && d.useIAMAuthN:                                    "incompatible options: WithOptOutOfAdvancedConnectionCheck cannot be used with WithIAMAuthN",
 		d.credentialsFile != "" && d.credentialsJSON != nil:                           "incompatible options: WithCredentialsFile cannot be used with WithCredentialsJSON",
 		d.credentialsFile != "" && d.tokenProvider != nil:                             "incompatible options: WithCredentialsFile cannot be used with WithTokenSource",
 		d.credentialsJSON != nil && d.tokenProvider != nil:                            "incompatible options: WithCredentialsJSON cannot be used with WithTokenSource",
@@ -213,6 +214,9 @@ type dialerConfig struct {
 	// above.
 	iamAuthNTokenProviderOverride auth.TokenProvider
 
+	// disableMetadataExchange is a temporary addition and will be removed in
+	// future versions.
+	disableMetadataExchange bool
 	// disableBuiltInTelemetry disables the internal metric exporter.
 	disableBuiltInTelemetry bool
 
@@ -465,13 +469,18 @@ func WithStaticConnectionInfo(r io.Reader) Option {
 	}
 }
 
-// WithOptOutOfAdvancedConnectionCheck is a no-op.
+// WithOptOutOfAdvancedConnectionCheck disables the dataplane permission check.
+// This option is incompatible with Auto IAM Authentication.
 //
-// Deprecated: In the past this was used to help internal clients migrate
-// to connections using the metadata exchange. The migration is complete
-// and now this method is a no-op.
+// WARNING: This option is for internal Google use only and is not supported
+// for general use. It may change or become a no-op at any time without
+// notice. Clients should not use this option. If you think you need it, open
+// an issue on https://github.com/GoogleCloudPlatform/alloydb-go-connector for
+// design advice.
 func WithOptOutOfAdvancedConnectionCheck() Option {
-	return func(_ *dialerConfig) {}
+	return func(d *dialerConfig) {
+		d.disableMetadataExchange = true
+	}
 }
 
 // WithOptOutOfBuiltInTelemetry disables the internal metric export. By
