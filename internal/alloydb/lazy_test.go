@@ -52,6 +52,7 @@ func TestLazyRefreshCacheConnectionInfo(t *testing.T) {
 	cache := NewLazyRefreshCache(
 		testInstanceURI(), nullLogger{}, c,
 		rsaKey, 30*time.Second, "",
+		false,
 		"some-ua",
 		telv2.NullMetricRecorder{},
 	)
@@ -96,6 +97,7 @@ func TestLazyRefreshCacheForceRefresh(t *testing.T) {
 	cache := NewLazyRefreshCache(
 		testInstanceURI(), nullLogger{}, c,
 		rsaKey, 30*time.Second, "",
+		false,
 		"some-ua",
 		telv2.NullMetricRecorder{},
 	)
@@ -195,6 +197,7 @@ func TestLazyRefreshCacheMetrics(t *testing.T) {
 			cache := NewLazyRefreshCache(
 				testInstanceURI(), nullLogger{}, c,
 				rsaKey, 30*time.Second, "",
+				false,
 				"some-ua",
 				mockRecorder,
 			)
