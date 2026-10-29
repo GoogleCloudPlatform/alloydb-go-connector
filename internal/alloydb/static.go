@@ -25,7 +25,8 @@ import (
 )
 
 type staticPSCConfig struct {
-	PSCDNSName string `json:"pscDnsName"`
+	PSCDNSName     string `json:"pscDnsName"`
+	PSCAutoDNSName string `json:"pscAutoDnsName"`
 }
 
 // staticConnectionInfo is an amalgamation of the generate ephemeral
@@ -109,13 +110,20 @@ func NewStaticConnectionInfoCache(
 	}
 	pool := x509.NewCertPool()
 	pool.AddCert(cc.caCert)
+	ipAddrs := map[string]string{
+		PublicIP:  static.PublicIPAddress,
+		PrivateIP: static.IPAddress,
+		PSC:       static.PSCInstanceConfig.PSCDNSName,
+	}
+	// Match the API path: only record the automatic PSC DNS name when it is
+	// present, so the Dialer's presence check for a fallback address stays
+	// meaningful.
+	if a := static.PSCInstanceConfig.PSCAutoDNSName; a != "" {
+		ipAddrs[PSCAuto] = a
+	}
 	info := ConnectionInfo{
-		Instance: inst,
-		IPAddrs: map[string]string{
-			PublicIP:  static.PublicIPAddress,
-			PrivateIP: static.IPAddress,
-			PSC:       static.PSCInstanceConfig.PSCDNSName,
-		},
+		Instance:   inst,
+		IPAddrs:    ipAddrs,
 		ClientCert: cc.certChain,
 		RootCAs:    pool,
 		Expiration: cc.expiry,
