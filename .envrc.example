@@ -5,6 +5,8 @@ export ALLOYDB_PASS="some-password"
 export ALLOYDB_INSTANCE_NAME="projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>"
 export ALLOYDB_IAM_USER="some-user@my-project.iam"
 export ALLOYDB_IMPERSONATED_USER="some-impersonated-IAM-user"
-# Required only when running without -skip-private-ip / --skip-private-ip.
+# Required only when running private-network integration tests.
 export ALLOYDB_INSTANCE_IP="some-private-IP-address"
 export ALLOYDB_PSC_INSTANCE_URI="projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>"
+# Set to 1 to skip private-IP, PSC, and direct-connection integration tests.
+# export ALLOYDB_SKIP_PRIVATE_IP="1"

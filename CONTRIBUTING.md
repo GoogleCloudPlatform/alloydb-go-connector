@@ -30,7 +30,7 @@ Guidelines](https://opensource.google/conduct/).
 ## Testing
 
 - Unit tests (no AlloyDB instance required): `go test -short ./...`.
-- Integration tests with private-network tests skipped: `./scripts/test_system.sh --skip-private-ip`.
+- Integration tests with private-network tests skipped: `ALLOYDB_SKIP_PRIVATE_IP=1 ./scripts/test_system.sh`.
 - Full test suite, including private IP, PSC, and direct connections (requires access to the AlloyDB instance's VPC): `./scripts/test_system.sh`.
 
 See the [development guide](AGENTS.md) for project background, development

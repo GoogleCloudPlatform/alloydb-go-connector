@@ -106,15 +106,21 @@ your local environment or an ignored `.envrc` file before running tests.
   roles. Credential-option tests additionally require
   `GOOGLE_APPLICATION_CREDENTIALS` to point to a credentials JSON file; a local
   ADC login alone does not satisfy that test requirement.
-- Set `ALLOYDB_PSC_INSTANCE_URI` for the PSC test and run from a network that
-  can reach the private IP and PSC instance.
+- For the full suite, also set `ALLOYDB_INSTANCE_IP` and
+  `ALLOYDB_PSC_INSTANCE_URI`, then run from a network that can reach the
+  private IP and PSC instance. These variables are not required when private
+  network tests are skipped.
 
 ```sh
+# Run integration tests outside the VPC, skipping private IP, PSC, and direct connections.
+ALLOYDB_SKIP_PRIVATE_IP=1 ./scripts/test_system.sh
+
 # Run the integration suite, including private IP, public IP, PSC, and direct connections.
 ./scripts/test_system.sh
 ```
 
-The script enables race detection and coverage. `-short` skips all integration
+The script enables race detection and coverage. `ALLOYDB_SKIP_PRIVATE_IP=1`
+also works with direct `go test` invocations. `-short` skips all integration
 tests. CI runs unit tests across macOS, Windows, and Linux; live integration
 tests run on a configured Linux runner and are skipped for pull requests from
 forks and Dependabot.
