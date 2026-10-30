@@ -57,6 +57,9 @@ const (
 	// metricShutdownTimeout is the maximum amount of time to wait to flush any
 	// remaining metrics when the dialer closes.
 	metricShutdownTimeout = 3 * time.Second
+	// byteReportInterval is how often the dialer reports the bytes sent and
+	// received on each open connection.
+	byteReportInterval = 5 * time.Second
 )
 
 var (
@@ -166,6 +169,14 @@ type Dialer struct {
 	metricsMu       sync.Mutex
 	metricRecorders map[alloydb.InstanceURI]telv2.MetricRecorder
 
+	// connsMu guards conns, the set of open connections whose byte counters
+	// the reporter goroutine sweeps.
+	connsMu sync.Mutex
+	conns   map[*instrumentedConn]struct{}
+	// byteReportInterval is how often the reporter goroutine sweeps conns. It
+	// is a field rather than a constant so tests can shorten it.
+	byteReportInterval time.Duration
+
 	// dialFunc is the function used to connect to the address on the named
 	// network. By default it is golang.org/x/net/proxy#Dial.
 	dialFunc func(cxt context.Context, network, addr string) (net.Conn, error)
@@ -249,8 +260,58 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		iamAuthNTokenProvider:   cfg.iamAuthNTokenProvider,
 		userAgent:               userAgent,
 		buffer:                  newBuffer(),
+		conns:                   map[*instrumentedConn]struct{}{},
+		byteReportInterval:      byteReportInterval,
 	}
+	go d.reportConnBytes()
 	return d, nil
+}
+
+// trackConn registers a connection with the byte counter reporter.
+func (d *Dialer) trackConn(c *instrumentedConn) {
+	d.connsMu.Lock()
+	d.conns[c] = struct{}{}
+	d.connsMu.Unlock()
+}
+
+// untrackConn removes a closed connection from the byte counter reporter.
+func (d *Dialer) untrackConn(c *instrumentedConn) {
+	d.connsMu.Lock()
+	delete(d.conns, c)
+	d.connsMu.Unlock()
+}
+
+// reportConnBytes periodically reports the bytes sent and received on every
+// open connection. A single reporter per Dialer keeps the cost of byte
+// reporting independent of the size of the connection pool; a goroutine and
+// timer per connection costs several KiB of stack each and wakes the scheduler
+// once per connection per interval.
+func (d *Dialer) reportConnBytes() {
+	t := time.NewTicker(d.byteReportInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			d.reportOpenConns()
+		case <-d.closed:
+			return
+		}
+	}
+}
+
+// reportOpenConns reports the byte counters of every open connection.
+func (d *Dialer) reportOpenConns() {
+	// Snapshot the connections so reporting happens without holding connsMu
+	// against Dial and Close.
+	d.connsMu.Lock()
+	conns := make([]*instrumentedConn, 0, len(d.conns))
+	for c := range d.conns {
+		conns = append(conns, c)
+	}
+	d.connsMu.Unlock()
+	for _, c := range conns {
+		c.reportCounters()
+	}
 }
 
 // metricRecorder does a lazy initialization of the metric exporter.
@@ -315,7 +376,9 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		// it off the dial path. The OpenTelemetry record is a sync.Map
 		// lookup plus an atomic add, so record it inline to guarantee it
 		// lands before Dial returns.
-		go tel.RecordDialError(context.Background(), instance, d.dialerID, err)
+		if err != nil {
+			go tel.RecordDialError(context.Background(), instance, d.dialerID, err)
+		}
 		mr.RecordDialCount(ctx, attrs)
 		endDial(err)
 	}()
@@ -439,11 +502,15 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
 
-	return newInstrumentedConn(tlsConn, mr, attrs, func() {
+	var ic *instrumentedConn
+	ic = newInstrumentedConn(tlsConn, mr, attrs, func() {
+		d.untrackConn(ic)
 		n := atomic.AddUint64(cache.openConns, ^uint64(0))
 		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
 		mr.RecordClosedConnection(context.Background(), attrs)
-	}, d.dialerID, inst.String()), nil
+	}, d.dialerID, inst.String())
+	d.trackConn(ic)
+	return ic, nil
 }
 
 // removeCached stops all background refreshes and deletes the connection
@@ -602,22 +669,18 @@ func (b *buffer) put(buf *[]byte) {
 }
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
-// decrement the number of open connects and record the result.
+// decrement the number of open connects and record the result. Byte counters
+// are reported periodically by the Dialer's reporter goroutine, which the
+// caller is responsible for registering the connection with.
 func newInstrumentedConn(conn net.Conn, mr telv2.MetricRecorder, a telv2.Attributes, closeFunc func(), dialerID, instance string) *instrumentedConn {
-	ctx, cancel := context.WithCancel(context.Background())
-	c := &instrumentedConn{
+	return &instrumentedConn{
 		Conn:           conn,
 		closeFunc:      closeFunc,
 		dialerID:       dialerID,
 		instance:       instance,
 		metricRecorder: mr,
 		attrs:          a,
-		reportTicker:   time.NewTicker(5 * time.Second),
-		stopReporter:   cancel,
 	}
-
-	go c.report(ctx)
-	return c
 }
 
 // instrumentedConn wraps a net.Conn and invokes closeFunc when the connection
@@ -632,15 +695,15 @@ type instrumentedConn struct {
 	attrs          telv2.Attributes
 	bytesRead      atomic.Int64
 	bytesWritten   atomic.Int64
-	reportTicker   *time.Ticker
-	stopReporter   func()
 }
 
 // Read delegates to the underlying net.Conn interface and records number of
 // bytes read.
 func (i *instrumentedConn) Read(b []byte) (int, error) {
 	bytesRead, err := i.Conn.Read(b)
-	if err == nil {
+	// A read may return bytes and an error together, so count whatever was
+	// transferred regardless of the error.
+	if bytesRead > 0 {
 		i.bytesRead.Add(int64(bytesRead))
 	}
 	return bytesRead, err
@@ -650,7 +713,9 @@ func (i *instrumentedConn) Read(b []byte) (int, error) {
 // bytes written.
 func (i *instrumentedConn) Write(b []byte) (int, error) {
 	bytesWritten, err := i.Conn.Write(b)
-	if err == nil {
+	// A write may report a partial write and an error together, so count
+	// whatever was transferred regardless of the error.
+	if bytesWritten > 0 {
 		i.bytesWritten.Add(int64(bytesWritten))
 	}
 	return bytesWritten, err
@@ -661,7 +726,6 @@ func (i *instrumentedConn) Write(b []byte) (int, error) {
 // report will only execute once.
 func (i *instrumentedConn) Close() error {
 	i.closeOnce.Do(func() {
-		i.stopReporter()
 		i.reportCounters()
 		i.closeFunc()
 	})
@@ -671,22 +735,17 @@ func (i *instrumentedConn) Close() error {
 func (i *instrumentedConn) reportCounters() {
 	bytesRead := i.bytesRead.Swap(0)
 	bytesWritten := i.bytesWritten.Swap(0)
-	tel.RecordBytesReceived(context.Background(), bytesRead, i.instance, i.dialerID)
-	tel.RecordBytesSent(context.Background(), bytesWritten, i.instance, i.dialerID)
-	i.metricRecorder.RecordBytesRxCount(context.Background(), int64(bytesRead), i.attrs)
-	i.metricRecorder.RecordBytesTxCount(context.Background(), int64(bytesWritten), i.attrs)
-}
-
-func (i *instrumentedConn) report(ctx context.Context) {
-	defer i.reportTicker.Stop()
-	for {
-		select {
-		case <-i.reportTicker.C:
-			i.reportCounters()
-		case <-ctx.Done():
-			return
-		}
+	// Recording a counter is not free: it allocates and, for OpenCensus,
+	// serializes through a single worker goroutine. An idle connection has
+	// nothing to add to either counter, so skip the work entirely.
+	if bytesRead == 0 && bytesWritten == 0 {
+		return
 	}
+	ctx := context.Background()
+	tel.RecordBytesReceived(ctx, bytesRead, i.instance, i.dialerID)
+	tel.RecordBytesSent(ctx, bytesWritten, i.instance, i.dialerID)
+	i.metricRecorder.RecordBytesRxCount(ctx, bytesRead, i.attrs)
+	i.metricRecorder.RecordBytesTxCount(ctx, bytesWritten, i.attrs)
 }
 
 // Close closes the Dialer; it prevents the Dialer from refreshing the information
@@ -705,6 +764,10 @@ func (d *Dialer) Close() error {
 		_ = i.Close()
 	}
 	d.lock.Unlock()
+
+	// Flush the byte counters of any still-open connections before the
+	// exporters shut down, otherwise their last interval of traffic is lost.
+	d.reportOpenConns()
 
 	d.metricsMu.Lock()
 	ctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
