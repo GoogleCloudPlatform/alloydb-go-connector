@@ -4,3 +4,7 @@
 
 # direnv
 .envrc
+test_results.txt
+.tools
+test-results
+build.sh
