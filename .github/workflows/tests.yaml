@@ -79,6 +79,7 @@ jobs:
             ALLOYDB_INSTANCE_IP:${{ vars.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_INSTANCE_IP
             ALLOYDB_IAM_USER:${{ vars.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_GO_IAM_USER
             ALLOYDB_PSC_INSTANCE_URI:${{ vars.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_PSC_INSTANCE_URI
+            ALLOYDB_WRITE_ENDPOINT:${{ vars.GOOGLE_CLOUD_PROJECT }}/ALLOYDB_WRITE_ENDPOINT
 
       - name: Run tests
         env:
@@ -89,6 +90,7 @@ jobs:
           ALLOYDB_INSTANCE_NAME: '${{ steps.secrets.outputs.ALLOYDB_INSTANCE_NAME }}'
           ALLOYDB_INSTANCE_IP: '${{ steps.secrets.outputs.ALLOYDB_INSTANCE_IP }}'
           ALLOYDB_PSC_INSTANCE_URI: '${{ steps.secrets.outputs.ALLOYDB_PSC_INSTANCE_URI }}'
+          ALLOYDB_WRITE_ENDPOINT: '${{ steps.secrets.outputs.ALLOYDB_WRITE_ENDPOINT }}'
         # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
         shell: bash
         run: ./scripts/test_system.sh | tee test_results.txt

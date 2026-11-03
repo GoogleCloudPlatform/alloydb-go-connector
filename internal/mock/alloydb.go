@@ -73,6 +73,14 @@ func WithCertExpiry(expiry time.Time) Option {
 	}
 }
 
+// WithDNSNames adds DNS names (e.g. a write endpoint) as SANs on the server
+// certificate.
+func WithDNSNames(names ...string) Option {
+	return func(f *FakeAlloyDBInstance) {
+		f.dnsNames = append(f.dnsNames, names...)
+	}
+}
+
 // FakeAlloyDBInstance represents the server side proxy.
 type FakeAlloyDBInstance struct {
 	project string
@@ -84,6 +92,8 @@ type FakeAlloyDBInstance struct {
 	uid        string
 	serverName string
 	certExpiry time.Time
+	// dnsNames are extra DNS SANs on the server certificate.
+	dnsNames []string
 
 	rootCACert *x509.Certificate
 	rootKey    *rsa.PrivateKey
@@ -194,6 +204,7 @@ func NewFakeInstance(proj, reg, clust, name string, opts ...Option) FakeAlloyDBI
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1)},
+		DNSNames:              f.dnsNames,
 	}
 	signedServer, err := x509.CreateCertificate(
 		rand.Reader, serverTemplate, rootCert, &serverKey.PublicKey, rootCAKey)

@@ -221,6 +221,10 @@ type dialerConfig struct {
 	disableBuiltInTelemetry bool
 
 	staticConnInfo io.Reader
+
+	// useDNSResolver enables resolving DNS names (e.g. AlloyDB write
+	// endpoints) into instance URIs using TXT records.
+	useDNSResolver bool
 }
 
 // WithUniverseDomain configures the underlying AlloyDB Admin API client and
@@ -492,6 +496,22 @@ func WithOptOutOfAdvancedConnectionCheck() Option {
 func WithOptOutOfBuiltInTelemetry() Option {
 	return func(d *dialerConfig) {
 		d.disableBuiltInTelemetry = true
+	}
+}
+
+// WithDNSResolver configures Dial to also accept a DNS name, such as an
+// AlloyDB write endpoint, in addition to an instance URI. When given a DNS
+// name, Dial resolves its TXT record, which must hold an instance URI in the
+// format
+// projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>,
+// and connects to that instance. The TLS connection verifies the server
+// certificate against the DNS name.
+//
+// AlloyDB write endpoint DNS names only resolve from within the VPC network of
+// the cluster.
+func WithDNSResolver() Option {
+	return func(d *dialerConfig) {
+		d.useDNSResolver = true
 	}
 }
 
