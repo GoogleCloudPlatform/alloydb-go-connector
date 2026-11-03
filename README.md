@@ -286,6 +286,9 @@ Pass `WithDNSResolver()` to connect using an AlloyDB write endpoint DNS name
 (whose TXT record holds the target instance URI) in addition to an instance URI.
 Write endpoint DNS names only resolve from within the [VPC Network][vpc] of the
 cluster.
+By default, the connector re-checks the DNS TXT record every 30 seconds (configurable
+with `WithFailoverPeriod`) and closes existing connections when the target instance
+changes so the connection pool can reconnect to the new primary.
 
 **With database/sql:**
 

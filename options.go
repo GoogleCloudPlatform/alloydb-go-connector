@@ -44,6 +44,9 @@ const (
 
 	// Default GDU API Domain.
 	defaultUniverseDomain = "googleapis.com"
+	// defaultFailoverPeriod is the default period for checking if a DNS
+	// write endpoint target has changed.
+	defaultFailoverPeriod = 30 * time.Second
 )
 
 // An Option is an option for configuring a Dialer.
@@ -55,6 +58,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		dialFunc:       proxy.Dial,
 		logger:         nullLogger{},
 		userAgents:     []string{userAgent},
+		failoverPeriod: defaultFailoverPeriod,
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -69,6 +73,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		d.credentials != nil && d.credentialsJSON != nil:                              "incompatible options: WithCredentials cannot be used with WithCredentialsJSON",
 		d.credentials != nil && d.tokenProvider != nil:                                "incompatible options: WithCredentials cannot be used with WithTokenSource",
 		d.adminAPIEndpoint != "" && d.clientUniverseDomain() != defaultUniverseDomain: "incompatible options: WithAdminAPIEndpoint cannot be used with TPC UniverseDomain",
+		d.failoverPeriod < 0: "invalid option: WithFailoverPeriod must be greater than or equal to 0",
 	}
 	for bad, msg := range badPairs {
 		if bad {
@@ -225,6 +230,9 @@ type dialerConfig struct {
 	// useDNSResolver enables resolving DNS names (e.g. AlloyDB write
 	// endpoints) into instance URIs using TXT records.
 	useDNSResolver bool
+	// failoverPeriod is the frequency at which the dialer checks DNS TXT
+	// records for changes.
+	failoverPeriod time.Duration
 }
 
 // WithUniverseDomain configures the underlying AlloyDB Admin API client and
@@ -512,6 +520,18 @@ func WithOptOutOfBuiltInTelemetry() Option {
 func WithDNSResolver() Option {
 	return func(d *dialerConfig) {
 		d.useDNSResolver = true
+	}
+}
+
+// WithFailoverPeriod configures how frequently the Dialer checks the DNS TXT
+// record of instances configured using DNS names (with WithDNSResolver). When
+// a target change is detected, the Dialer closes existing connections dialed
+// through that DNS name so the connection pool can reconnect to the new
+// instance. By default, this is 30 seconds. If set to 0, the connector will
+// only check for DNS target changes when establishing a new connection.
+func WithFailoverPeriod(f time.Duration) Option {
+	return func(d *dialerConfig) {
+		d.failoverPeriod = f
 	}
 }
 
