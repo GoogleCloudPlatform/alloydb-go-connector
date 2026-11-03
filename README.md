@@ -280,6 +280,33 @@ config.ConnConfig.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, e
 
 [psc]: https://cloud.google.com/alloydb/docs/psc-overview
 
+### Write Endpoint (DNS)
+
+Pass `WithDNSResolver()` to connect using an AlloyDB write endpoint DNS name
+(whose TXT record holds the target instance URI) in addition to an instance URI.
+Write endpoint DNS names only resolve from within the [VPC Network][vpc] of the
+cluster.
+
+**With database/sql:**
+
+```go
+cleanup, err := postgres.RegisterDriver("alloydb",
+    alloydbconn.WithDNSResolver(),
+)
+// Pass the write endpoint DNS name as the host in the DSN:
+// "host=my-endpoint.global.alloydb-psa.goog user=... password=... dbname=... sslmode=disable"
+```
+
+**With pgx:**
+
+```go
+d, err := alloydbconn.NewDialer(ctx, alloydbconn.WithDNSResolver())
+// ...
+config.ConnConfig.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
+    return d.Dial(ctx, "my-endpoint.global.alloydb-psa.goog")
+}
+```
+
 ## IAM Database Authentication
 
 The connector supports [Automatic IAM database authentication][iam-db-authn].

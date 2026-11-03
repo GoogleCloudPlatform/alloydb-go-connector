@@ -174,6 +174,11 @@ type Dialer struct {
 	userAgent             string
 
 	buffer *buffer
+
+	// resolver converts the instance string passed to Dial into a
+	// DialTarget. By default it parses instance URIs; with
+	// WithDNSResolver it resolves DNS names via TXT records.
+	resolver alloydb.InstanceResolver
 }
 
 type nullLogger struct{}
@@ -230,6 +235,10 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	if err != nil {
 		return nil, err
 	}
+	resolver := alloydb.NewURIResolver()
+	if cfg.useDNSResolver {
+		resolver = alloydb.NewDNSResolver(net.DefaultResolver)
+	}
 	d := &Dialer{
 		closed:                  make(chan struct{}),
 		cache:                   make(map[alloydb.InstanceURI]monitoredCache),
@@ -249,6 +258,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		iamAuthNTokenProvider:   cfg.iamAuthNTokenProvider,
 		userAgent:               userAgent,
 		buffer:                  newBuffer(),
+		resolver:                resolver,
 	}
 	return d, nil
 }
@@ -277,6 +287,10 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst alloydb.InstanceURI) t
 // Dial returns a net.Conn connected to the specified AlloyDB instance. The
 // instance argument must be the instance's URI, which is in the format
 // projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>
+//
+// If the Dialer was created with WithDNSResolver, instance may also be a DNS
+// name (such as an AlloyDB write endpoint) whose TXT record holds an instance
+// URI.
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
 	select {
 	case <-d.closed:
@@ -288,16 +302,21 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		opt(&cfg)
 	}
 
-	inst, err := alloydb.ParseInstURI(instance)
+	startTime := time.Now()
+	target, err := d.resolver.Resolve(ctx, instance)
 	if err != nil {
+		d.logger.Debugf(ctx, "[%v] Failed to resolve instance: %v", instance, err)
 		return nil, err
+	}
+	inst := target.URI
+	if target.HasDomainName() {
+		d.logger.Debugf(ctx, "[%v] Resolved domain name", target.String())
 	}
 	mr := d.metricRecorder(ctx, inst)
 
 	var (
-		startTime = time.Now()
-		endDial   tel.EndSpanFunc
-		attrs     = telv2.Attributes{
+		endDial tel.EndSpanFunc
+		attrs   = telv2.Attributes{
 			IAMAuthN:    cfg.iamAuthN,
 			UserAgent:   d.userAgent,
 			RefreshType: telv2.RefreshAheadType,
@@ -393,14 +412,20 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		}
 	}
 
+	// The PSC, private, and public IP all appear in the certificate as
+	// SAN. Use the server name that corresponds to the requested
+	// connection path. When dialing by DNS name (e.g. a write endpoint),
+	// the certificate also carries that DNS name as a SAN, so verify
+	// against it instead.
+	serverName := addr
+	if target.HasDomainName() {
+		serverName = target.DomainName
+	}
 	c := &tls.Config{
 		Certificates: []tls.Certificate{ci.ClientCert},
 		RootCAs:      ci.RootCAs,
-		// The PSC, private, and public IP all appear in the certificate as
-		// SAN. Use the server name that corresponds to the requested
-		// connection path.
-		ServerName: addr,
-		MinVersion: tls.VersionTLS13,
+		ServerName:   serverName,
+		MinVersion:   tls.VersionTLS13,
 	}
 	tlsConn := tls.Client(conn, c)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
