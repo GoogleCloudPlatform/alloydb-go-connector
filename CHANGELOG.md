@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.19.3...v1.20.0) (2026-11-04)
+
+
+### Features
+
+* PSC Auto DNS Fallback logic ([#814](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/814)) ([d55ba6b](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/d55ba6b9f89c95294a082068ae0b2d131d996949))
+
 ## [1.19.3](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.19.2...v1.19.3) (2026-10-28)
 
 
