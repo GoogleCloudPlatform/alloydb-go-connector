@@ -18,12 +18,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"sync"
 	"testing"
 	"time"
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/internal/mock"
+	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
 	"go.opencensus.io/stats/view"
 	"google.golang.org/api/option"
 )
@@ -199,6 +201,9 @@ func TestDialerWithMetrics(t *testing.T) {
 		t.Fatalf("conn.Write failed: %v", err)
 	}
 	defer conn2.Close()
+	// Flush the byte counters now, so the assertions below don't have to wait
+	// for the reporting interval to elapse.
+	d.reportOpenConns()
 	// dial a bogus instance
 	_, err = d.Dial(ctx,
 		"projects/my-project/locations/my-region/clusters/"+
@@ -220,4 +225,75 @@ func TestDialerWithMetrics(t *testing.T) {
 	// failure metrics from dialing bogus instance
 	wantCountMetric(t, "alloydbconn/dial_failure_count", spy.data())
 	wantCountMetric(t, "alloydbconn/refresh_failure_count", spy.data())
+}
+
+// byteCountRecorder signals on a channel whenever byte counters are recorded,
+// so tests can synchronize on the dialer's reporter goroutine instead of
+// sleeping.
+type byteCountRecorder struct {
+	telv2.NullMetricRecorder
+	rx chan int64
+	tx chan int64
+}
+
+func (r *byteCountRecorder) RecordBytesRxCount(_ context.Context, b int64, _ telv2.Attributes) {
+	r.rx <- b
+}
+
+func (r *byteCountRecorder) RecordBytesTxCount(_ context.Context, b int64, _ telv2.Attributes) {
+	r.tx <- b
+}
+
+// nopConn is a net.Conn that does nothing, for connections that are never
+// read from or written to.
+type nopConn struct{ net.Conn }
+
+func (nopConn) Close() error { return nil }
+
+// TestReportConnBytes verifies the dialer's reporter goroutine reports the
+// byte counters of a connection that is still open, and that it skips
+// connections with no traffic to report.
+func TestReportConnBytes(t *testing.T) {
+	rec := &byteCountRecorder{rx: make(chan int64, 1), tx: make(chan int64, 1)}
+	d := &Dialer{
+		closed:             make(chan struct{}),
+		conns:              map[*instrumentedConn]struct{}{},
+		byteReportInterval: time.Millisecond,
+	}
+	conn := newInstrumentedConn(
+		nopConn{}, rec, telv2.Attributes{}, func() {}, "dialer-id", testInstanceURI,
+	)
+	conn.bytesRead.Store(11)
+	conn.bytesWritten.Store(22)
+	d.trackConn(conn)
+
+	go d.reportConnBytes()
+	defer close(d.closed)
+
+	select {
+	case got := <-rec.rx:
+		if got != 11 {
+			t.Fatalf("bytes received: want = 11, got = %v", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for bytes received to be reported")
+	}
+	select {
+	case got := <-rec.tx:
+		if got != 22 {
+			t.Fatalf("bytes sent: want = 22, got = %v", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for bytes sent to be reported")
+	}
+
+	// The counters are drained, so further sweeps have nothing to report and
+	// should not record anything at all.
+	select {
+	case got := <-rec.rx:
+		t.Fatalf("want no report for an idle connection, got = %v", got)
+	case got := <-rec.tx:
+		t.Fatalf("want no report for an idle connection, got = %v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
 }

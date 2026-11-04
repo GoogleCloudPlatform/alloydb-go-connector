@@ -56,6 +56,10 @@ const (
 	ClientID = "client_uid"
 	// connectorType is one of go or auth-proxy
 	connectorType = "connector_type"
+	// connectorTypeGo is the connector_type value for this library.
+	connectorTypeGo = "go"
+	// connectorTypeAuthProxy is the connector_type value for the Auth Proxy.
+	connectorTypeAuthProxy = "auth_proxy"
 	// authType is one of iam or built-in
 	authType = "auth_type"
 	// isCacheHit reports whether connection info was available in the cache
@@ -219,7 +223,27 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		mBytesTx:      mBytesTx,
 		mBytesRx:      mBytesRx,
 		mRefreshCount: mRefreshCount,
+		connTypeOpts:  newConnTypeOpts(),
 	}
+}
+
+// newConnTypeOpts precomputes the measurement option for every possible
+// connector_type value.
+//
+// attribute.NewSet allocates and sorts its input on every call, so building
+// the set at record time is the most expensive part of recording a
+// measurement. The byte counters are recorded for every open connection on
+// every reporting interval, so precompute the sets they need. The remaining
+// metrics are recorded at most once per dial or refresh and so are not worth
+// the extra bookkeeping.
+func newConnTypeOpts() map[string]metric.MeasurementOption {
+	opts := make(map[string]metric.MeasurementOption, 2)
+	for _, ct := range []string{connectorTypeGo, connectorTypeAuthProxy} {
+		opts[ct] = metric.WithAttributeSet(attribute.NewSet(
+			attribute.String(connectorType, ct),
+		))
+	}
+	return opts
 }
 
 // metricRecorder holds the various counters that track internal operations.
@@ -233,6 +257,21 @@ type metricRecorder struct {
 	mBytesTx      metric.Int64Counter
 	mBytesRx      metric.Int64Counter
 	mRefreshCount metric.Int64Counter
+	// connTypeOpts maps a connector_type value to a precomputed measurement
+	// option holding just that attribute. It is read-only after construction.
+	connTypeOpts map[string]metric.MeasurementOption
+}
+
+// connTypeOpt returns the precomputed measurement option for a measurement
+// whose only attribute is connector_type.
+func (m *metricRecorder) connTypeOpt(a Attributes) metric.MeasurementOption {
+	ct := connectorTypeValue(a.UserAgent)
+	if opt, ok := m.connTypeOpts[ct]; ok {
+		return opt
+	}
+	return metric.WithAttributeSet(attribute.NewSet(
+		attribute.String(connectorType, ct),
+	))
 }
 
 // Shutdown should be called when the MetricRecorder is no longer needed.
@@ -245,9 +284,9 @@ func (m *metricRecorder) Shutdown(ctx context.Context) error {
 
 func connectorTypeValue(userAgent string) string {
 	if strings.Contains(userAgent, "auth-proxy") {
-		return "auth_proxy"
+		return connectorTypeAuthProxy
 	}
-	return "go"
+	return connectorTypeGo
 }
 
 func authTypeValue(iamAuthn bool) string {
@@ -277,21 +316,13 @@ type Attributes struct {
 // RecordBytesRxCount records the number of bytes received for a particular
 // instance.
 func (m *metricRecorder) RecordBytesRxCount(ctx context.Context, bytes int64, a Attributes) {
-	m.mBytesRx.Add(ctx, bytes,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
-		)),
-	)
+	m.mBytesRx.Add(ctx, bytes, m.connTypeOpt(a))
 }
 
 // RecordBytesTxCount records the number of bytes send for a paritcular
 // instance.
 func (m *metricRecorder) RecordBytesTxCount(ctx context.Context, bytes int64, a Attributes) {
-	m.mBytesTx.Add(ctx, bytes,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
-		)),
-	)
+	m.mBytesTx.Add(ctx, bytes, m.connTypeOpt(a))
 }
 
 // RecordDialCount records increments the number of dial attempts.
@@ -308,11 +339,7 @@ func (m *metricRecorder) RecordDialCount(ctx context.Context, a Attributes) {
 // RecordDialLatency records a latency measurement for a particular dial
 // attempt.
 func (m *metricRecorder) RecordDialLatency(ctx context.Context, latencyMS int64, a Attributes) {
-	m.mDialLatency.Record(ctx, float64(latencyMS),
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(connectorType, connectorTypeValue(a.UserAgent)),
-		)),
-	)
+	m.mDialLatency.Record(ctx, float64(latencyMS), m.connTypeOpt(a))
 }
 
 // RecordOpenConnection increments the number of open connections.
