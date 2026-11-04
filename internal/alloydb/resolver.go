@@ -34,10 +34,8 @@ func IsValidDomain(dn string) bool {
 	return domainNameRegex.MatchString(strings.ToLower(dn))
 }
 
-// DialTarget is the result of resolving the instance string passed to
-// Dial. It keeps the instance identity (URI) separate from how the caller
-// addressed it (DomainName), so that InstanceURI remains a pure identity that
-// is safe to use as a cache or metrics key.
+// DialTarget is the result of resolving the connection string passed to
+// Dial.
 type DialTarget struct {
 	// URI identifies the AlloyDB instance.
 	URI InstanceURI

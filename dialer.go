@@ -119,8 +119,25 @@ type connectionInfoCache interface {
 // monitoredCache is a wrapper around a connectionInfoCache that tracks the
 // number of connections to the associated instance.
 type monitoredCache struct {
+	uri       alloydb.InstanceURI
 	openConns *uint64
 	connectionInfoCache
+}
+
+// cacheKey keys Dialer.cache by normalized domain name for DNS dials and by
+// InstanceURI for direct URI dials. Dialing the same instance via both its DNS
+// write endpoint and its instance URI intentionally keeps two cache entries
+// (with separate certificate refreshes).
+type cacheKey struct {
+	domainName string
+	uri        alloydb.InstanceURI
+}
+
+func createKey(t alloydb.DialTarget) cacheKey {
+	if t.HasDomainName() {
+		return cacheKey{domainName: t.DomainName}
+	}
+	return cacheKey{uri: t.URI}
 }
 
 // A Dialer is used to create connections to AlloyDB instance.
@@ -128,7 +145,7 @@ type monitoredCache struct {
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
 	lock           sync.RWMutex
-	cache          map[alloydb.InstanceURI]monitoredCache
+	cache          map[cacheKey]monitoredCache
 	keyGenerator   *keyGenerator
 	refreshTimeout time.Duration
 	// closed reports if the dialer has been closed.
@@ -241,7 +258,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 	d := &Dialer{
 		closed:                  make(chan struct{}),
-		cache:                   make(map[alloydb.InstanceURI]monitoredCache),
+		cache:                   make(map[cacheKey]monitoredCache),
 		lazyRefresh:             cfg.lazyRefresh,
 		disableMetadataExchange: cfg.disableMetadataExchange,
 		disableBuiltInMetrics:   cfg.disableBuiltInTelemetry,
@@ -341,7 +358,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 
 	var endInfo tel.EndSpanFunc
 	ctx, endInfo = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.InstanceInfo")
-	cache, cacheHit, err := d.connectionInfoCache(ctx, inst, mr)
+	cache, cacheHit, err := d.connectionInfoCache(ctx, target, mr)
 	attrs.CacheHit = cacheHit
 	if err != nil {
 		attrs.DialStatus = telv2.DialCacheError
@@ -351,7 +368,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	ci, err := cache.ConnectionInfo(ctx)
 	if err != nil {
 		attrs.DialStatus = telv2.DialCacheError
-		d.removeCached(ctx, inst, cache, err)
+		d.removeCached(ctx, target, cache, err)
 		endInfo(err)
 		return nil, err
 	}
@@ -368,14 +385,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		// Block on refreshed connection info
 		ci, err = cache.ConnectionInfo(ctx)
 		if err != nil {
-			d.removeCached(ctx, inst, cache, err)
+			d.removeCached(ctx, target, cache, err)
 			attrs.DialStatus = telv2.DialCacheError
 			return nil, err
 		}
 	}
 	addr, ok := ci.IPAddrs[cfg.ipType]
 	if !ok {
-		d.removeCached(ctx, inst, cache, err)
+		d.removeCached(ctx, target, cache, err)
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", cfg.ipType),
 			inst.String(),
@@ -475,18 +492,21 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 // info cache from the map of caches.
 func (d *Dialer) removeCached(
 	ctx context.Context,
-	i alloydb.InstanceURI, c connectionInfoCache, err error,
+	t alloydb.DialTarget, c connectionInfoCache, err error,
 ) {
 	d.logger.Debugf(
 		ctx,
 		"[%v] Removing connection info from cache: %v",
-		i.String(),
+		t.String(),
 		err,
 	)
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	c.Close()
-	delete(d.cache, i)
+	key := createKey(t)
+	if cur, ok := d.cache[key]; ok && cur == c {
+		delete(d.cache, key)
+	}
 }
 
 func invalidClientCert(
@@ -744,15 +764,23 @@ func (d *Dialer) Close() error {
 
 }
 
-func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceURI, mr telv2.MetricRecorder) (monitoredCache, bool, error) {
+func (d *Dialer) connectionInfoCache(ctx context.Context, target alloydb.DialTarget, mr telv2.MetricRecorder) (monitoredCache, bool, error) {
+	key := createKey(target)
+	uri := target.URI
 	d.lock.RLock()
-	c, ok := d.cache[uri]
+	c, ok := d.cache[key]
 	d.lock.RUnlock()
-	if !ok {
+	if !ok || c.uri != uri {
 		d.lock.Lock()
 		defer d.lock.Unlock()
 		// Recheck to ensure instance wasn't created between locks
-		c, ok = d.cache[uri]
+		c, ok = d.cache[key]
+		if ok && c.uri != uri {
+			d.logger.Debugf(ctx, "[%v] Domain name target changed from %v to %v, closing old cache",
+				target.DomainName, c.uri.String(), uri.String())
+			_ = c.Close()
+			ok = false
+		}
 		if !ok {
 			k, err := d.keyGenerator.rsaKey()
 			if err != nil {
@@ -795,8 +823,8 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 				d.logger.Debugf(ctx, "[%v] Connection info cache = refresh ahead", uri.String())
 			}
 			var open uint64
-			c = monitoredCache{openConns: &open, connectionInfoCache: cache}
-			d.cache[uri] = c
+			c = monitoredCache{uri: uri, openConns: &open, connectionInfoCache: cache}
+			d.cache[key] = c
 		}
 	}
 	return c, ok, nil
