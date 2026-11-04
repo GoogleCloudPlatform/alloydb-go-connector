@@ -64,7 +64,7 @@ func TestRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admin API client error: %v", err)
 	}
-	r := newAdminAPIClient(cl, rsaKey, testDialerID)
+	r := newAdminAPIClient(cl, rsaKey, testDialerID, false)
 	res, err := r.connectionInfo(context.Background(), cn)
 	if err != nil {
 		t.Fatalf("performRefresh unexpectedly failed with error: %v", err)
@@ -133,7 +133,7 @@ func TestRefreshFailsFast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admin API client error: %v", err)
 	}
-	r := newAdminAPIClient(cl, rsaKey, testDialerID)
+	r := newAdminAPIClient(cl, rsaKey, testDialerID, false)
 
 	_, err = r.connectionInfo(context.Background(), cn)
 	if err != nil {
