@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -108,6 +109,50 @@ func TestPgxConnect(t *testing.T) {
 				return connectPgxWithPSC(
 					ctx, alloydbPSCInstanceName,
 					alloydbUser, alloydbPass, alloydbDB,
+					alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
+				)
+			},
+		},
+		{
+			// Fails every dial to the instance's manual PSC DNS name, so the
+			// connection can only be established by falling back to the
+			// automatic PSC DNS name. The TLS handshake doubles as the
+			// assertion: it only succeeds if the Dialer derived its SNI from
+			// the endpoint it actually reached rather than from the manual
+			// name it started with.
+			//
+			// The instance named by ALLOYDB_PSC_INSTANCE_URI must have an
+			// automatic PSC DNS name, or there is nothing to fall back to.
+			desc: "PSC with automatic DNS fallback",
+			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
+				// The manual PSC DNS name is whichever address the Dialer
+				// tries first.
+				var (
+					mu     sync.Mutex
+					manual string
+				)
+				failManualPSC := func(
+					ctx context.Context, network, addr string,
+				) (net.Conn, error) {
+					mu.Lock()
+					if manual == "" {
+						manual = addr
+					}
+					isManual := addr == manual
+					mu.Unlock()
+					if isManual {
+						return nil, fmt.Errorf(
+							"simulated failure dialing manual PSC DNS name %v",
+							addr,
+						)
+					}
+					var d net.Dialer
+					return d.DialContext(ctx, network, addr)
+				}
+				return connectPgxWithPSC(
+					ctx, alloydbPSCInstanceName,
+					alloydbUser, alloydbPass, alloydbDB,
+					alloydbconn.WithDialFunc(failManualPSC),
 					alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 				)
 			},
