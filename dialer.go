@@ -176,6 +176,12 @@ type Dialer struct {
 	buffer *buffer
 }
 
+// connIDCounter is the source of connection IDs used in debug logs to
+// correlate the log lines of a single Dial attempt (and the eventual close of
+// the resulting connection). It is process-wide so that IDs remain unique even
+// when multiple Dialers share a logger.
+var connIDCounter atomic.Uint64
+
 type nullLogger struct{}
 
 func (nullLogger) Debugf(context.Context, string, ...any) {}
@@ -293,6 +299,8 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		return nil, err
 	}
 	mr := d.metricRecorder(ctx, inst)
+	// connID identifies this dial attempt in debug logs.
+	connID := connIDCounter.Add(1)
 
 	var (
 		startTime = time.Now()
@@ -332,7 +340,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	ci, err := cache.ConnectionInfo(ctx)
 	if err != nil {
 		attrs.DialStatus = telv2.DialCacheError
-		d.removeCached(ctx, inst, cache, err)
+		d.removeCached(ctx, inst, connID, cache, err)
 		endInfo(err)
 		return nil, err
 	}
@@ -343,20 +351,20 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	// The TLS handshake will not fail on an expired client certificate. It's
 	// not until the first read where the client cert error will be surfaced.
 	// So check that the certificate is valid before proceeding.
-	if invalidClientCert(ctx, inst, d.logger, ci.Expiration) {
-		d.logger.Debugf(ctx, "[%v] Refreshing certificate now", inst.String())
+	if invalidClientCert(ctx, inst, connID, d.logger, ci.Expiration) {
+		d.logger.Debugf(ctx, "[%v] [connID=%d] Refreshing certificate now", inst.String(), connID)
 		cache.ForceRefresh()
 		// Block on refreshed connection info
 		ci, err = cache.ConnectionInfo(ctx)
 		if err != nil {
-			d.removeCached(ctx, inst, cache, err)
+			d.removeCached(ctx, inst, connID, cache, err)
 			attrs.DialStatus = telv2.DialCacheError
 			return nil, err
 		}
 	}
 	addr, ok := ci.IPAddrs[cfg.ipType]
 	if !ok {
-		d.removeCached(ctx, inst, cache, err)
+		d.removeCached(ctx, inst, connID, cache, err)
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", cfg.ipType),
 			inst.String(),
@@ -373,10 +381,10 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if cfg.dialFunc != nil {
 		f = cfg.dialFunc
 	}
-	d.logger.Debugf(ctx, "[%v] Dialing %v", inst.String(), hostPort)
+	d.logger.Debugf(ctx, "[%v] [connID=%d] Dialing %v", inst.String(), connID, hostPort)
 	conn, err = f(ctx, "tcp", hostPort)
 	if err != nil {
-		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", inst.String(), hostPort, err)
+		d.logger.Debugf(ctx, "[%v] [connID=%d] Dialing %v failed: %v", inst.String(), connID, hostPort, err)
 		// refresh the instance info in case it caused the connection failure
 		cache.ForceRefresh()
 		attrs.DialStatus = telv2.DialTCPError
@@ -404,19 +412,19 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	tlsConn := tls.Client(conn, c)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		d.logger.Debugf(ctx, "[%v] TLS handshake failed: %v", inst.String(), err)
+		d.logger.Debugf(ctx, "[%v] [connID=%d] TLS handshake failed: %v", inst.String(), connID, err)
 		// refresh the instance info in case it caused the handshake failure
 		cache.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
 		attrs.DialStatus = telv2.DialTLSError
 		return nil, errtype.NewDialError("handshake failed", inst.String(), err)
 	}
-	d.logger.Debugf(ctx, "[%v] Connected securely to %v", inst.String(), hostPort)
+	d.logger.Debugf(ctx, "[%v] [connID=%d] Connected securely to %v", inst.String(), connID, hostPort)
 
 	if !d.disableMetadataExchange {
 		// The metadata exchange must occur after the TLS connection is established
 		// to avoid leaking sensitive information.
-		err = d.metadataExchange(ctx, tlsConn, cfg.iamAuthN, inst.String())
+		err = d.metadataExchange(ctx, tlsConn, cfg.iamAuthN, inst.String(), connID)
 		if err != nil {
 			_ = tlsConn.Close() // best effort close attempt
 			attrs.DialStatus = telv2.DialMDXError
@@ -425,7 +433,10 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	attrs.DialStatus = telv2.DialSuccess
 
-	latency := time.Since(startTime).Milliseconds()
+	setupDuration := time.Since(startTime)
+	d.logger.Debugf(ctx, "[%v] [connID=%d] Connection established (setupDuration=%v)",
+		inst.String(), connID, setupDuration)
+	latency := setupDuration.Milliseconds()
 	// Increment open connections synchronously before returning the
 	// connection to the caller. This prevents a race where the caller
 	// could close the connection before a background goroutine increments
@@ -443,6 +454,8 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		n := atomic.AddUint64(cache.openConns, ^uint64(0))
 		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
 		mr.RecordClosedConnection(context.Background(), attrs)
+		d.logger.Debugf(context.Background(), "[%v] [connID=%d] Connection closed (duration=%v)",
+			inst.String(), connID, time.Since(startTime))
 	}, d.dialerID, inst.String()), nil
 }
 
@@ -450,12 +463,13 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 // info cache from the map of caches.
 func (d *Dialer) removeCached(
 	ctx context.Context,
-	i alloydb.InstanceURI, c connectionInfoCache, err error,
+	i alloydb.InstanceURI, connID uint64, c connectionInfoCache, err error,
 ) {
 	d.logger.Debugf(
 		ctx,
-		"[%v] Removing connection info from cache: %v",
+		"[%v] [connID=%d] Removing connection info from cache: %v",
 		i.String(),
+		connID,
 		err,
 	)
 	d.lock.Lock()
@@ -466,19 +480,20 @@ func (d *Dialer) removeCached(
 
 func invalidClientCert(
 	ctx context.Context,
-	inst alloydb.InstanceURI, l debug.ContextLogger, expiration time.Time,
+	inst alloydb.InstanceURI, connID uint64, l debug.ContextLogger, expiration time.Time,
 ) bool {
 	now := time.Now().UTC()
 	notAfter := expiration.UTC()
 	invalid := now.After(notAfter)
 	l.Debugf(
 		ctx,
-		"[%v] Now = %v, Current cert expiration = %v",
+		"[%v] [connID=%d] Now = %v, Current cert expiration = %v",
 		inst.String(),
+		connID,
 		now.Format(time.RFC3339),
 		notAfter.Format(time.RFC3339),
 	)
-	l.Debugf(ctx, "[%v] Cert is valid = %v", inst.String(), !invalid)
+	l.Debugf(ctx, "[%v] [connID=%d] Cert is valid = %v", inst.String(), connID, !invalid)
 	return invalid
 }
 
@@ -501,7 +516,7 @@ func invalidClientCert(
 //     metadata exchange has succeeded and the connection is complete.
 //
 // Subsequent interactions with the server use the database protocol.
-func (d *Dialer) metadataExchange(ctx context.Context, conn net.Conn, useIAMAuthN bool, inst string) error {
+func (d *Dialer) metadataExchange(ctx context.Context, conn net.Conn, useIAMAuthN bool, inst string, connID uint64) error {
 	tok, err := d.iamAuthNTokenProvider.Token(ctx)
 	if err != nil {
 		return err
@@ -510,8 +525,8 @@ func (d *Dialer) metadataExchange(ctx context.Context, conn net.Conn, useIAMAuth
 	if useIAMAuthN {
 		authType = connectorspb.MetadataExchangeRequest_AUTO_IAM
 	}
-	d.logger.Debugf(ctx, "[%v] Metadata exchange start (token expiry = %v, token size = %v, auth type = %v)",
-		inst, tok.Expiry.UTC().Format(time.RFC3339), len(tok.Value), authType)
+	d.logger.Debugf(ctx, "[%v] [connID=%d] Metadata exchange start (token expiry = %v, token size = %v, auth type = %v)",
+		inst, connID, tok.Expiry.UTC().Format(time.RFC3339), len(tok.Value), authType)
 	req := &connectorspb.MetadataExchangeRequest{
 		UserAgent:   d.userAgent,
 		AuthType:    authType,
@@ -566,8 +581,8 @@ func (d *Dialer) metadataExchange(ctx context.Context, conn net.Conn, useIAMAuth
 	if err != nil {
 		return err
 	}
-	d.logger.Debugf(ctx, "[%v] Metadata exchange finish (result = %v)",
-		inst, mdxResp.GetResponseCode())
+	d.logger.Debugf(ctx, "[%v] [connID=%d] Metadata exchange finish (result = %v)",
+		inst, connID, mdxResp.GetResponseCode())
 
 	if mdxResp.GetResponseCode() != connectorspb.MetadataExchangeResponse_OK {
 		return errors.New(mdxResp.GetError())
