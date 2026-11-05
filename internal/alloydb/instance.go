@@ -239,10 +239,15 @@ func (i *RefreshAheadCache) ConnectionInfo(ctx context.Context) (ConnectionInfo,
 	select {
 	case <-refresh.ready:
 		err = refresh.err
-	case <-ctx.Done():
-		err = ctx.Err()
-	case <-i.ctx.Done():
-		err = i.ctx.Err()
+	default:
+		select {
+		case <-refresh.ready:
+			err = refresh.err
+		case <-ctx.Done():
+			err = ctx.Err()
+		case <-i.ctx.Done():
+			err = i.ctx.Err()
+		}
 	}
 	if err != nil {
 		return ConnectionInfo{}, err
