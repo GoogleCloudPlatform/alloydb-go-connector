@@ -119,7 +119,8 @@ ALLOYDB_SKIP_PRIVATE_IP=1 ./scripts/test_system.sh
 ./scripts/test_system.sh
 ```
 
-The script enables race detection and coverage. `ALLOYDB_SKIP_PRIVATE_IP=1`
+The script enables race detection and coverage. Any non-empty
+`ALLOYDB_SKIP_PRIVATE_IP` value (for example, `ALLOYDB_SKIP_PRIVATE_IP=1`)
 also works with direct `go test` invocations. `-short` skips all integration
 tests. CI runs unit tests across macOS, Windows, and Linux; live integration
 tests run on a configured Linux runner and are skipped for pull requests from

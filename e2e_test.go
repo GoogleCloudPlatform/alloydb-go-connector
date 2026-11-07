@@ -32,7 +32,7 @@ import (
 )
 
 var (
-	skipPrivateIP = os.Getenv("ALLOYDB_SKIP_PRIVATE_IP") == "1"
+	skipPrivateIP = os.Getenv("ALLOYDB_SKIP_PRIVATE_IP") != ""
 
 	// AlloyDB instance name, in the form of
 	// projects/PROJECT_ID/locations/REGION_ID/clusters/CLUSTER_ID/instances/INSTANCE_ID
@@ -75,7 +75,7 @@ func requireAlloyDBVars(t *testing.T) {
 func requirePrivateNetwork(t *testing.T) {
 	t.Helper()
 	if skipPrivateIP {
-		t.Skip("skipping integration test requiring private network access (ALLOYDB_SKIP_PRIVATE_IP=1)")
+		t.Skip("skipping integration test requiring private network access (ALLOYDB_SKIP_PRIVATE_IP is set)")
 	}
 }
 
