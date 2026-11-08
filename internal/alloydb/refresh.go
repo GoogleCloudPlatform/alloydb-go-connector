@@ -40,6 +40,8 @@ const (
 	PrivateIP = "PRIVATE"
 	// PSC designates PSC-based connections.
 	PSC = "PSC"
+	// PSCAuto designates PSC-based connections using the auto DNS name.
+	PSCAuto = "PSCAuto"
 )
 
 type instanceInfo struct {
@@ -81,6 +83,9 @@ func fetchInstanceInfo(
 	}
 	if addr := resp.GetPscDnsName(); addr != "" {
 		ipAddrs[PSC] = addr
+	}
+	if autoAddr := resp.GetPscAutoDnsName(); autoAddr != "" {
+		ipAddrs[PSCAuto] = autoAddr
 	}
 
 	if len(ipAddrs) == 0 {
