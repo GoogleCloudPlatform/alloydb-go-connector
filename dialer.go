@@ -141,6 +141,11 @@ type Dialer struct {
 	// ahead cache assumes a background goroutine may run consistently.
 	lazyRefresh bool
 
+	// disableMetadataExchange is a temporary addition to help clients who
+	// cannot use the metadata exchange yet. In future versions, this field
+	// should be removed.
+	disableMetadataExchange bool
+
 	// disableBuiltInMetrics turns the internal metric export into a no-op.
 	disableBuiltInMetrics bool
 
@@ -226,23 +231,24 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, err
 	}
 	d := &Dialer{
-		closed:                make(chan struct{}),
-		cache:                 make(map[alloydb.InstanceURI]monitoredCache),
-		lazyRefresh:           cfg.lazyRefresh,
-		disableBuiltInMetrics: cfg.disableBuiltInTelemetry,
-		staticConnInfo:        cfg.staticConnInfo,
-		keyGenerator:          g,
-		refreshTimeout:        cfg.refreshTimeout,
-		client:                client,
-		mClient:               mClient,
-		logger:                cfg.logger,
-		defaultDialCfg:        dialCfg,
-		dialerID:              dialerID,
-		metricRecorders:       map[alloydb.InstanceURI]telv2.MetricRecorder{},
-		dialFunc:              cfg.dialFunc,
-		iamAuthNTokenProvider: cfg.iamAuthNTokenProvider,
-		userAgent:             userAgent,
-		buffer:                newBuffer(),
+		closed:                  make(chan struct{}),
+		cache:                   make(map[alloydb.InstanceURI]monitoredCache),
+		lazyRefresh:             cfg.lazyRefresh,
+		disableMetadataExchange: cfg.disableMetadataExchange,
+		disableBuiltInMetrics:   cfg.disableBuiltInTelemetry,
+		staticConnInfo:          cfg.staticConnInfo,
+		keyGenerator:            g,
+		refreshTimeout:          cfg.refreshTimeout,
+		client:                  client,
+		mClient:                 mClient,
+		logger:                  cfg.logger,
+		defaultDialCfg:          dialCfg,
+		dialerID:                dialerID,
+		metricRecorders:         map[alloydb.InstanceURI]telv2.MetricRecorder{},
+		dialFunc:                cfg.dialFunc,
+		iamAuthNTokenProvider:   cfg.iamAuthNTokenProvider,
+		userAgent:               userAgent,
+		buffer:                  newBuffer(),
 	}
 	return d, nil
 }
@@ -305,8 +311,12 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		tel.AddDialerID(d.dialerID),
 	)
 	defer func() {
+		// The OpenCensus record may block on a full worker channel, so keep
+		// it off the dial path. The OpenTelemetry record is a sync.Map
+		// lookup plus an atomic add, so record it inline to guarantee it
+		// lands before Dial returns.
 		go tel.RecordDialError(context.Background(), instance, d.dialerID, err)
-		go mr.RecordDialCount(ctx, attrs)
+		mr.RecordDialCount(ctx, attrs)
 		endDial(err)
 	}()
 
@@ -358,19 +368,44 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	var connectEnd tel.EndSpanFunc
 	ctx, connectEnd = tel.StartSpan(ctx, "cloud.google.com/go/alloydbconn/internal.Connect")
 	defer func() { connectEnd(err) }()
-	hostPort := net.JoinHostPort(addr, serverProxyPort)
 	f := d.dialFunc
 	if cfg.dialFunc != nil {
 		f = cfg.dialFunc
 	}
-	d.logger.Debugf(ctx, "[%v] Dialing %v", inst.String(), hostPort)
-	conn, err = f(ctx, "tcp", hostPort)
-	if err != nil {
+
+	// Candidate addresses in priority order. For PSC-enabled instances, the API
+	// always populates psc_dns_name, and may also populate psc_auto_dns_name.
+	// Fall back to the automatic PSC DNS name if the manual one can't be reached.
+	addrs := []string{addr}
+	if cfg.ipType == alloydb.PSC {
+		if autoAddr, ok := ci.IPAddrs[alloydb.PSCAuto]; ok {
+			addrs = append(addrs, autoAddr)
+		}
+	}
+
+	var (
+		hostPort string
+		dialErr  error
+	)
+	for _, a := range addrs {
+		hostPort = net.JoinHostPort(a, serverProxyPort)
+		d.logger.Debugf(ctx, "[%v] Dialing %v", inst.String(), hostPort)
+		conn, err = f(ctx, "tcp", hostPort)
+		if err == nil {
+			addr = a // ensure the TLS ServerName matches the endpoint we reached
+			break
+		}
 		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", inst.String(), hostPort, err)
+		dialErr = errors.Join(dialErr, err)
+		if ctx.Err() != nil {
+			break // don't burn a fallback attempt on a dead context
+		}
+	}
+	if err != nil {
 		// refresh the instance info in case it caused the connection failure
 		cache.ForceRefresh()
 		attrs.DialStatus = telv2.DialTCPError
-		return nil, errtype.NewDialError("failed to dial", inst.String(), err)
+		return nil, errtype.NewDialError("failed to dial", inst.String(), dialErr)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
@@ -403,13 +438,15 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	d.logger.Debugf(ctx, "[%v] Connected securely to %v", inst.String(), hostPort)
 
-	// The metadata exchange must occur after the TLS connection is established
-	// to avoid leaking sensitive information.
-	err = d.metadataExchange(ctx, tlsConn, cfg.iamAuthN, inst.String())
-	if err != nil {
-		_ = tlsConn.Close() // best effort close attempt
-		attrs.DialStatus = telv2.DialMDXError
-		return nil, err
+	if !d.disableMetadataExchange {
+		// The metadata exchange must occur after the TLS connection is established
+		// to avoid leaking sensitive information.
+		err = d.metadataExchange(ctx, tlsConn, cfg.iamAuthN, inst.String())
+		if err != nil {
+			_ = tlsConn.Close() // best effort close attempt
+			attrs.DialStatus = telv2.DialMDXError
+			return nil, err
+		}
 	}
 	attrs.DialStatus = telv2.DialSuccess
 
@@ -417,14 +454,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	// Increment open connections synchronously before returning the
 	// connection to the caller. This prevents a race where the caller
 	// could close the connection before a background goroutine increments
-	// the counter, which would underflow the uint64 and produce incorrect
-	// metric values.
+	// the counters, which would underflow the uint64 and make the
+	// open_connections up/down counter go negative.
 	n := atomic.AddUint64(cache.openConns, 1)
+	mr.RecordOpenConnection(ctx, attrs)
+	mr.RecordDialLatency(ctx, latency, attrs)
 	go func() {
 		tel.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
 		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
-		mr.RecordOpenConnection(ctx, attrs)
-		mr.RecordDialLatency(ctx, latency, attrs)
 	}()
 
 	return newInstrumentedConn(tlsConn, mr, attrs, func() {
@@ -729,6 +766,7 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 					d.logger,
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
+					d.disableMetadataExchange,
 					d.userAgent,
 					mr,
 				)
@@ -750,6 +788,7 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 					d.logger,
 					d.client, k,
 					d.refreshTimeout, d.dialerID,
+					d.disableMetadataExchange,
 					d.userAgent,
 					mr,
 				)

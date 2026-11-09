@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.19.3](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.19.2...v1.19.3) (2026-10-28)
+
+
+### Bug Fixes
+
+* record OpenTelemetry dial metrics synchronously ([#820](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/820)) ([d1ec337](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/d1ec3379f825a33c47518c173f4430e96d8e22c0))
+* restore WithOptOutOfAdvancedConnectionCheck behavior ([#836](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/836)) ([12e1b75](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/12e1b75d054412cd426d36994e6ce8f7346556db))
+
+## [1.19.2](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.19.1...v1.19.2) (2026-10-14)
+
+
+### Bug Fixes
+
+* update dependencies to latest ([#827](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/827)) ([a0424eb](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/a0424ebada4a7ef17774c25d7635c53a1b98255e))
+
 ## [1.19.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.19.0...v1.19.1) (2026-09-09)
 
 
