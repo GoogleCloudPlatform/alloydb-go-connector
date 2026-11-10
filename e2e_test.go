@@ -152,7 +152,9 @@ func TestPgxConnect(t *testing.T) {
 			//
 			// The instance named by ALLOYDB_PSC_INSTANCE_URI must have an
 			// automatic PSC DNS name, or there is nothing to fall back to.
-			desc: "PSC with automatic DNS fallback",
+			desc:           "PSC with automatic DNS fallback",
+			privateNetwork: true,
+			requireVars:    requirePSCVars,
 			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
 				// The manual PSC DNS name is whichever address the Dialer
 				// tries first.
