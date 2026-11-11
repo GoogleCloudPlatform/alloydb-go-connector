@@ -42,6 +42,9 @@ var (
 	// It is a separate instance because PSC does not currently allow PSA
 	// attachments in the same cluster.
 	alloydbPSCInstanceName = os.Getenv("ALLOYDB_PSC_INSTANCE_URI")
+	// alloydbWriteEndpoint is the DNS name of a write endpoint configured on
+	// the AlloyDB cluster.
+	alloydbWriteEndpoint = os.Getenv("ALLOYDB_WRITE_ENDPOINT")
 	// Name of database user.
 	alloydbUser = os.Getenv("ALLOYDB_USER")
 	// Name of database IAM user.
@@ -84,6 +87,13 @@ func requirePSCVars(t *testing.T) {
 	t.Helper()
 	if alloydbPSCInstanceName == "" {
 		t.Fatal("'ALLOYDB_PSC_INSTANCE_URI' env var not set")
+	}
+}
+
+func requireWriteEndpointVars(t *testing.T) {
+	t.Helper()
+	if alloydbWriteEndpoint == "" {
+		t.Fatal("'ALLOYDB_WRITE_ENDPOINT' env var not set")
 	}
 }
 
@@ -538,5 +548,67 @@ func TestAutoIAMAuthN(t *testing.T) {
 			}
 			t.Log(tt)
 		})
+	}
+}
+
+func TestWriteEndpointReadWrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration tests")
+	}
+	requirePrivateNetwork(t)
+	requireAlloyDBVars(t)
+	requireWriteEndpointVars(t)
+
+	ctx := t.Context()
+	pool, cleanup, err := connectPgx(
+		ctx, alloydbWriteEndpoint,
+		alloydbUser, alloydbPass, alloydbDB,
+		alloydbconn.WithDNSResolver(),
+		alloydbconn.WithOptOutOfBuiltInTelemetry(),
+		alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
+	)
+	if err != nil {
+		_ = cleanup()
+		t.Fatal(err)
+	}
+	defer func() {
+		pool.Close()
+		_ = cleanup()
+	}()
+
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS write_endpoint_e2e_test (
+			id SERIAL PRIMARY KEY,
+			val TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		t.Fatalf("CREATE TABLE failed: %v", err)
+	}
+	defer func() {
+		_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS write_endpoint_e2e_test")
+	}()
+
+	var insertedID int
+	err = pool.QueryRow(
+		ctx,
+		"INSERT INTO write_endpoint_e2e_test (val) VALUES ($1) RETURNING id",
+		"hello-write-endpoint",
+	).Scan(&insertedID)
+	if err != nil {
+		t.Fatalf("INSERT failed: %v", err)
+	}
+
+	var gotVal string
+	err = pool.QueryRow(
+		ctx,
+		"SELECT val FROM write_endpoint_e2e_test WHERE id = $1",
+		insertedID,
+	).Scan(&gotVal)
+	if err != nil {
+		t.Fatalf("SELECT failed: %v", err)
+	}
+	if gotVal != "hello-write-endpoint" {
+		t.Fatalf("got %q, want %q", gotVal, "hello-write-endpoint")
 	}
 }
