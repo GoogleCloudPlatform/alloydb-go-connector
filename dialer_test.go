@@ -29,6 +29,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -458,12 +459,22 @@ const testWriteEndpoint = "my-endpoint.global.alloydb-psa.goog"
 
 // fakeNetResolver returns canned TXT records for any name.
 type fakeNetResolver struct {
+	mu      sync.Mutex
 	records []string
 	err     error
 }
 
 func (f *fakeNetResolver) LookupTXT(context.Context, string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.records, f.err
+}
+
+// set replaces the canned TXT records and lookup error.
+func (f *fakeNetResolver) set(err error, records ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.records, f.err = records, err
 }
 
 // newDNSTestDialer creates a Dialer wired to a fake Admin API serving inst
@@ -554,6 +565,154 @@ func TestDialerWithDNSResolverAcceptsInstanceURI(t *testing.T) {
 	}
 	if string(data) != "my-instance" {
 		t.Fatalf("expected known response from the server, but got %v", string(data))
+	}
+}
+
+// newSwitchoverTestDialer creates a Dialer that checks DNS names on the given
+// period and whose fake DNS resolver points testWriteEndpoint at inst1. The
+// fake Admin API serves two refreshes for inst1 and one for inst2.
+func newSwitchoverTestDialer(t *testing.T, period time.Duration) (
+	d *Dialer, netRes *fakeNetResolver, inst1, inst2 mock.FakeAlloyDBInstance,
+) {
+	t.Helper()
+	ctx := context.Background()
+	inst1 = mock.NewFakeInstance(
+		"my-project", "my-region-1", "my-cluster-1", "my-instance-1",
+		mock.WithDNSNames(testWriteEndpoint),
+	)
+	inst2 = mock.NewFakeInstance(
+		"my-project", "my-region-2", "my-cluster-2", "my-instance-2",
+		mock.WithDNSNames(testWriteEndpoint),
+	)
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst1, 2),
+		mock.CreateEphemeralSuccess(inst1, 2),
+		mock.InstanceGetSuccess(inst2, 1),
+		mock.CreateEphemeralSuccess(inst2, 1),
+	)
+	t.Cleanup(func() { _ = cleanup() })
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+	d, err = NewDialer(ctx,
+		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
+		WithDNSResolver(),
+		WithFailoverPeriod(period),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	netRes = &fakeNetResolver{records: []string{inst1.String()}}
+	d.client = c
+	d.resolver = alloydb.NewDNSResolver(netRes)
+	t.Cleanup(func() { _ = d.Close() })
+	return d, netRes, inst1, inst2
+}
+
+// isClosedLocally reports whether conn was closed on the client side. A TLS
+// connection rejects writes with net.ErrClosed once it has been closed.
+func isClosedLocally(conn net.Conn) bool {
+	_, err := conn.Write(nil)
+	return errors.Is(err, net.ErrClosed)
+}
+
+// eventuallyClosed reports whether conn is closed on the client side within a
+// few seconds. Watchers close connections in the background.
+func eventuallyClosed(conn net.Conn) bool {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if isClosedLocally(conn) {
+			return true
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return false
+}
+
+func TestDialerDNSNameChangeClosesConnections(t *testing.T) {
+	// Evicting the connection info cache (e.g. after a refresh error) must
+	// not detach earlier connections from the DNS name's watcher.
+	ctx := context.Background()
+	d, netRes, inst1, inst2 := newSwitchoverTestDialer(t, time.Millisecond)
+
+	stop1 := mock.StartServerProxy(t, inst1)
+	conn1, err := d.Dial(ctx, testWriteEndpoint)
+	if err != nil {
+		stop1()
+		t.Fatalf("expected Dial to inst1 to succeed, got: %v", err)
+	}
+	defer conn1.Close()
+
+	uri1, _ := alloydb.ParseInstURI(inst1.String())
+	d.lock.RLock()
+	c := d.cache[uri1]
+	d.lock.RUnlock()
+	d.removeCached(ctx, uri1, c, errors.New("refresh failed"))
+
+	conn2, err := d.Dial(ctx, testWriteEndpoint)
+	stop1()
+	if err != nil {
+		t.Fatalf("expected second Dial to inst1 to succeed, got: %v", err)
+	}
+	defer conn2.Close()
+
+	netRes.set(nil, inst2.String())
+	stop2 := mock.StartServerProxy(t, inst2)
+	defer stop2()
+	conn3, err := d.Dial(ctx, testWriteEndpoint)
+	if err != nil {
+		t.Fatalf("expected Dial to inst2 to succeed, got: %v", err)
+	}
+	defer conn3.Close()
+
+	if !eventuallyClosed(conn1) {
+		t.Error("expected conn1 (dialed before cache eviction) to be closed")
+	}
+	if !eventuallyClosed(conn2) {
+		t.Error("expected conn2 (dialed after cache eviction) to be closed")
+	}
+	if isClosedLocally(conn3) {
+		t.Error("expected conn3 to inst2 to stay open")
+	}
+	// Closing through the watcher must run the same bookkeeping as a close
+	// by the caller.
+	d.lock.RLock()
+	c = d.cache[uri1]
+	d.lock.RUnlock()
+	if got := atomic.LoadUint64(c.openConns); got != 0 {
+		t.Errorf("open connections to inst1 = %d, want 0", got)
+	}
+}
+
+func TestDialerFailoverPeriodZeroDisablesWatching(t *testing.T) {
+	ctx := context.Background()
+	d, _, inst1, _ := newSwitchoverTestDialer(t, 0)
+	stop := mock.StartServerProxy(t, inst1)
+	defer stop()
+
+	conn, err := d.Dial(ctx, testWriteEndpoint)
+	if err != nil {
+		t.Fatalf("expected Dial to succeed, got: %v", err)
+	}
+	defer conn.Close()
+
+	d.domainsMu.Lock()
+	defer d.domainsMu.Unlock()
+	if len(d.domains) != 0 {
+		t.Errorf("watched DNS names = %d, want 0", len(d.domains))
+	}
+}
+
+func TestDialerWatchDomainAfterClose(t *testing.T) {
+	// A Dial racing with Close must not start a watcher that Close missed.
+	d := &Dialer{closed: make(chan struct{})}
+	close(d.closed)
+	_, err := d.watchDomain(testWriteEndpoint)
+	if !errors.Is(err, ErrDialerClosed) {
+		t.Fatalf("watchDomain() after Close: got = %v, want = %v", err, ErrDialerClosed)
 	}
 }
 

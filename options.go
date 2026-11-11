@@ -44,6 +44,9 @@ const (
 
 	// Default GDU API Domain.
 	defaultUniverseDomain = "googleapis.com"
+	// defaultFailoverPeriod is how often a Dialer checks whether a DNS name
+	// passed to Dial points to a different instance.
+	defaultFailoverPeriod = 30 * time.Second
 )
 
 // An Option is an option for configuring a Dialer.
@@ -55,6 +58,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		dialFunc:       proxy.Dial,
 		logger:         nullLogger{},
 		userAgents:     []string{userAgent},
+		failoverPeriod: defaultFailoverPeriod,
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -69,6 +73,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		d.credentials != nil && d.credentialsJSON != nil:                              "incompatible options: WithCredentials cannot be used with WithCredentialsJSON",
 		d.credentials != nil && d.tokenProvider != nil:                                "incompatible options: WithCredentials cannot be used with WithTokenSource",
 		d.adminAPIEndpoint != "" && d.clientUniverseDomain() != defaultUniverseDomain: "incompatible options: WithAdminAPIEndpoint cannot be used with TPC UniverseDomain",
+		d.failoverPeriod < 0: "invalid option: WithFailoverPeriod must not be negative",
 	}
 	for bad, msg := range badPairs {
 		if bad {
@@ -225,6 +230,9 @@ type dialerConfig struct {
 	// useDNSResolver enables resolving DNS names (e.g. AlloyDB write
 	// endpoints) into instance URIs using TXT records.
 	useDNSResolver bool
+	// failoverPeriod is how often the Dialer checks whether a DNS name
+	// passed to Dial points to a different instance.
+	failoverPeriod time.Duration
 }
 
 // WithUniverseDomain configures the underlying AlloyDB Admin API client and
@@ -513,6 +521,21 @@ func WithOptOutOfBuiltInTelemetry() Option {
 func WithDNSResolver() Option {
 	return func(d *dialerConfig) {
 		d.useDNSResolver = true
+	}
+}
+
+// WithFailoverPeriod configures how often the Dialer checks the TXT record of
+// each DNS name passed to Dial (see WithDNSResolver). When the record points
+// to a different instance, for example after a switchover or failover, the
+// Dialer closes the connections dialed through that name so connection pools
+// reconnect to the new instance. The default is 30 seconds.
+//
+// A period of 0 disables the check, so connections dialed through a DNS name
+// stay open after the name points to a different instance. WithFailoverPeriod
+// has no effect without WithDNSResolver.
+func WithFailoverPeriod(p time.Duration) Option {
+	return func(d *dialerConfig) {
+		d.failoverPeriod = p
 	}
 }
 
