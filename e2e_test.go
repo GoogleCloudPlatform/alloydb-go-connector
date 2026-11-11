@@ -33,6 +33,8 @@ import (
 )
 
 var (
+	skipPrivateIP = os.Getenv("ALLOYDB_SKIP_PRIVATE_IP") != ""
+
 	// AlloyDB instance name, in the form of
 	// projects/PROJECT_ID/locations/REGION_ID/clusters/CLUSTER_ID/instances/INSTANCE_ID
 	alloydbInstanceName = os.Getenv("ALLOYDB_INSTANCE_NAME")
@@ -44,7 +46,7 @@ var (
 	alloydbUser = os.Getenv("ALLOYDB_USER")
 	// Name of database IAM user.
 	alloydbIAMUser = os.Getenv("ALLOYDB_IAM_USER")
-	// IP address of the instance
+	// Private IP address of the instance, used by the direct-connection tests.
 	alloydbInstanceIP = os.Getenv("ALLOYDB_INSTANCE_IP")
 	// Password for the database user; be careful when entering a password on the
 	// command line (it may go into your terminal's history).
@@ -60,8 +62,6 @@ func requireAlloyDBVars(t *testing.T) {
 	switch "" {
 	case alloydbInstanceName:
 		t.Fatal("'ALLOYDB_INSTANCE_NAME' env var not set")
-	case alloydbPSCInstanceName:
-		t.Fatal("'ALLOYDB_PSC_INSTANCE_URI' env var not set")
 	case alloydbUser:
 		t.Fatal("'ALLOYDB_USER' env var not set")
 	case alloydbIAMUser:
@@ -73,18 +73,45 @@ func requireAlloyDBVars(t *testing.T) {
 	}
 }
 
+func requirePrivateNetwork(t *testing.T) {
+	t.Helper()
+	if skipPrivateIP {
+		t.Skip("skipping integration test requiring private network access (ALLOYDB_SKIP_PRIVATE_IP is set)")
+	}
+}
+
+func requirePSCVars(t *testing.T) {
+	t.Helper()
+	if alloydbPSCInstanceName == "" {
+		t.Fatal("'ALLOYDB_PSC_INSTANCE_URI' env var not set")
+	}
+}
+
+func requireDirectAlloyDBVars(t *testing.T) {
+	t.Helper()
+	switch "" {
+	case alloydbInstanceIP:
+		t.Fatal("'ALLOYDB_INSTANCE_IP' env var not set")
+	case alloydbIAMUser:
+		t.Fatal("'ALLOYDB_IAM_USER' env var not set")
+	case alloydbDB:
+		t.Fatal("'ALLOYDB_DB' env var not set")
+	}
+}
+
 func TestPgxConnect(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration tests")
 	}
-	requireAlloyDBVars(t)
-
 	tcs := []struct {
-		desc string
-		f    func(ctx context.Context) (*pgxpool.Pool, func() error, error)
+		desc           string
+		privateNetwork bool
+		requireVars    func(*testing.T)
+		f              func(ctx context.Context) (*pgxpool.Pool, func() error, error)
 	}{
 		{
-			desc: "private IP",
+			desc:           "private IP",
+			privateNetwork: true,
 			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
 				return connectPgx(
 					ctx, alloydbInstanceName,
@@ -104,7 +131,9 @@ func TestPgxConnect(t *testing.T) {
 			},
 		},
 		{
-			desc: "PSC",
+			desc:           "PSC",
+			privateNetwork: true,
+			requireVars:    requirePSCVars,
 			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
 				return connectPgxWithPSC(
 					ctx, alloydbPSCInstanceName,
@@ -123,7 +152,9 @@ func TestPgxConnect(t *testing.T) {
 			//
 			// The instance named by ALLOYDB_PSC_INSTANCE_URI must have an
 			// automatic PSC DNS name, or there is nothing to fall back to.
-			desc: "PSC with automatic DNS fallback",
+			desc:           "PSC with automatic DNS fallback",
+			privateNetwork: true,
+			requireVars:    requirePSCVars,
 			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
 				// The manual PSC DNS name is whichever address the Dialer
 				// tries first.
@@ -160,7 +191,7 @@ func TestPgxConnect(t *testing.T) {
 		{
 			desc: "metadata exchange disabled",
 			f: func(ctx context.Context) (*pgxpool.Pool, func() error, error) {
-				return connectPgx(
+				return connectPgxWithPublicIP(
 					ctx, alloydbInstanceName,
 					alloydbUser, alloydbPass, alloydbDB,
 					alloydbconn.WithOptOutOfAdvancedConnectionCheck(),
@@ -172,6 +203,13 @@ func TestPgxConnect(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
+			if tc.privateNetwork {
+				requirePrivateNetwork(t)
+			}
+			requireAlloyDBVars(t)
+			if tc.requireVars != nil {
+				tc.requireVars(t)
+			}
 			ctx := t.Context()
 			pool, cleanup, err := tc.f(ctx)
 			if err != nil {
@@ -201,15 +239,15 @@ func TestDatabaseSQLConnect(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration tests")
 	}
-	requireAlloyDBVars(t)
-
 	tcs := []struct {
-		desc string
-		f    func(instURI, user, pass, dbname string, opts ...alloydbconn.Option) (*sql.DB, func() error, error)
+		desc           string
+		privateNetwork bool
+		f              func(instURI, user, pass, dbname string, opts ...alloydbconn.Option) (*sql.DB, func() error, error)
 	}{
 		{
-			desc: "private IP",
-			f:    connectDatabaseSQL,
+			desc:           "private IP",
+			privateNetwork: true,
+			f:              connectDatabaseSQL,
 		},
 		{
 			desc: "public IP",
@@ -219,6 +257,10 @@ func TestDatabaseSQLConnect(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
+			if tc.privateNetwork {
+				requirePrivateNetwork(t)
+			}
+			requireAlloyDBVars(t)
 			db, cleanup, err := tc.f(
 				alloydbInstanceName, alloydbUser, alloydbPass, alloydbDB,
 				alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
@@ -247,7 +289,12 @@ func TestDatabaseSQLConnectPGXV4(t *testing.T) {
 		t.Skip("skipping integration tests")
 	}
 
-	cleanup, err := pgxv4.RegisterDriver("alloydb-v4", alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain))
+	requireAlloyDBVars(t)
+
+	cleanup, err := pgxv4.RegisterDriver("alloydb-v4",
+		alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()),
+		alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +330,10 @@ func TestDatabaseSQLConnectPostgres(t *testing.T) {
 		t.Skip("skipping integration tests")
 	}
 
+	requireAlloyDBVars(t)
+
 	cleanup, err := postgres.RegisterDriver("alloydb-postgres",
+		alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()),
 		alloydbconn.WithIAMAuthN(), alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 	)
 	if err != nil {
@@ -321,7 +371,10 @@ func TestDatabaseSQLConnectPGXV5(t *testing.T) {
 		t.Skip("skipping integration tests")
 	}
 
+	requireAlloyDBVars(t)
+
 	cleanup, err := pgxv5.RegisterDriver("alloydb-v5",
+		alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()),
 		alloydbconn.WithIAMAuthN(), alloydbconn.WithOptOutOfBuiltInTelemetry(), alloydbconn.WithUniverseDomain(alloydbUniverseDomain),
 	)
 	if err != nil {
@@ -358,6 +411,8 @@ func TestDirectDatabaseSQLAutoIAMAuthN(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	requirePrivateNetwork(t)
+	requireDirectAlloyDBVars(t)
 	db, err := connectDirectDatabaseSQLAutoIAMAuthN(
 		alloydbInstanceIP, alloydbIAMUser, alloydbDB,
 	)
@@ -377,6 +432,8 @@ func TestDirectPGXAutoIAMAuthN(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	requirePrivateNetwork(t)
+	requireDirectAlloyDBVars(t)
 	db, err := connectDirectPGXPoolAutoIAMAuthN(
 		context.Background(),
 		alloydbInstanceIP, alloydbIAMUser, alloydbDB,
@@ -397,6 +454,7 @@ func TestAutoIAMAuthN(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	requireAlloyDBVars(t)
 	tcs := []struct {
 		desc         string
 		opts         []alloydbconn.Option
@@ -440,7 +498,9 @@ func TestAutoIAMAuthN(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			ctx := context.Background()
 
-			d, err := alloydbconn.NewDialer(ctx, tc.opts...)
+			opts := append([]alloydbconn.Option{}, tc.opts...)
+			opts = append(opts, alloydbconn.WithDefaultDialOptions(alloydbconn.WithPublicIP()))
+			d, err := alloydbconn.NewDialer(ctx, opts...)
 			if err != nil {
 				t.Fatalf("failed to init Dialer: %v", err)
 			}
