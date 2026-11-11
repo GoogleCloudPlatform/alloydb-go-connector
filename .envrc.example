@@ -8,5 +8,6 @@ export ALLOYDB_IMPERSONATED_USER="some-impersonated-IAM-user"
 # Required only when running private-network integration tests.
 export ALLOYDB_INSTANCE_IP="some-private-IP-address"
 export ALLOYDB_PSC_INSTANCE_URI="projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>"
+export ALLOYDB_WRITE_ENDPOINT="some-write-endpoint.global.alloydb-psa.goog"
 # Set to any non-empty value to skip private-IP, PSC, and direct-connection tests.
 # export ALLOYDB_SKIP_PRIVATE_IP="1"
