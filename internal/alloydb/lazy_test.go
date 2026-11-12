@@ -140,7 +140,9 @@ func stalledAdminClient(t *testing.T) *alloydbadmin.AlloyDBAdminClient {
 	if err != nil {
 		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
 	}
-	t.Cleanup(func() { c.Close() })
+	// Don't close the client. A refresh abandoned on timeout leaves its
+	// requests running, and closing the client underneath them is a data
+	// race. The Dialer never closes its client either.
 	return c
 }
 
