@@ -47,6 +47,12 @@ const (
 	refreshBurst = 2
 )
 
+// NewRefreshLimiter returns a rate limiter that allows a burst of refreshBurst
+// refreshes and then one refresh every refreshInterval.
+func NewRefreshLimiter() *rate.Limiter {
+	return rate.NewLimiter(rate.Every(refreshInterval), refreshBurst)
+}
+
 var (
 	// Instance URI is in the format:
 	// 'projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>'
@@ -201,7 +207,7 @@ func NewRefreshAheadCache(
 	i := &RefreshAheadCache{
 		instanceURI:    instance,
 		logger:         l,
-		l:              rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
+		l:              NewRefreshLimiter(),
 		r:              newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
 		refreshTimeout: refreshTimeout,
 		ctx:            ctx,

@@ -454,6 +454,80 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	}
 }
 
+func TestDialRateLimitsRefreshAfterFailure(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeInstance(
+		"my-project", "my-region", "my-cluster", "my-instance",
+	)
+	// One refresh for the first Dial, then the limiter's burst of two.
+	// Any further refresh is an unexpected request and fails the Dial
+	// with a different error.
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 3),
+		mock.CreateEphemeralSuccess(inst, 3),
+	)
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+	defer d.Close()
+
+	// The fake instance has only a private IP, so every refresh succeeds
+	// and every Dial fails.
+	var limited int
+	for i := range 10 {
+		_, err := d.Dial(ctx, testInstanceURI, WithPublicIP())
+		// Rate limited or not, the caller sees the underlying error.
+		var cfgErr *errtype.ConfigError
+		if !errors.As(err, &cfgErr) {
+			t.Fatalf("attempt %d: want = %T, got = %v", i, cfgErr, err)
+		}
+		var refreshErr *errtype.RefreshError
+		if errors.As(err, &refreshErr) {
+			limited++
+		}
+	}
+	if limited != 7 {
+		t.Fatalf("want 7 rate limited dials, got = %v", limited)
+	}
+}
+
+func TestDialDoesNotRateLimitAfterCallerCancels(t *testing.T) {
+	ctx := context.Background()
+	// The refresh may or may not reach the API before the Dial returns,
+	// so don't check the mock.
+	mc, url, _ := mock.HTTPClient()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+	d, err := NewDialer(ctx, WithTokenSource(stubTokenSource{}), WithOptOutOfBuiltInTelemetry())
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.client = c
+	defer d.Close()
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := d.Dial(canceled, testInstanceURI); !errors.Is(err, context.Canceled) {
+		t.Fatalf("want = %v, got = %v", context.Canceled, err)
+	}
+	if got := len(d.failures); got != 0 {
+		t.Fatalf("want no recorded failures, got = %v", got)
+	}
+}
+
 func TestDialWithUnavailableServerErrors(t *testing.T) {
 	ctx := context.Background()
 	inst := mock.NewFakeInstance(

@@ -37,6 +37,7 @@ import (
 	"cloud.google.com/go/alloydbconn/internal/tel"
 	"cloud.google.com/go/auth"
 	"github.com/google/uuid"
+	"golang.org/x/time/rate"
 	"google.golang.org/api/option"
 	"google.golang.org/protobuf/proto"
 
@@ -134,6 +135,9 @@ type Dialer struct {
 	cache          map[alloydb.InstanceURI]monitoredCache
 	keyGenerator   *keyGenerator
 	refreshTimeout time.Duration
+	// failures records instances whose cache was removed after a failure,
+	// so that recreating the cache stays rate limited. Guarded by lock.
+	failures map[alloydb.InstanceURI]*refreshFailure
 	// closed reports if the dialer has been closed.
 	closed chan struct{}
 
@@ -244,6 +248,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	d := &Dialer{
 		closed:                  make(chan struct{}),
 		cache:                   make(map[alloydb.InstanceURI]monitoredCache),
+		failures:                make(map[alloydb.InstanceURI]*refreshFailure),
 		lazyRefresh:             cfg.lazyRefresh,
 		disableMetadataExchange: cfg.disableMetadataExchange,
 		disableBuiltInMetrics:   cfg.disableBuiltInTelemetry,
@@ -419,11 +424,11 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	addr, ok := ci.IPAddrs[cfg.ipType]
 	if !ok {
-		d.removeCached(ctx, inst, cache, err)
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", cfg.ipType),
 			inst.String(),
 		)
+		d.removeCached(ctx, inst, cache, err)
 		attrs.DialStatus = telv2.DialUserError
 		return nil, err
 	}
@@ -554,6 +559,27 @@ func (d *Dialer) removeCached(
 	defer d.lock.Unlock()
 	c.Close()
 	delete(d.cache, i)
+	// A caller giving up says nothing about the instance.
+	if ctx.Err() != nil {
+		return
+	}
+	f, ok := d.failures[i]
+	if !ok {
+		f = &refreshFailure{l: alloydb.NewRefreshLimiter()}
+		d.failures[i] = f
+	}
+	f.err = err
+}
+
+// refreshFailure tracks an instance whose cache was removed after a failure.
+// Removing the cache ensures stale connection info is not reused, but each
+// new cache refreshes immediately. Without a limit that outlives the cache, a
+// persistent failure (e.g., a missing IAM role or IP type) costs Admin API
+// calls on every Dial and can exhaust the project's quota.
+type refreshFailure struct {
+	l *rate.Limiter
+	// err is the most recent failure, reported while refreshes are limited.
+	err error
 }
 
 func invalidClientCert(
@@ -817,6 +843,12 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 		// Recheck to ensure instance wasn't created between locks
 		c, ok = d.cache[uri]
 		if !ok {
+			if f, failed := d.failures[uri]; failed && !f.l.Allow() {
+				return monitoredCache{}, ok, errtype.NewRefreshError(
+					"refresh rate limited after a recent failure",
+					uri.String(), f.err,
+				)
+			}
 			k, err := d.keyGenerator.rsaKey()
 			if err != nil {
 				return monitoredCache{}, ok, err
