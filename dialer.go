@@ -817,6 +817,13 @@ func (d *Dialer) connectionInfoCache(ctx context.Context, uri alloydb.InstanceUR
 		// Recheck to ensure instance wasn't created between locks
 		c, ok = d.cache[uri]
 		if !ok {
+			// Close may have already closed every cached entry. Creating a
+			// new one now would leave a cache that nothing closes.
+			select {
+			case <-d.closed:
+				return monitoredCache{}, ok, ErrDialerClosed
+			default:
+			}
 			k, err := d.keyGenerator.rsaKey()
 			if err != nil {
 				return monitoredCache{}, ok, err

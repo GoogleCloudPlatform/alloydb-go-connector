@@ -800,6 +800,31 @@ func TestDialerCloseReportsFriendlyError(t *testing.T) {
 	}
 }
 
+// TestDialerDoesNotCacheAfterClose covers a Dial that passes its closed check
+// before Close runs and only reaches the cache afterwards.
+func TestDialerDoesNotCacheAfterClose(t *testing.T) {
+	d, err := NewDialer(
+		context.Background(),
+		WithTokenSource(stubTokenSource{}),
+		WithOptOutOfBuiltInTelemetry(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Close()
+
+	inst, _ := alloydb.ParseInstURI(testInstanceURI)
+	_, _, err = d.connectionInfoCache(
+		context.Background(), inst, telv2.NullMetricRecorder{},
+	)
+	if !errors.Is(err, ErrDialerClosed) {
+		t.Fatalf("want = %v, got = %v", ErrDialerClosed, err)
+	}
+	if got := len(d.cache); got != 0 {
+		t.Fatalf("want no cached entries after Close, got = %v", got)
+	}
+}
+
 func TestDialerClose(t *testing.T) {
 	d, err := NewDialer(
 		context.Background(),
