@@ -115,6 +115,91 @@ func TestLazyRefreshCacheForceRefresh(t *testing.T) {
 	}
 }
 
+func TestLazyRefreshCacheRateLimitsForceRefresh(t *testing.T) {
+	u := testInstanceURI()
+	inst := mock.NewFakeInstance(u.project, u.region, u.cluster, u.name)
+	// One initial refresh plus the limiter's burst of forced refreshes.
+	client, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1+refreshBurst),
+		mock.CreateEphemeralSuccess(inst, 1+refreshBurst),
+	)
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		context.Background(),
+		option.WithHTTPClient(client),
+		option.WithEndpoint(url),
+		option.WithTokenSource(stubTokenSource{}),
+	)
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+	cache := NewLazyRefreshCache(
+		u, nullLogger{}, c,
+		rsaKey, 30*time.Second, "",
+		false,
+		"some-ua",
+		telv2.NullMetricRecorder{},
+	)
+	if _, err := cache.ConnectionInfo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a pool retrying failed dials. Any refresh beyond the burst
+	// would be an unexpected request and fail.
+	for i := range 10 {
+		cache.ForceRefresh()
+		if _, err := cache.ConnectionInfo(context.Background()); err != nil {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+	}
+}
+
+func TestLazyRefreshCacheAlwaysRefreshesExpiringCert(t *testing.T) {
+	u := testInstanceURI()
+	// A certificate inside the refresh buffer is treated as expired.
+	inst := mock.NewFakeInstance(
+		u.project, u.region, u.cluster, u.name,
+		mock.WithCertExpiry(time.Now().Add(time.Minute)),
+	)
+	attempts := refreshBurst + 3
+	client, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, attempts),
+		mock.CreateEphemeralSuccess(inst, attempts),
+	)
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		context.Background(),
+		option.WithHTTPClient(client),
+		option.WithEndpoint(url),
+		option.WithTokenSource(stubTokenSource{}),
+	)
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+	cache := NewLazyRefreshCache(
+		u, nullLogger{}, c,
+		rsaKey, 30*time.Second, "",
+		false,
+		"some-ua",
+		telv2.NullMetricRecorder{},
+	)
+
+	for i := range attempts {
+		cache.ForceRefresh()
+		if _, err := cache.ConnectionInfo(context.Background()); err != nil {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+	}
+}
+
 type mockMetricRecorder struct {
 	mu       sync.Mutex
 	gotAttrs telv2.Attributes

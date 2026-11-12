@@ -23,6 +23,7 @@ import (
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
 	"cloud.google.com/go/alloydbconn/debug"
 	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
+	"golang.org/x/time/rate"
 )
 
 // LazyRefreshCache is caches connection info and refreshes the cache only when
@@ -32,6 +33,7 @@ type LazyRefreshCache struct {
 	logger         debug.ContextLogger
 	r              adminAPIClient
 	mu             sync.Mutex
+	l              *rate.Limiter // limits forced refreshes of valid info
 	needsRefresh   bool
 	cached         ConnectionInfo
 	userAgent      string
@@ -54,6 +56,7 @@ func NewLazyRefreshCache(
 		uri:            uri,
 		logger:         l,
 		r:              newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
+		l:              rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
 		userAgent:      userAgent,
 		metricRecorder: mr,
 	}
@@ -62,7 +65,7 @@ func NewLazyRefreshCache(
 // ConnectionInfo returns connection info for the associated instance. New
 // connection info is retrieved under two conditions:
 // - the current connection info's certificate has expired, or
-// - a caller has separately called ForceRefresh
+// - a caller has separately called ForceRefresh and the rate limit allows it
 func (c *LazyRefreshCache) ConnectionInfo(
 	ctx context.Context,
 ) (ConnectionInfo, error) {
@@ -77,6 +80,18 @@ func (c *LazyRefreshCache) ConnectionInfo(
 		c.logger.Debugf(
 			ctx,
 			"[%v] Connection info is still valid, using cached info (type = lazy)",
+			c.uri.String(),
+		)
+		return c.cached, nil
+	}
+	// Every failed dial forces a refresh. Limit forced refreshes of
+	// connection info that is still valid the same way the refresh-ahead
+	// cache does, so a pool retrying through an outage cannot exhaust the
+	// Admin API quota. An expired certificate is always refreshed.
+	if now.Before(exp) && !c.l.Allow() {
+		c.logger.Debugf(
+			ctx,
+			"[%v] Refresh rate limited, using cached info (type = lazy)",
 			c.uri.String(),
 		)
 		return c.cached, nil
