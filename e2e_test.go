@@ -44,7 +44,7 @@ var (
 	alloydbPSCInstanceName = os.Getenv("ALLOYDB_PSC_INSTANCE_URI")
 	// alloydbWriteEndpoint is the DNS name of a write endpoint configured on
 	// the AlloyDB cluster.
-	alloydbWriteEndpoint = os.Getenv("ALLOYDB_WRITE_ENDPOINT")
+	alloydbWriteEndpoint = os.Getenv("ALLOYDB_PSA_WRITE_ENDPOINT")
 	// Name of database user.
 	alloydbUser = os.Getenv("ALLOYDB_USER")
 	// Name of database IAM user.
@@ -93,7 +93,7 @@ func requirePSCVars(t *testing.T) {
 func requireWriteEndpointVars(t *testing.T) {
 	t.Helper()
 	if alloydbWriteEndpoint == "" {
-		t.Fatal("'ALLOYDB_WRITE_ENDPOINT' env var not set")
+		t.Fatal("'ALLOYDB_PSA_WRITE_ENDPOINT' env var not set")
 	}
 }
 
