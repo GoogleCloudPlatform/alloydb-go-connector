@@ -32,6 +32,7 @@ type LazyRefreshCache struct {
 	logger         debug.ContextLogger
 	r              adminAPIClient
 	mu             sync.Mutex
+	refreshTimeout time.Duration
 	needsRefresh   bool
 	cached         ConnectionInfo
 	userAgent      string
@@ -44,7 +45,7 @@ func NewLazyRefreshCache(
 	l debug.ContextLogger,
 	client *alloydbadmin.AlloyDBAdminClient,
 	key *rsa.PrivateKey,
-	_ time.Duration,
+	refreshTimeout time.Duration,
 	dialerID string,
 	disableMetadataExchange bool,
 	userAgent string,
@@ -54,6 +55,7 @@ func NewLazyRefreshCache(
 		uri:            uri,
 		logger:         l,
 		r:              newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
+		refreshTimeout: refreshTimeout,
 		userAgent:      userAgent,
 		metricRecorder: mr,
 	}
@@ -68,6 +70,11 @@ func (c *LazyRefreshCache) ConnectionInfo(
 ) (ConnectionInfo, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// The caller may have waited on the mutex behind a slow refresh. Don't
+	// report success to a caller whose context has already ended.
+	if err := ctx.Err(); err != nil {
+		return ConnectionInfo{}, err
+	}
 	// strip monotonic clock with UTC()
 	now := time.Now().UTC()
 	// Pad expiration with a buffer to give the client plenty of time to
@@ -87,7 +94,9 @@ func (c *LazyRefreshCache) ConnectionInfo(
 		"[%v] Connection info refresh operation started (type = lazy)",
 		c.uri.String(),
 	)
-	ci, err := c.r.connectionInfo(ctx, c.uri)
+	refreshCtx, cancel := context.WithTimeout(ctx, c.refreshTimeout)
+	defer cancel()
+	ci, err := c.r.connectionInfo(refreshCtx, c.uri)
 	if err != nil {
 		c.logger.Debugf(
 			ctx,
