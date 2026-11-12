@@ -570,6 +570,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		if w != nil {
 			w.Remove(ic)
 		}
+		d.untrackConn(ic)
 		n := atomic.AddUint64(cache.openConns, ^uint64(0))
 		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
 		mr.RecordClosedConnection(context.Background(), attrs)
@@ -579,13 +580,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if w != nil {
 		w.Add(ic, inst)
 	}
+	d.trackConn(ic)
 
 	mr.RecordDialLatency(ctx, latency, attrs)
 	go func() {
 		tel.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
 		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
- 
+
 	return ic, nil
 }
 
