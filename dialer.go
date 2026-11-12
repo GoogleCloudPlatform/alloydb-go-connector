@@ -179,6 +179,16 @@ type Dialer struct {
 	// DialTarget. By default it parses instance URIs; with
 	// WithDNSResolver it resolves DNS names via TXT records.
 	resolver alloydb.InstanceResolver
+
+	// failoverPeriod is how often each DNSWatcher re-resolves its DNS
+	// name. Zero disables watching DNS names.
+	failoverPeriod time.Duration
+	domainsMu      sync.Mutex
+	// domains holds a watcher for each DNS name that Dial has resolved. A
+	// watcher keeps checking its name until the Dialer closes, even when it
+	// has no open connections, so the number of watchers is bounded by the
+	// number of distinct names.
+	domains map[string]*alloydb.DNSWatcher
 }
 
 type nullLogger struct{}
@@ -259,6 +269,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		userAgent:               userAgent,
 		buffer:                  newBuffer(),
 		resolver:                resolver,
+		failoverPeriod:          cfg.failoverPeriod,
+		domains:                 make(map[string]*alloydb.DNSWatcher),
 	}
 	return d, nil
 }
@@ -309,8 +321,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		return nil, err
 	}
 	inst := target.URI
+	var w *alloydb.DNSWatcher
 	if target.HasDomainName() {
 		d.logger.Debugf(ctx, "[%v] Resolved domain name %v", inst.String(), target.DomainName)
+		if d.failoverPeriod > 0 {
+			if w, err = d.watchDomain(target.DomainName); err != nil {
+				return nil, err
+			}
+		}
 	}
 	mr := d.metricRecorder(ctx, inst)
 
@@ -483,17 +501,48 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	// open_connections up/down counter go negative.
 	n := atomic.AddUint64(cache.openConns, 1)
 	mr.RecordOpenConnection(ctx, attrs)
+
+	var ic *instrumentedConn
+	ic = newInstrumentedConn(tlsConn, mr, attrs, func() {
+		if w != nil {
+			w.Remove(ic)
+		}
+		n := atomic.AddUint64(cache.openConns, ^uint64(0))
+		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
+		mr.RecordClosedConnection(context.Background(), attrs)
+	}, d.dialerID, inst.String())
+	// Track the connection returned to the caller, so that a watcher closing
+	// it also runs the close bookkeeping above.
+	if w != nil {
+		w.Add(ic, inst)
+	}
+
 	mr.RecordDialLatency(ctx, latency, attrs)
 	go func() {
 		tel.RecordOpenConnections(ctx, int64(n), d.dialerID, inst.String())
 		tel.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
 
-	return newInstrumentedConn(tlsConn, mr, attrs, func() {
-		n := atomic.AddUint64(cache.openConns, ^uint64(0))
-		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
-		mr.RecordClosedConnection(context.Background(), attrs)
-	}, d.dialerID, inst.String()), nil
+	return ic, nil
+}
+
+// watchDomain returns the watcher for the DNS name, creating one if needed.
+func (d *Dialer) watchDomain(name string) (*alloydb.DNSWatcher, error) {
+	d.domainsMu.Lock()
+	defer d.domainsMu.Unlock()
+	// Close stops the watchers in d.domains after closing d.closed, so a
+	// watcher added after that point would never be stopped.
+	select {
+	case <-d.closed:
+		return nil, ErrDialerClosed
+	default:
+	}
+	w, ok := d.domains[name]
+	if !ok {
+		w = alloydb.NewDNSWatcher(name, d.resolver, d.logger, d.failoverPeriod)
+		d.domains[name] = w
+	}
+	return w, nil
 }
 
 // removeCached stops all background refreshes and deletes the connection
@@ -755,6 +804,12 @@ func (d *Dialer) Close() error {
 		_ = i.Close()
 	}
 	d.lock.Unlock()
+
+	d.domainsMu.Lock()
+	for _, w := range d.domains {
+		w.Stop()
+	}
+	d.domainsMu.Unlock()
 
 	d.metricsMu.Lock()
 	ctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
