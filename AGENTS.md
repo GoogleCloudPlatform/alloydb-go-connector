@@ -106,10 +106,10 @@ your local environment or an ignored `.envrc` file before running tests.
   roles. Credential-option tests additionally require
   `GOOGLE_APPLICATION_CREDENTIALS` to point to a credentials JSON file; a local
   ADC login alone does not satisfy that test requirement.
-- For the full suite, also set `ALLOYDB_INSTANCE_IP` and
-  `ALLOYDB_PSC_INSTANCE_URI`, then run from a network that can reach the
-  private IP and PSC instance. These variables are not required when private
-  network tests are skipped.
+- For the full suite, also set `ALLOYDB_INSTANCE_IP`,
+  `ALLOYDB_PSC_INSTANCE_URI`, and `ALLOYDB_PSA_WRITE_ENDPOINT`, then run from a
+  network that can reach the private IP, PSC instance, and cluster VPC DNS.
+  These variables are not required when private network tests are skipped.
 
 ```sh
 # Run integration tests outside the VPC, skipping private IP, PSC, and direct connections.
