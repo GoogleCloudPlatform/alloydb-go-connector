@@ -16,6 +16,9 @@ package alloydb
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -112,6 +115,58 @@ func TestLazyRefreshCacheForceRefresh(t *testing.T) {
 	_, err = cache.ConnectionInfo(context.Background())
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// stalledAdminClient returns an Admin API client whose requests never
+// receive a response.
+func stalledAdminClient(t *testing.T) *alloydbadmin.AlloyDBAdminClient {
+	t.Helper()
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-done:
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(done) })
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		context.Background(),
+		option.WithHTTPClient(srv.Client()),
+		option.WithEndpoint(srv.URL),
+		option.WithTokenSource(stubTokenSource{}),
+	)
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+	// Don't close the client. A refresh abandoned on timeout leaves its
+	// requests running, and closing the client underneath them is a data
+	// race. The Dialer never closes its client either.
+	return c
+}
+
+func TestLazyRefreshCacheRefreshTimeout(t *testing.T) {
+	cache := NewLazyRefreshCache(
+		testInstanceURI(), nullLogger{}, stalledAdminClient(t),
+		rsaKey, 100*time.Millisecond, "",
+		false,
+		"some-ua",
+		telv2.NullMetricRecorder{},
+	)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := cache.ConnectionInfo(context.Background())
+		errCh <- err
+	}()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("want = %v, got = %v", context.DeadlineExceeded, err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ConnectionInfo did not honor the refresh timeout")
 	}
 }
 

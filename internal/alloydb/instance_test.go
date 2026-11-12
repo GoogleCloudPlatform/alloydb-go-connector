@@ -230,6 +230,29 @@ func TestConnectInfoErrors(t *testing.T) {
 	}
 }
 
+func TestRefreshAheadCacheRefreshTimeout(t *testing.T) {
+	i := NewRefreshAheadCache(
+		testInstanceURI(),
+		nullLogger{},
+		stalledAdminClient(t), rsaKey, 100*time.Millisecond, "dialer-id",
+		false,
+		"some-ua",
+		telv2.NullMetricRecorder{},
+	)
+	defer i.Close()
+
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := i.ConnectionInfo(ctx)
+	if err == nil {
+		t.Fatal("want error from stalled refresh, got nil")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("refresh did not honor the refresh timeout, took %v", elapsed)
+	}
+}
+
 func TestClose(t *testing.T) {
 	ctx := context.Background()
 	inst := mock.NewFakeInstance(
