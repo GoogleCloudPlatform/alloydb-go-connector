@@ -99,13 +99,20 @@ func TestDNSWatcherCheck(t *testing.T) {
 		err        error
 		wantClosed bool
 	}{
-		{desc: "same instance keeps connections", uri: testURI},
+		{
+			desc: "same instance keeps connections",
+			uri:  testURI,
+		},
 		{
 			// A failed lookup is likely transient.
 			desc: "failed lookup keeps connections",
 			err:  errors.New("DNS unavailable"),
 		},
-		{desc: "different instance closes connections", uri: testURI2, wantClosed: true},
+		{
+			desc:       "different instance closes connections",
+			uri:        testURI2,
+			wantClosed: true,
+		},
 	}
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
@@ -151,6 +158,29 @@ func TestDNSWatcherCheckClosesOnlyStaleConns(t *testing.T) {
 	defer w.mu.Unlock()
 	if _, ok := w.conns[newConn]; !ok || len(w.conns) != 1 {
 		t.Errorf("tracked conns = %v, want only the conn to the new instance", w.conns)
+	}
+}
+
+func TestDNSWatcherCheckSkipsLookupWithoutConns(t *testing.T) {
+	var lookups atomic.Int32
+	r := resolverFunc(func(context.Context, string) (DialTarget, error) {
+		lookups.Add(1)
+		return dnsTarget(t, testURI), nil
+	})
+	// The period is long enough that only the explicit checks run.
+	w := NewDNSWatcher(testEndpoint, r, nullLogger{}, time.Hour)
+	t.Cleanup(w.Stop)
+
+	w.check(context.Background())
+	if got := lookups.Load(); got != 0 {
+		t.Fatalf("lookups with no conns = %d, want 0", got)
+	}
+
+	conn := &fakeConn{}
+	w.Add(conn, mustParse(t, testURI))
+	w.check(context.Background())
+	if got := lookups.Load(); got != 1 {
+		t.Errorf("lookups with a conn = %d, want 1", got)
 	}
 }
 

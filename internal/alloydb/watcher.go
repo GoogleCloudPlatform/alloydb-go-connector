@@ -24,7 +24,10 @@ import (
 )
 
 // dnsCheckTimeout bounds each DNS check so a hung lookup cannot stall the
-// watcher.
+// watcher. It allows one full retry cycle of the default resolver
+// configuration (two 5s attempts). A check that times out keeps connections
+// open until the next check. On Windows, the system resolver does not honor
+// context cancellation, so this bound does not apply there.
 const dnsCheckTimeout = 10 * time.Second
 
 // DNSWatcher tracks the connections dialed through a DNS name (e.g. a write
@@ -40,6 +43,8 @@ const dnsCheckTimeout = 10 * time.Second
 // is keyed by instance URI. Evicting a cache entry (e.g. after a refresh
 // error) neither closes nor stops tracking connections dialed by DNS name.
 type DNSWatcher struct {
+	// name is the DNS name being watched, e.g. a cluster write endpoint. Its
+	// TXT record holds the URI of the instance it currently points to.
 	name     string
 	resolver InstanceResolver
 	logger   debug.ContextLogger
@@ -90,8 +95,15 @@ func (w *DNSWatcher) watch(ctx context.Context, period time.Duration) {
 // check re-resolves the DNS name and closes every tracked connection to an
 // instance other than the one the name now points to. A failed lookup keeps
 // existing connections open: it is more likely a transient DNS error than a
-// change of instance.
+// change of instance. With no tracked connections there is nothing to close,
+// so the lookup is skipped.
 func (w *DNSWatcher) check(ctx context.Context) {
+	w.mu.Lock()
+	n := len(w.conns)
+	w.mu.Unlock()
+	if n == 0 {
+		return
+	}
 	t, err := w.resolver.Resolve(ctx, w.name)
 	if err != nil {
 		w.logger.Debugf(ctx, "[%v] DNS name check failed, keeping connections: %v", w.name, err)
