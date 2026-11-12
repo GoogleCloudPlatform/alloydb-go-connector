@@ -70,11 +70,6 @@ func (c *LazyRefreshCache) ConnectionInfo(
 ) (ConnectionInfo, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// The caller may have waited on the mutex behind a slow refresh. Don't
-	// report success to a caller whose context has already ended.
-	if err := ctx.Err(); err != nil {
-		return ConnectionInfo{}, err
-	}
 	// strip monotonic clock with UTC()
 	now := time.Now().UTC()
 	// Pad expiration with a buffer to give the client plenty of time to

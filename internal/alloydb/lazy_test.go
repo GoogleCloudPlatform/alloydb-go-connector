@@ -170,47 +170,6 @@ func TestLazyRefreshCacheRefreshTimeout(t *testing.T) {
 	}
 }
 
-func TestLazyRefreshCacheHonorsCallerContext(t *testing.T) {
-	u := testInstanceURI()
-	inst := mock.NewFakeInstance(u.project, u.region, u.cluster, u.name)
-	client, url, cleanup := mock.HTTPClient(
-		mock.InstanceGetSuccess(inst, 1),
-		mock.CreateEphemeralSuccess(inst, 1),
-	)
-	defer func() {
-		if err := cleanup(); err != nil {
-			t.Fatalf("%v", err)
-		}
-	}()
-	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
-		context.Background(),
-		option.WithHTTPClient(client),
-		option.WithEndpoint(url),
-		option.WithTokenSource(stubTokenSource{}),
-	)
-	if err != nil {
-		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
-	}
-	cache := NewLazyRefreshCache(
-		u, nullLogger{}, c,
-		rsaKey, 30*time.Second, "",
-		false,
-		"some-ua",
-		telv2.NullMetricRecorder{},
-	)
-	if _, err := cache.ConnectionInfo(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
-	// A caller whose context ended while it waited on the cache should get
-	// its context error, not the cached connection info.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := cache.ConnectionInfo(ctx); !errors.Is(err, context.Canceled) {
-		t.Fatalf("want = %v, got = %v", context.Canceled, err)
-	}
-}
-
 type mockMetricRecorder struct {
 	mu       sync.Mutex
 	gotAttrs telv2.Attributes
