@@ -21,9 +21,10 @@ import (
 	"time"
 
 	alloydbadmin "cloud.google.com/go/alloydb/apiv1alpha"
+	"golang.org/x/time/rate"
+
 	"cloud.google.com/go/alloydbconn/debug"
 	telv2 "cloud.google.com/go/alloydbconn/internal/tel/v2"
-	"golang.org/x/time/rate"
 )
 
 // LazyRefreshCache is caches connection info and refreshes the cache only when
