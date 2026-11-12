@@ -58,6 +58,12 @@ func (r *Request) matches(hR *http.Request) bool {
 	return true
 }
 
+// ServeHTTP responds to hR the way the Request is configured to, regardless of
+// whether it matches and without counting it as a call.
+func (r *Request) ServeHTTP(resp http.ResponseWriter, hR *http.Request) {
+	r.handle(resp, hR)
+}
+
 // InstanceGetSuccess returns a Request that responds to the `instance.get`
 // AlloyDB Admin API endpoint.
 func InstanceGetSuccess(i FakeAlloyDBInstance, ct int) *Request {
