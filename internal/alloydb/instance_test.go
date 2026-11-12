@@ -19,6 +19,9 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -378,4 +381,506 @@ func TestRefreshAheadCacheMetrics(t *testing.T) {
 		})
 	}
 
+}
+
+// fakeAdminAPI is an AlloyDB Admin API that answers each refresh according to
+// a scripted step, so tests can fail, hold, or vary individual refreshes. A
+// refresh beyond the script fails. Every refresh makes one connectionInfo
+// (GET) and one generateClientCertificate (POST) call, so the Nth call of
+// each kind belongs to refresh N.
+type fakeAdminAPI struct {
+	steps   []refreshStep
+	started chan int // receives each refresh's number as it starts
+
+	mu    sync.Mutex
+	gets  int
+	posts int
+}
+
+// refreshStep describes how the fake answers one refresh.
+type refreshStep struct {
+	inst mock.FakeAlloyDBInstance
+	// fail responds with 403 Forbidden, which the client does not retry.
+	fail bool
+	// hold, if set, delays the response until it is released.
+	hold *gate
+}
+
+func newFakeAdminAPI(
+	t *testing.T, steps ...refreshStep,
+) (*fakeAdminAPI, *alloydbadmin.AlloyDBAdminClient) {
+	t.Helper()
+	f := &fakeAdminAPI{steps: steps, started: make(chan int, 100)}
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	c, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		context.Background(),
+		option.WithHTTPClient(srv.Client()),
+		option.WithEndpoint(srv.URL),
+		option.WithTokenSource(stubTokenSource{}),
+	)
+	if err != nil {
+		t.Fatalf("expected NewClient to succeed, but got error: %v", err)
+	}
+	// Don't close the client: a refresh abandoned by Close may still be
+	// using it.
+	return f, c
+}
+
+func (f *fakeAdminAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	isGet := r.Method == http.MethodGet
+	f.mu.Lock()
+	var n int
+	if isGet {
+		f.gets++
+		n = f.gets
+	} else {
+		f.posts++
+		n = f.posts
+	}
+	f.mu.Unlock()
+	if isGet {
+		select {
+		case f.started <- n:
+		default:
+		}
+	}
+	if n > len(f.steps) {
+		http.Error(w, "unexpected refresh", http.StatusForbidden)
+		return
+	}
+	s := f.steps[n-1]
+	if isGet && s.hold != nil {
+		select {
+		case <-s.hold.ch:
+		case <-r.Context().Done():
+			return
+		}
+	}
+	switch {
+	case s.fail:
+		http.Error(w, "refresh failed", http.StatusForbidden)
+	case isGet:
+		mock.InstanceGetSuccess(s.inst, 1).ServeHTTP(w, r)
+	default:
+		mock.CreateEphemeralSuccess(s.inst, 1).ServeHTTP(w, r)
+	}
+}
+
+// refreshes reports how many refreshes have started.
+func (f *fakeAdminAPI) refreshes() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.gets
+}
+
+// waitForRefresh waits until refresh n has started.
+func (f *fakeAdminAPI) waitForRefresh(t *testing.T, n int) {
+	t.Helper()
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-f.started:
+			if got >= n {
+				return
+			}
+		case <-timeout:
+			t.Fatalf("refresh %d did not start, refreshes = %d", n, f.refreshes())
+		}
+	}
+}
+
+// forceRefresh calls ForceRefresh and waits for refresh n to start.
+//
+// RefreshAheadCache drops a ForceRefresh that arrives after a refresh's result
+// is ready but before the next refresh is scheduled, so this retries until
+// the refresh starts.
+func (f *fakeAdminAPI) forceRefresh(t *testing.T, c *RefreshAheadCache, n int) {
+	t.Helper()
+	for range 50 {
+		c.ForceRefresh()
+		select {
+		case got := <-f.started:
+			if got >= n {
+				return
+			}
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	t.Fatalf("refresh %d did not start, refreshes = %d", n, f.refreshes())
+}
+
+// gate holds a refresh until released. Tests release it at cleanup so the
+// fake's server can shut down.
+type gate struct {
+	ch   chan struct{}
+	once sync.Once
+}
+
+func newGate(t *testing.T) *gate {
+	g := &gate{ch: make(chan struct{})}
+	t.Cleanup(g.release)
+	return g
+}
+
+func (g *gate) release() { g.once.Do(func() { close(g.ch) }) }
+
+// settle gives the cache time to act on a refresh the test can't observe
+// directly, such as recording a failed refresh or skipping a refresh.
+func settle() { time.Sleep(500 * time.Millisecond) }
+
+func newTestRefreshAheadCache(
+	t *testing.T, c *alloydbadmin.AlloyDBAdminClient,
+) *RefreshAheadCache {
+	t.Helper()
+	cache := NewRefreshAheadCache(
+		testInstanceURI(), nullLogger{}, c, rsaKey,
+		30*time.Second, "dialer-id", false, "some-ua",
+		telv2.NullMetricRecorder{},
+	)
+	t.Cleanup(func() { cache.Close() })
+	return cache
+}
+
+// fakeInstance returns a fake instance whose results are told apart by
+// private IP and whose client certificates expire at expiry.
+func fakeInstance(ip string, expiry time.Time) mock.FakeAlloyDBInstance {
+	u := testInstanceURI()
+	return mock.NewFakeInstance(
+		u.Project(), u.Region(), u.Cluster(), u.Name(),
+		mock.WithPrivateIP(ip),
+		mock.WithCertExpiry(expiry),
+	)
+}
+
+func inADay() time.Time { return time.Now().Add(24 * time.Hour) }
+
+// wantIP fetches connection info and checks it has the wanted private IP.
+func wantIP(t *testing.T, c *RefreshAheadCache, want string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	ci, err := c.ConnectionInfo(ctx)
+	if err != nil {
+		t.Fatalf("ConnectionInfo: %v", err)
+	}
+	if got := ci.IPAddrs[PrivateIP]; got != want {
+		t.Fatalf("private IP: want = %v, got = %v", want, got)
+	}
+}
+
+// eventuallyIP waits for the cache to serve connection info with the wanted
+// private IP.
+func eventuallyIP(t *testing.T, c *RefreshAheadCache, want string) {
+	t.Helper()
+	var (
+		got string
+		err error
+	)
+	for range 50 {
+		var ci ConnectionInfo
+		ci, err = c.ConnectionInfo(context.Background())
+		got = ci.IPAddrs[PrivateIP]
+		if err == nil && got == want {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("private IP: want = %v, got = %v (err = %v)", want, got, err)
+}
+
+func TestRefreshAheadCacheReturnsConnectionInfo(t *testing.T) {
+	expiry := inADay()
+	_, c := newFakeAdminAPI(t, refreshStep{inst: fakeInstance("10.0.0.1", expiry)})
+	cache := newTestRefreshAheadCache(t, c)
+
+	ci, err := cache.ConnectionInfo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ci.Instance != testInstanceURI() {
+		t.Errorf("instance: want = %v, got = %v", testInstanceURI(), ci.Instance)
+	}
+	if got := ci.IPAddrs[PrivateIP]; got != "10.0.0.1" {
+		t.Errorf("private IP: want = 10.0.0.1, got = %v", got)
+	}
+	// Certificates store expiry to the second.
+	if want := expiry.Truncate(time.Second); !ci.Expiration.Equal(want) {
+		t.Errorf("expiration: want = %v, got = %v", want, ci.Expiration)
+	}
+	if ci.ClientCert.Leaf == nil {
+		t.Error("want a client certificate, got none")
+	}
+	if ci.RootCAs == nil {
+		t.Error("want root CAs, got none")
+	}
+}
+
+func TestRefreshAheadCacheWaitsForFirstRefresh(t *testing.T) {
+	hold := newGate(t)
+	f, c := newFakeAdminAPI(t,
+		refreshStep{inst: fakeInstance("10.0.0.1", inADay()), hold: hold},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+	f.waitForRefresh(t, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := cache.ConnectionInfo(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("before first refresh: want = %v, got = %v", context.DeadlineExceeded, err)
+	}
+
+	hold.release()
+	wantIP(t, cache, "10.0.0.1")
+}
+
+func TestRefreshAheadCacheConcurrentCallersShareFirstRefresh(t *testing.T) {
+	hold := newGate(t)
+	f, c := newFakeAdminAPI(t,
+		refreshStep{inst: fakeInstance("10.0.0.1", inADay()), hold: hold},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+
+	const callers = 10
+	errs := make(chan error, callers)
+	for range callers {
+		go func() {
+			ci, err := cache.ConnectionInfo(context.Background())
+			if err == nil && ci.IPAddrs[PrivateIP] != "10.0.0.1" {
+				err = errors.New("unexpected private IP " + ci.IPAddrs[PrivateIP])
+			}
+			errs <- err
+		}()
+	}
+	f.waitForRefresh(t, 1)
+	hold.release()
+	for range callers {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := f.refreshes(); got != 1 {
+		t.Fatalf("refreshes: want = 1, got = %v", got)
+	}
+}
+
+func TestRefreshAheadCacheServesCachedInfo(t *testing.T) {
+	f, c := newFakeAdminAPI(t, refreshStep{inst: fakeInstance("10.0.0.1", inADay())})
+	cache := newTestRefreshAheadCache(t, c)
+
+	for range 5 {
+		wantIP(t, cache, "10.0.0.1")
+	}
+	settle()
+	if got := f.refreshes(); got != 1 {
+		t.Fatalf("refreshes: want = 1, got = %v", got)
+	}
+}
+
+func TestRefreshAheadCacheRefreshesBeforeExpiry(t *testing.T) {
+	// Refreshes are scheduled refreshBuffer before a short-lived
+	// certificate expires, here in about a second.
+	soon := time.Now().Add(refreshBuffer + 2*time.Second)
+	f, c := newFakeAdminAPI(t,
+		refreshStep{inst: fakeInstance("10.0.0.1", soon)},
+		refreshStep{inst: fakeInstance("10.0.0.2", inADay())},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+	wantIP(t, cache, "10.0.0.1")
+
+	f.waitForRefresh(t, 2)
+	eventuallyIP(t, cache, "10.0.0.2")
+}
+
+func TestRefreshAheadCacheServesValidInfoDuringRefresh(t *testing.T) {
+	hold := newGate(t)
+	f, c := newFakeAdminAPI(t,
+		refreshStep{inst: fakeInstance("10.0.0.1", inADay())},
+		refreshStep{inst: fakeInstance("10.0.0.2", inADay()), hold: hold},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+	wantIP(t, cache, "10.0.0.1")
+
+	f.forceRefresh(t, cache, 2)
+	// The forced refresh is held, but the current info is still valid.
+	wantIP(t, cache, "10.0.0.1")
+
+	hold.release()
+	eventuallyIP(t, cache, "10.0.0.2")
+}
+
+func TestRefreshAheadCacheKeepsValidInfoAfterFailedRefresh(t *testing.T) {
+	f, c := newFakeAdminAPI(t,
+		refreshStep{inst: fakeInstance("10.0.0.1", inADay())},
+		refreshStep{fail: true},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+	wantIP(t, cache, "10.0.0.1")
+
+	f.forceRefresh(t, cache, 2)
+	settle()
+	wantIP(t, cache, "10.0.0.1")
+}
+
+func TestRefreshAheadCacheReturnsErrorWithoutValidInfo(t *testing.T) {
+	hold := newGate(t)
+	f, c := newFakeAdminAPI(t,
+		refreshStep{fail: true},
+		refreshStep{inst: fakeInstance("10.0.0.1", inADay()), hold: hold},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+	// The failed refresh is retried right away. Wait for the retry so the
+	// failure is known to be recorded.
+	f.waitForRefresh(t, 2)
+
+	// The caller gets the failure without waiting for the retry.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := cache.ConnectionInfo(ctx)
+	var refreshErr *errtype.RefreshError
+	if !errors.As(err, &refreshErr) {
+		t.Fatalf("want = %T, got = %v", refreshErr, err)
+	}
+}
+
+func TestRefreshAheadCacheRetriesFailedRefresh(t *testing.T) {
+	f, c := newFakeAdminAPI(t,
+		refreshStep{fail: true},
+		refreshStep{inst: fakeInstance("10.0.0.1", inADay())},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+
+	f.waitForRefresh(t, 2)
+	eventuallyIP(t, cache, "10.0.0.1")
+}
+
+func TestRefreshAheadCacheForceRefreshWaitsWhenInfoFailed(t *testing.T) {
+	hold := newGate(t)
+	f, c := newFakeAdminAPI(t,
+		refreshStep{fail: true},
+		refreshStep{inst: fakeInstance("10.0.0.1", inADay()), hold: hold},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+	f.waitForRefresh(t, 2)
+	if _, err := cache.ConnectionInfo(context.Background()); err == nil {
+		t.Fatal("want error from failed refresh, got nil")
+	}
+
+	// The retry is already running, so ForceRefresh joins it, and callers
+	// wait for its result instead of getting the earlier failure.
+	cache.ForceRefresh()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := cache.ConnectionInfo(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("during forced refresh: want = %v, got = %v", context.DeadlineExceeded, err)
+	}
+
+	hold.release()
+	wantIP(t, cache, "10.0.0.1")
+	settle()
+	if got := f.refreshes(); got != 2 {
+		t.Fatalf("refreshes: want = 2, got = %v", got)
+	}
+}
+
+func TestRefreshAheadCacheForceRefreshWaitsWhenInfoExpired(t *testing.T) {
+	hold := newGate(t)
+	f, c := newFakeAdminAPI(t,
+		refreshStep{inst: fakeInstance("10.0.0.1", time.Now().Add(-time.Minute))},
+		refreshStep{inst: fakeInstance("10.0.0.2", inADay()), hold: hold},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+	// An expired certificate is refreshed right away.
+	f.waitForRefresh(t, 2)
+
+	// ConnectionInfo returns expired info. Callers are expected to check
+	// the expiration and force a refresh, as Dial does.
+	wantIP(t, cache, "10.0.0.1")
+
+	cache.ForceRefresh()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := cache.ConnectionInfo(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("during forced refresh: want = %v, got = %v", context.DeadlineExceeded, err)
+	}
+
+	hold.release()
+	wantIP(t, cache, "10.0.0.2")
+}
+
+func TestRefreshAheadCacheRateLimitsRefreshes(t *testing.T) {
+	f, c := newFakeAdminAPI(t,
+		refreshStep{inst: fakeInstance("10.0.0.1", inADay())},
+		refreshStep{inst: fakeInstance("10.0.0.2", inADay())},
+		refreshStep{inst: fakeInstance("10.0.0.3", inADay())},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+	wantIP(t, cache, "10.0.0.1")
+
+	// The initial refresh and one forced refresh use the burst.
+	f.forceRefresh(t, cache, 2)
+	eventuallyIP(t, cache, "10.0.0.2")
+
+	// The next refresh waits about refreshInterval for the limiter. Let the
+	// cache schedule its next refresh first so ForceRefresh isn't dropped
+	// (see forceRefresh), which would make this check pass vacuously.
+	settle()
+	cache.ForceRefresh()
+	settle()
+	if got := f.refreshes(); got != 2 {
+		t.Fatalf("refreshes: want = 2, got = %v", got)
+	}
+	wantIP(t, cache, "10.0.0.2")
+}
+
+func TestRefreshAheadCacheCloseStopsRefreshes(t *testing.T) {
+	soon := time.Now().Add(refreshBuffer + 2*time.Second)
+	f, c := newFakeAdminAPI(t,
+		refreshStep{inst: fakeInstance("10.0.0.1", soon)},
+		refreshStep{inst: fakeInstance("10.0.0.2", inADay())},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+	wantIP(t, cache, "10.0.0.1")
+
+	if err := cache.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// The second refresh was due in about a second.
+	time.Sleep(3 * time.Second)
+	if got := f.refreshes(); got != 1 {
+		t.Fatalf("refreshes: want = 1, got = %v", got)
+	}
+	cache.ForceRefresh()
+	settle()
+	if got := f.refreshes(); got != 1 {
+		t.Fatalf("refreshes after ForceRefresh: want = 1, got = %v", got)
+	}
+	if err := cache.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
+func TestRefreshAheadCacheCloseUnblocksWaitingCallers(t *testing.T) {
+	hold := newGate(t)
+	f, c := newFakeAdminAPI(t,
+		refreshStep{inst: fakeInstance("10.0.0.1", inADay()), hold: hold},
+	)
+	cache := newTestRefreshAheadCache(t, c)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := cache.ConnectionInfo(context.Background())
+		errCh <- err
+	}()
+	f.waitForRefresh(t, 1)
+	cache.Close()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("want error after Close, got nil")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ConnectionInfo still waiting after Close")
+	}
 }
