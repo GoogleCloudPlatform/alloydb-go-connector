@@ -52,7 +52,7 @@ var (
 	// 'projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>'
 	// Additionally, we have to support legacy "domain-scoped" projects
 	// (e.g. "google.com:PROJECT")
-	instURIRegex = regexp.MustCompile("projects/([^:]+(:[^:]+)?)/locations/([^:]+)/clusters/([^:]+)/instances/([^:]+)")
+	instURIRegex = regexp.MustCompile(`^projects/([^/:]+(?::[^/:]+)?)/locations/([^/]+)/clusters/([^/]+)/instances/([^/]+)$`)
 )
 
 // InstanceURI represents an AlloyDB instance.
@@ -110,9 +110,9 @@ func ParseInstURI(cn string) (InstanceURI, error) {
 
 	c := InstanceURI{
 		project: string(m[1]),
-		region:  string(m[3]),
-		cluster: string(m[4]),
-		name:    string(m[5]),
+		region:  string(m[2]),
+		cluster: string(m[3]),
+		name:    string(m[4]),
 	}
 	return c, nil
 }
