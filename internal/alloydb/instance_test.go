@@ -109,6 +109,38 @@ func TestParseConnNameErrors(t *testing.T) {
 			desc: "empty",
 			in:   "::::",
 		},
+		{
+			desc: "slash in project",
+			in:   "projects/org/proj/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "slash in domain-scoped project",
+			in:   "projects/google.com:org/proj/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "multiple colons in project",
+			in:   "projects/a:b:c/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "extra leading segment",
+			in:   "extra/projects/proj/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "trailing slash",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name/",
+		},
+		{
+			desc: "extra trailing segment",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name/extra",
+		},
+		{
+			desc: "empty project",
+			in:   "projects//locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "wrong resource segment",
+			in:   "projects/proj/regions/reg/clusters/clust/instances/name",
+		},
 	}
 
 	for _, tc := range tcs {
