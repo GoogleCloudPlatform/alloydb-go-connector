@@ -17,10 +17,12 @@ package tel
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/alloydbconn/debug"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -33,6 +35,7 @@ import (
 
 const (
 	meterName         = "alloydb.googleapis.com/client/connector"
+	publicMeterName   = "cloud.google.com/go/alloydbconn"
 	monitoredResource = "alloydb.googleapis.com/InstanceClient"
 	dialCount         = "dial_count"
 	dialLatency       = "dial_latencies"
@@ -40,6 +43,12 @@ const (
 	bytesSent         = "bytes_sent_count"
 	bytesReceived     = "bytes_received_count"
 	refreshCount      = "refresh_count"
+	publicDialCount   = "alloydb.connector.dial.count"
+	publicDialLatency = "alloydb.connector.dial.duration"
+	publicOpenConns   = "alloydb.connector.connections.open"
+	publicBytesSent   = "alloydb.connector.bytes.sent"
+	publicBytesRecv   = "alloydb.connector.bytes.received"
+	publicRefresh     = "alloydb.connector.refresh.count"
 	// ResourceType is a special attribute that the exporter
 	// transforms into the MonitoredResource field.
 	ResourceType = "gcp.resource_type"
@@ -68,7 +77,16 @@ const (
 	status = "status"
 	// refreshType indicates whether the cache is a refresh ahead cache or a
 	// lazy cache.
-	refreshType = "refresh_type"
+	refreshType         = "refresh_type"
+	publicProjectID     = "alloydb.project_id"
+	publicLocation      = "alloydb.location"
+	publicCluster       = "alloydb.cluster_id"
+	publicInstance      = "alloydb.instance_id"
+	publicConnectorType = "alloydb.connector.type"
+	publicAuthType      = "alloydb.auth.type"
+	publicCacheHit      = "alloydb.cache.hit"
+	publicStatus        = "alloydb.status"
+	publicRefreshType   = "alloydb.refresh.type"
 	// DialSuccess indicates the dial attempt succeeded.
 	DialSuccess = "success"
 	// DialUserError indicates the dial attempt failed due to a user mistake.
@@ -128,8 +146,8 @@ type MetricRecorder interface {
 // should always be 60s. This value is exposed as a var to faciliate testing.
 var DefaultExportInterval = 60 * time.Second
 
-// NewMetricRecorder creates a MetricRecorder. When the configuration is not
-// enabled, a null recorder is returned instead.
+// NewMetricRecorder creates the built-in Cloud Monitoring MetricRecorder. When
+// the configuration is not enabled, a null recorder is returned instead.
 func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitoring.MetricClient, cfg Config) MetricRecorder {
 	if !cfg.Enabled {
 		l.Debugf(ctx, "disabling built-in metrics")
@@ -244,6 +262,139 @@ func newConnTypeOpts() map[string]metric.MeasurementOption {
 		))
 	}
 	return opts
+}
+
+// NewGlobalMetricRecorder creates a MetricRecorder that reports public
+// connector metrics through the process-global OpenTelemetry MeterProvider.
+// It does not configure or manage the provider's lifecycle.
+func NewGlobalMetricRecorder(ctx context.Context, l debug.ContextLogger, cfg Config) MetricRecorder {
+	return newGlobalMetricRecorder(ctx, l, otel.GetMeterProvider(), cfg)
+}
+
+func newGlobalMetricRecorder(ctx context.Context, l debug.ContextLogger, p metric.MeterProvider, cfg Config) MetricRecorder {
+	if !cfg.Enabled || p == nil {
+		return NullMetricRecorder{}
+	}
+	m := p.Meter(publicMeterName, metric.WithInstrumentationVersion(cfg.Version))
+	mDialCount, err := m.Int64Counter(publicDialCount, metric.WithUnit("{dial}"))
+	if err != nil {
+		l.Debugf(ctx, "global metrics failed to initialize dial count metric: %v", err)
+		return NullMetricRecorder{}
+	}
+	mDialLatency, err := m.Float64Histogram(publicDialLatency, metric.WithUnit("ms"))
+	if err != nil {
+		l.Debugf(ctx, "global metrics failed to initialize dial duration metric: %v", err)
+		return NullMetricRecorder{}
+	}
+	mOpenConns, err := m.Int64UpDownCounter(publicOpenConns, metric.WithUnit("{connection}"))
+	if err != nil {
+		l.Debugf(ctx, "global metrics failed to initialize open connections metric: %v", err)
+		return NullMetricRecorder{}
+	}
+	mBytesTx, err := m.Int64Counter(publicBytesSent, metric.WithUnit("By"))
+	if err != nil {
+		l.Debugf(ctx, "global metrics failed to initialize bytes sent metric: %v", err)
+		return NullMetricRecorder{}
+	}
+	mBytesRx, err := m.Int64Counter(publicBytesRecv, metric.WithUnit("By"))
+	if err != nil {
+		l.Debugf(ctx, "global metrics failed to initialize bytes received metric: %v", err)
+		return NullMetricRecorder{}
+	}
+	mRefreshCount, err := m.Int64Counter(publicRefresh, metric.WithUnit("{refresh}"))
+	if err != nil {
+		l.Debugf(ctx, "global metrics failed to initialize refresh count metric: %v", err)
+		return NullMetricRecorder{}
+	}
+	return &globalMetricRecorder{
+		baseAttributes: []attribute.KeyValue{
+			attribute.String(publicProjectID, cfg.ProjectID),
+			attribute.String(publicLocation, cfg.Location),
+			attribute.String(publicCluster, cfg.Cluster),
+			attribute.String(publicInstance, cfg.Instance),
+		},
+		mDialCount:    mDialCount,
+		mDialLatency:  mDialLatency,
+		mOpenConns:    mOpenConns,
+		mBytesTx:      mBytesTx,
+		mBytesRx:      mBytesRx,
+		mRefreshCount: mRefreshCount,
+	}
+}
+
+// MultiMetricRecorder forwards metrics to each recorder. It is used to emit
+// built-in and public OpenTelemetry metrics from the same connector events.
+type MultiMetricRecorder struct {
+	recorders []MetricRecorder
+}
+
+// NewMultiMetricRecorder creates a MetricRecorder that forwards to recorders.
+func NewMultiMetricRecorder(recorders ...MetricRecorder) MetricRecorder {
+	filtered := make([]MetricRecorder, 0, len(recorders))
+	for _, recorder := range recorders {
+		if recorder != nil {
+			filtered = append(filtered, recorder)
+		}
+	}
+	return MultiMetricRecorder{recorders: filtered}
+}
+
+// Shutdown shuts down each contained recorder.
+func (m MultiMetricRecorder) Shutdown(ctx context.Context) error {
+	var errs []error
+	for _, recorder := range m.recorders {
+		errs = append(errs, recorder.Shutdown(ctx))
+	}
+	return errors.Join(errs...)
+}
+
+// RecordBytesRxCount records received bytes with each contained recorder.
+func (m MultiMetricRecorder) RecordBytesRxCount(ctx context.Context, bytes int64, a Attributes) {
+	for _, recorder := range m.recorders {
+		recorder.RecordBytesRxCount(ctx, bytes, a)
+	}
+}
+
+// RecordBytesTxCount records sent bytes with each contained recorder.
+func (m MultiMetricRecorder) RecordBytesTxCount(ctx context.Context, bytes int64, a Attributes) {
+	for _, recorder := range m.recorders {
+		recorder.RecordBytesTxCount(ctx, bytes, a)
+	}
+}
+
+// RecordDialCount records a dial attempt with each contained recorder.
+func (m MultiMetricRecorder) RecordDialCount(ctx context.Context, a Attributes) {
+	for _, recorder := range m.recorders {
+		recorder.RecordDialCount(ctx, a)
+	}
+}
+
+// RecordDialLatency records dial latency with each contained recorder.
+func (m MultiMetricRecorder) RecordDialLatency(ctx context.Context, latencyMS int64, a Attributes) {
+	for _, recorder := range m.recorders {
+		recorder.RecordDialLatency(ctx, latencyMS, a)
+	}
+}
+
+// RecordOpenConnection records an opened connection with each contained recorder.
+func (m MultiMetricRecorder) RecordOpenConnection(ctx context.Context, a Attributes) {
+	for _, recorder := range m.recorders {
+		recorder.RecordOpenConnection(ctx, a)
+	}
+}
+
+// RecordClosedConnection records a closed connection with each contained recorder.
+func (m MultiMetricRecorder) RecordClosedConnection(ctx context.Context, a Attributes) {
+	for _, recorder := range m.recorders {
+		recorder.RecordClosedConnection(ctx, a)
+	}
+}
+
+// RecordRefreshCount records a refresh result with each contained recorder.
+func (m MultiMetricRecorder) RecordRefreshCount(ctx context.Context, a Attributes) {
+	for _, recorder := range m.recorders {
+		recorder.RecordRefreshCount(ctx, a)
+	}
 }
 
 // metricRecorder holds the various counters that track internal operations.
@@ -371,6 +522,76 @@ func (m *metricRecorder) RecordRefreshCount(ctx context.Context, a Attributes) {
 			attribute.String(refreshType, a.RefreshType),
 		)),
 	)
+}
+
+// globalMetricRecorder records public connector metrics using an application
+// owned MeterProvider. Shutdown is intentionally a no-op.
+type globalMetricRecorder struct {
+	baseAttributes []attribute.KeyValue
+	mDialCount     metric.Int64Counter
+	mDialLatency   metric.Float64Histogram
+	mOpenConns     metric.Int64UpDownCounter
+	mBytesTx       metric.Int64Counter
+	mBytesRx       metric.Int64Counter
+	mRefreshCount  metric.Int64Counter
+}
+
+func (m *globalMetricRecorder) Shutdown(context.Context) error { return nil }
+
+func (m *globalMetricRecorder) attributes(attributes ...attribute.KeyValue) metric.MeasurementOption {
+	all := make([]attribute.KeyValue, 0, len(m.baseAttributes)+len(attributes))
+	all = append(all, m.baseAttributes...)
+	all = append(all, attributes...)
+	return metric.WithAttributeSet(attribute.NewSet(all...))
+}
+
+func (m *globalMetricRecorder) RecordBytesRxCount(ctx context.Context, bytes int64, a Attributes) {
+	m.mBytesRx.Add(ctx, bytes, m.attributes(
+		attribute.String(publicConnectorType, connectorTypeValue(a.UserAgent)),
+	))
+}
+
+func (m *globalMetricRecorder) RecordBytesTxCount(ctx context.Context, bytes int64, a Attributes) {
+	m.mBytesTx.Add(ctx, bytes, m.attributes(
+		attribute.String(publicConnectorType, connectorTypeValue(a.UserAgent)),
+	))
+}
+
+func (m *globalMetricRecorder) RecordDialCount(ctx context.Context, a Attributes) {
+	m.mDialCount.Add(ctx, 1, m.attributes(
+		attribute.String(publicConnectorType, connectorTypeValue(a.UserAgent)),
+		attribute.String(publicAuthType, authTypeValue(a.IAMAuthN)),
+		attribute.Bool(publicCacheHit, a.CacheHit),
+		attribute.String(publicStatus, a.DialStatus),
+	))
+}
+
+func (m *globalMetricRecorder) RecordDialLatency(ctx context.Context, latencyMS int64, a Attributes) {
+	m.mDialLatency.Record(ctx, float64(latencyMS), m.attributes(
+		attribute.String(publicConnectorType, connectorTypeValue(a.UserAgent)),
+	))
+}
+
+func (m *globalMetricRecorder) RecordOpenConnection(ctx context.Context, a Attributes) {
+	m.mOpenConns.Add(ctx, 1, m.attributes(
+		attribute.String(publicConnectorType, connectorTypeValue(a.UserAgent)),
+		attribute.String(publicAuthType, authTypeValue(a.IAMAuthN)),
+	))
+}
+
+func (m *globalMetricRecorder) RecordClosedConnection(ctx context.Context, a Attributes) {
+	m.mOpenConns.Add(ctx, -1, m.attributes(
+		attribute.String(publicConnectorType, connectorTypeValue(a.UserAgent)),
+		attribute.String(publicAuthType, authTypeValue(a.IAMAuthN)),
+	))
+}
+
+func (m *globalMetricRecorder) RecordRefreshCount(ctx context.Context, a Attributes) {
+	m.mRefreshCount.Add(ctx, 1, m.attributes(
+		attribute.String(publicConnectorType, connectorTypeValue(a.UserAgent)),
+		attribute.String(publicStatus, a.RefreshStatus),
+		attribute.String(publicRefreshType, a.RefreshType),
+	))
 }
 
 // NullMetricRecorder implements the MetricRecorder interface with no-ops. It

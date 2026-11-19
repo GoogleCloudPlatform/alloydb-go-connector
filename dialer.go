@@ -149,7 +149,7 @@ type Dialer struct {
 	// should be removed.
 	disableMetadataExchange bool
 
-	// disableBuiltInMetrics turns the internal metric export into a no-op.
+	// disableBuiltInMetrics turns OpenTelemetry metric exports into no-ops.
 	disableBuiltInMetrics bool
 
 	staticConnInfo io.Reader
@@ -352,7 +352,10 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst alloydb.InstanceURI) t
 		Cluster:   inst.Cluster(),
 		Instance:  inst.Name(),
 	}
-	mr := telv2.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
+	mr := telv2.NewMultiMetricRecorder(
+		telv2.NewMetricRecorder(ctx, d.logger, d.mClient, cfg),
+		telv2.NewGlobalMetricRecorder(ctx, d.logger, cfg),
+	)
 	d.metricRecorders[inst] = mr
 	return mr
 }

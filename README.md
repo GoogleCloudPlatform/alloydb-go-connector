@@ -395,10 +395,18 @@ For all available options, see the [`alloydbconn.Option` reference][pkg-docs].
 
 ## Observability
 
-The connector exports metrics and traces via [OpenCensus][opencensus]. Configure
-an exporter to send telemetry to your monitoring backend.
+The connector emits OpenTelemetry metrics through the application's global
+`MeterProvider`. Configure an exporter during application startup and metrics
+will be delivered through that existing pipeline; the connector does not
+configure or shut down the provider. See [METRICS.md](METRICS.md) for the
+metric catalog, Prometheus and OTLP integration guidance, and cardinality
+details.
 
-### Metrics
+The connector continues to record legacy metrics and traces via
+[OpenCensus][opencensus] for compatibility. Configure an OpenCensus exporter
+separately when those legacy signals are required.
+
+### Legacy OpenCensus metrics
 
 | Metric | Description |
 |---|---|
@@ -410,14 +418,14 @@ an exporter to send telemetry to your monitoring backend.
 | `alloydbconn/bytes_sent` | Bytes sent to an AlloyDB instance |
 | `alloydbconn/bytes_received` | Bytes received from an AlloyDB instance |
 
-### Traces
+### Legacy OpenCensus traces
 
 - `cloud.google.com/go/alloydbconn.Dial` — the full dial operation
 - `cloud.google.com/go/alloydbconn/internal.InstanceInfo` — instance metadata retrieval
 - `cloud.google.com/go/alloydbconn/internal.Connect` — connection attempt using the ephemeral certificate
 - AlloyDB API client operations
 
-### Example: Cloud Monitoring and Cloud Trace
+### Example: OpenCensus Cloud Monitoring and Cloud Trace
 
 ```go
 import (
