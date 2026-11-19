@@ -575,12 +575,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		tel.RecordOpenConnections(context.Background(), int64(n), d.dialerID, inst.String())
 		mr.RecordClosedConnection(context.Background(), attrs)
 	}, d.dialerID, inst.String())
+	// Register the connection in d.conns before adding it to the watcher so a
+	// concurrent failover close cannot untrack it before it is tracked.
+	d.trackConn(ic)
 	// Track the connection returned to the caller, so that a watcher closing
 	// it also runs the close bookkeeping above.
 	if w != nil {
 		w.Add(ic, inst)
 	}
-	d.trackConn(ic)
 
 	mr.RecordDialLatency(ctx, latency, attrs)
 	go func() {
