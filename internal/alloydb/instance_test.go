@@ -1037,7 +1037,6 @@ func TestRefreshAheadCacheCloseUnblocksWaitingCallers(t *testing.T) {
 }
 
 func TestRefreshAheadCacheConnectionInfoAfterClose(t *testing.T) {
-	t.Skip("skipping flaky test: ConnectionInfo after Close randomly returns the cached result or context.Canceled")
 	synctest.Test(t, func(t *testing.T) {
 		_, c := newFakeAdminAPI(t,
 			refreshStep{inst: fakeInstance("10.0.0.1", inADay())},
@@ -1054,7 +1053,6 @@ func TestRefreshAheadCacheConnectionInfoAfterClose(t *testing.T) {
 }
 
 func TestRefreshAheadCacheTimesOutRefresh(t *testing.T) {
-	t.Skip("skipping until the refresh timeout applies to the Admin API call: https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/842")
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
 		// Shorter than refreshInterval, so the limiter wait for the third

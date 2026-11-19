@@ -365,8 +365,9 @@ func WithRSAKey(k *rsa.PrivateKey) Option {
 	}
 }
 
-// WithRefreshTimeout returns an Option that sets a timeout on refresh
-// operations. Defaults to 60s.
+// WithRefreshTimeout returns an Option that sets a timeout on the AlloyDB
+// Admin API calls made by each background refresh. Defaults to 60s. It has no
+// effect with WithLazyRefresh, where the dial's context bounds each refresh.
 func WithRefreshTimeout(t time.Duration) Option {
 	return func(d *dialerConfig) {
 		d.refreshTimeout = t

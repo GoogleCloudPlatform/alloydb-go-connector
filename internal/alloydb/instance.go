@@ -38,9 +38,9 @@ const (
 	// enforced by the rate limiter.
 	refreshInterval = 30 * time.Second
 
-	// RefreshTimeout is the maximum amount of time to wait for a refresh
-	// cycle to complete. This value should be greater than the
-	// refreshInterval.
+	// RefreshTimeout is the maximum amount of time to wait for the AlloyDB
+	// Admin API calls of a refresh to complete. It does not include time
+	// spent waiting on the rate limiter.
 	RefreshTimeout = 60 * time.Second
 
 	// refreshBurst is the initial burst allowed by the rate limiter.
@@ -117,75 +117,44 @@ func ParseInstURI(cn string) (InstanceURI, error) {
 	return c, nil
 }
 
-// refreshOperation is a pending result of a refresh operation of data used to
-// connect securely. It should only be initialized by the Instance struct as
-// part of a refresh cycle.
-type refreshOperation struct {
-	result ConnectionInfo
-	err    error
+// errCacheClosed is returned by ConnectionInfo once the cache is closed.
+var errCacheClosed = fmt.Errorf("refresh ahead cache is closed: %w", context.Canceled)
 
-	// timer that triggers refresh, can be used to cancel.
-	timer *time.Timer
-	// indicates the struct is ready to read from
-	ready chan struct{}
-}
-
-// Cancel prevents the instanceInfo from starting, if it hasn't already
-// started. Returns true if timer was stopped successfully, or false if it has
-// already started.
-func (r *refreshOperation) cancel() bool {
-	return r.timer.Stop()
-}
-
-// IsValid returns true if this result is complete, successful, and is still
-// valid.
-func (r *refreshOperation) isValid() bool {
-	// verify the result has finished running
-	select {
-	default:
-		return false
-	case <-r.ready:
-		if r.err != nil || time.Now().After(r.result.Expiration) {
-			return false
-		}
-		return true
-	}
-}
-
-// RefreshAheadCache manages the information used to connect to the AlloyDB instance by
-// periodically calling the AlloyDB Admin API. It automatically refreshes the
-// required information approximately 4 minutes before the previous certificate
-// expires (every ~56 minutes).
+// RefreshAheadCache manages the information used to connect to the AlloyDB
+// instance by periodically calling the AlloyDB Admin API. A single goroutine
+// refreshes the information in the background, halfway to the client
+// certificate's expiration, or refreshBuffer before it expires if the
+// certificate is short-lived.
 type RefreshAheadCache struct {
 	instanceURI InstanceURI
 	logger      debug.ContextLogger
-	// refreshTimeout sets the maximum duration a refresh cycle can run
-	// for.
+	// refreshTimeout bounds each call to the AlloyDB Admin API.
 	refreshTimeout time.Duration
-	// l controls the rate at which refresh cycles are run.
-	l *rate.Limiter
-	r adminAPIClient
-
-	resultGuard sync.RWMutex
-	// cur represents the current refreshOperation that will be used to
-	// create connections. If a valid complete refreshOperation isn't
-	// available it's possible for cur to be equal to next.
-	cur *refreshOperation
-	// next represents a future or ongoing refreshOperation. Once complete,
-	// it will replace cur and schedule a replacement to occur.
-	next *refreshOperation
-
-	// ctx is the default ctx for refresh operations. Canceling it prevents
-	// new refresh operations from being triggered.
-	ctx    context.Context
-	cancel context.CancelFunc
-
+	// limiter controls the rate at which refreshes run.
+	limiter        *rate.Limiter
+	client         adminAPIClient
 	userAgent      string
 	metricRecorder telv2.MetricRecorder
+
+	mu sync.Mutex
+	// info and err hold the result callers should use: info from the latest
+	// successful refresh, or the error from the latest failed refresh if
+	// there was no valid info to keep.
+	info ConnectionInfo
+	err  error
+	// pending, when non-nil, is closed by the next publish. Callers wait on
+	// it instead of using info and err.
+	pending chan struct{}
+
+	// force asks run to refresh now. It holds at most one request.
+	force  chan struct{}
+	cancel context.CancelFunc
+	// done is closed when run returns.
+	done chan struct{}
 }
 
 // NewRefreshAheadCache initializes a new cache that proactively refreshes the
-// caches connection info.
+// cache's connection info.
 func NewRefreshAheadCache(
 	instance InstanceURI,
 	l debug.ContextLogger,
@@ -198,72 +167,185 @@ func NewRefreshAheadCache(
 	mr telv2.MetricRecorder,
 ) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
-	i := &RefreshAheadCache{
+	c := &RefreshAheadCache{
 		instanceURI:    instance,
 		logger:         l,
-		l:              rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
-		r:              newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
 		refreshTimeout: refreshTimeout,
-		ctx:            ctx,
-		cancel:         cancel,
+		limiter:        rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
+		client:         newAdminAPIClient(client, key, dialerID, disableMetadataExchange),
 		userAgent:      userAgent,
 		metricRecorder: mr,
+		// Callers wait for the first refresh.
+		pending: make(chan struct{}),
+		force:   make(chan struct{}, 1),
+		cancel:  cancel,
+		done:    make(chan struct{}),
 	}
-	// For the initial refresh operation, set cur = next so that connection
-	// requests block until the first refresh is complete.
-	i.resultGuard.Lock()
-	i.cur = i.scheduleRefresh(0)
-	i.next = i.cur
-	i.resultGuard.Unlock()
-	return i
+	go c.run(ctx)
+	return c
 }
 
-// Close closes the instance; it stops the refresh cycle and prevents it from
-// making additional calls to the AlloyDB Admin API.
-func (i *RefreshAheadCache) Close() error {
-	i.resultGuard.Lock()
-	defer i.resultGuard.Unlock()
-	i.cancel()
-	i.cur.cancel()
-	i.next.cancel()
+// ConnectionInfo returns the cached connection info. Before the first refresh
+// finishes, and after ForceRefresh when the cached info is not valid, it
+// waits for the next refresh. The info may be expired; callers should check
+// its expiration and call ForceRefresh if needed.
+func (c *RefreshAheadCache) ConnectionInfo(ctx context.Context) (ConnectionInfo, error) {
+	c.mu.Lock()
+	pending, info, err := c.pending, c.info, c.err
+	c.mu.Unlock()
+	if pending != nil {
+		select {
+		case <-pending:
+		case <-ctx.Done():
+			return ConnectionInfo{}, ctx.Err()
+		case <-c.done:
+		}
+		c.mu.Lock()
+		info, err = c.info, c.err
+		c.mu.Unlock()
+	}
+	select {
+	case <-c.done:
+		return ConnectionInfo{}, errCacheClosed
+	default:
+	}
+	return info, err
+}
+
+// ForceRefresh starts a refresh now, or joins one that is already running. If
+// the cached info is not valid, ConnectionInfo waits for that refresh.
+func (c *RefreshAheadCache) ForceRefresh() {
+	c.mu.Lock()
+	if c.pending == nil && !c.validLocked() {
+		c.pending = make(chan struct{})
+	}
+	c.mu.Unlock()
+	select {
+	case c.force <- struct{}{}:
+	default: // a refresh is already requested
+	}
+}
+
+// Close stops the refresh cycle and waits for it to exit, so the cache makes
+// no further calls to the AlloyDB Admin API. It is safe to call more than
+// once.
+func (c *RefreshAheadCache) Close() error {
+	c.cancel()
+	<-c.done
 	return nil
 }
 
-// ConnectionInfo returns an IP address specified by ipType (i.e., public or
-// private) of the AlloyDB instance.
-func (i *RefreshAheadCache) ConnectionInfo(ctx context.Context) (ConnectionInfo, error) {
-	i.resultGuard.RLock()
-	refresh := i.cur
-	i.resultGuard.RUnlock()
-	var err error
-	select {
-	case <-refresh.ready:
-		err = refresh.err
-	case <-ctx.Done():
-		err = ctx.Err()
-	case <-i.ctx.Done():
-		err = i.ctx.Err()
+// run is the refresh cycle. It is the only code that refreshes or schedules
+// refreshes, and it returns when ctx is canceled.
+func (c *RefreshAheadCache) run(ctx context.Context) {
+	defer close(c.done)
+	defer c.logger.Debugf(
+		context.Background(),
+		"[%v] Instance is closed, stopping refresh operations",
+		c.instanceURI.String(),
+	)
+	t := time.NewTimer(0) // the first refresh runs immediately
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		case <-c.force:
+		}
+		info, err := c.refresh(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		// This refresh satisfies any ForceRefresh made while it ran.
+		select {
+		case <-c.force:
+		default:
+		}
+		d := c.publish(info, err)
+		c.logger.Debugf(
+			ctx,
+			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
+			c.instanceURI.String(),
+			time.Now().Add(d).UTC().Format(time.RFC3339),
+			d.Round(time.Minute),
+		)
+		t.Reset(d)
 	}
-	if err != nil {
-		return ConnectionInfo{}, err
-	}
-	return refresh.result, nil
 }
 
-// ForceRefresh triggers an immediate refresh operation to be scheduled and
-// used for future connection attempts if valid.
-func (i *RefreshAheadCache) ForceRefresh() {
-	i.resultGuard.Lock()
-	defer i.resultGuard.Unlock()
-	// If the next refresh hasn't started yet, we can cancel it and start an immediate one
-	if i.next.cancel() {
-		i.next = i.scheduleRefresh(0)
+// refresh waits for the rate limiter, then fetches new connection info from
+// the AlloyDB Admin API.
+func (c *RefreshAheadCache) refresh(ctx context.Context) (ConnectionInfo, error) {
+	c.logger.Debugf(
+		ctx,
+		"[%v] Connection info refresh operation started (type = refresh ahead)",
+		c.instanceURI.String(),
+	)
+	// Wait without the refresh timeout: the limiter may need longer, and
+	// a wait that fails immediately would be retried immediately.
+	if err := c.limiter.Wait(ctx); err != nil {
+		return ConnectionInfo{}, err
 	}
-	// block all sequential connection attempts on the next refresh operation
-	// if current is invalid
-	if !i.cur.isValid() {
-		i.cur = i.next
+
+	ctx, cancel := context.WithTimeout(ctx, c.refreshTimeout)
+	defer cancel()
+	info, err := c.client.connectionInfo(ctx, c.instanceURI)
+
+	status := telv2.RefreshSuccess
+	if err != nil {
+		status = telv2.RefreshFailure
+		c.logger.Debugf(
+			ctx,
+			"[%v] Connection info refresh operation failed, err = %v",
+			c.instanceURI.String(),
+			err,
+		)
+	} else {
+		c.logger.Debugf(
+			ctx,
+			"[%v] Connection info refresh operation complete (type = refresh ahead)",
+			c.instanceURI.String(),
+		)
+		c.logger.Debugf(
+			ctx,
+			"[%v] Current certificate expiration = %v",
+			c.instanceURI.String(),
+			info.Expiration.UTC().Format(time.RFC3339),
+		)
 	}
+	go c.metricRecorder.RecordRefreshCount(context.Background(), telv2.Attributes{
+		UserAgent:     c.userAgent,
+		RefreshType:   telv2.RefreshAheadType,
+		RefreshStatus: status,
+	})
+	return info, err
+}
+
+// publish records a refresh result, wakes callers waiting for it, and returns
+// how long to wait before the next refresh.
+func (c *RefreshAheadCache) publish(info ConnectionInfo, err error) time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Keep valid info rather than replace it with an error.
+	if err == nil || !c.validLocked() {
+		c.info, c.err = info, err
+	}
+	if c.pending != nil {
+		close(c.pending)
+		c.pending = nil
+	}
+	if err != nil {
+		// Retry now. The limiter spaces out repeated failures.
+		return 0
+	}
+	return refreshDuration(time.Now(), info.Expiration)
+}
+
+// validLocked reports whether the cached info came from a successful refresh
+// and has not expired. c.mu must be held.
+func (c *RefreshAheadCache) validLocked() bool {
+	return c.err == nil && !time.Now().After(c.info.Expiration)
 }
 
 // refreshDuration returns the duration to wait before starting the next
@@ -280,111 +362,4 @@ func refreshDuration(now, certExpiry time.Time) time.Duration {
 		return d - refreshBuffer
 	}
 	return d / 2
-}
-
-// scheduleRefresh schedules a refresh operation to be triggered after a given
-// duration. The returned refreshOperation can be used to either Cancel or Wait
-// for the operation's result.
-func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
-	r := &refreshOperation{}
-	r.ready = make(chan struct{})
-	r.timer = time.AfterFunc(d, func() {
-		// instance has been closed, don't schedule anything
-		if err := i.ctx.Err(); err != nil {
-			i.logger.Debugf(
-				context.Background(),
-				"[%v] Instance is closed, stopping refresh operations",
-				i.instanceURI.String(),
-			)
-			r.err = err
-			close(r.ready)
-			return
-		}
-		i.logger.Debugf(
-			context.Background(),
-			"[%v] Connection info refresh operation started (type = refresh ahead)",
-			i.instanceURI.String(),
-		)
-
-		ctx, cancel := context.WithTimeout(i.ctx, i.refreshTimeout)
-		defer cancel()
-
-		err := i.l.Wait(ctx)
-		if err != nil {
-			r.err = errtype.NewDialError(
-				"context was canceled or expired before refresh completed",
-				i.instanceURI.String(),
-				nil,
-			)
-			i.logger.Debugf(
-				ctx,
-				"[%v] Connection info refresh operation failed, err = %v",
-				i.instanceURI.String(),
-				r.err,
-			)
-		} else {
-			r.result, r.err = i.r.connectionInfo(i.ctx, i.instanceURI)
-			i.logger.Debugf(
-				ctx,
-				"[%v] Connection info refresh operation complete (type = refresh ahead)",
-				i.instanceURI.String(),
-			)
-			i.logger.Debugf(
-				ctx,
-				"[%v] Current certificate expiration = %v",
-				i.instanceURI.String(),
-				r.result.Expiration.UTC().Format(time.RFC3339),
-			)
-		}
-
-		close(r.ready)
-
-		// Once the refresh is complete, update "current" with working
-		// result and schedule a new refresh
-		i.resultGuard.Lock()
-		defer i.resultGuard.Unlock()
-
-		// if failed, scheduled the next refresh immediately
-		if r.err != nil {
-			i.logger.Debugf(
-				ctx,
-				"[%v] Connection info refresh operation scheduled immediately",
-				i.instanceURI.String(),
-			)
-			i.next = i.scheduleRefresh(0)
-			// If the latest result is bad, avoid replacing the
-			// used result while it's still valid and potentially
-			// able to provide successful connections. TODO: This
-			// means that errors while the current result is still
-			// valid are suppressed. We should try to surface
-			// errors in a more meaningful way.
-			if !i.cur.isValid() {
-				i.cur = r
-			}
-			go i.metricRecorder.RecordRefreshCount(context.Background(), telv2.Attributes{
-				UserAgent:     i.userAgent,
-				RefreshType:   telv2.RefreshAheadType,
-				RefreshStatus: telv2.RefreshFailure,
-			})
-			return
-		}
-		// Update the current results, and schedule the next refresh in
-		// the future
-		i.cur = r
-		t := refreshDuration(time.Now(), i.cur.result.Expiration)
-		i.logger.Debugf(
-			ctx,
-			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
-			i.instanceURI.String(),
-			time.Now().Add(t).UTC().Format(time.RFC3339),
-			t.Round(time.Minute),
-		)
-		i.next = i.scheduleRefresh(t)
-		go i.metricRecorder.RecordRefreshCount(context.Background(), telv2.Attributes{
-			UserAgent:     i.userAgent,
-			RefreshType:   telv2.RefreshAheadType,
-			RefreshStatus: telv2.RefreshSuccess,
-		})
-	})
-	return r
 }
