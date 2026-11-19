@@ -402,6 +402,10 @@ configure or shut down the provider. See [METRICS.md](METRICS.md) for the
 metric catalog, Prometheus and OTLP integration guidance, and cardinality
 details.
 
+The connector's built-in Cloud Monitoring exporter is separate from this
+global-provider path. `WithOptOutOfBuiltInTelemetry` disables only that
+built-in exporter; it does not suppress global OpenTelemetry metrics.
+
 The connector continues to record legacy metrics and traces via
 [OpenCensus][opencensus] for compatibility. Configure an OpenCensus exporter
 separately when those legacy signals are required.

@@ -84,9 +84,11 @@ The connector deliberately does not choose an exporter, open an HTTP listener,
 or own provider shutdown. Use SDK Views or Collector processors to filter or
 rename metrics for a particular backend.
 
-`WithOptOutOfBuiltInTelemetry` disables both this global-OpenTelemetry path and
-the connector's built-in Cloud Monitoring exporter. It does not disable the
-legacy OpenCensus metrics described below.
+`WithOptOutOfBuiltInTelemetry` disables only the connector's built-in Cloud
+Monitoring exporter. It does not disable this global-OpenTelemetry path or the
+legacy OpenCensus metrics described below. To prevent export through the global
+provider, do not configure an exporter for the connector's instrumentation
+scope, or filter it in the application SDK or Collector.
 
 ## Legacy OpenCensus metrics
 

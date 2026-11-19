@@ -36,6 +36,9 @@ import (
 	"cloud.google.com/go/alloydbconn/errtype"
 	"cloud.google.com/go/alloydbconn/internal/alloydb"
 	"cloud.google.com/go/alloydbconn/internal/mock"
+	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 
@@ -71,6 +74,51 @@ func TestDialerIncompatibleOptions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOptOutOfBuiltInTelemetryRetainsGlobalMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	previousProvider := otel.GetMeterProvider()
+	otel.SetMeterProvider(provider)
+	t.Cleanup(func() { otel.SetMeterProvider(previousProvider) })
+
+	inst, err := alloydb.ParseInstURI(testInstanceURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &Dialer{
+		disableBuiltInMetrics: true,
+		metricRecorders:       make(map[alloydb.InstanceURI]telv2.MetricRecorder),
+		logger:                nullLogger{},
+	}
+	d.metricRecorder(t.Context(), inst).RecordDialCount(t.Context(), telv2.Attributes{
+		DialStatus: telv2.DialSuccess,
+	})
+
+	var got metricdata.ResourceMetrics
+	if err := reader.Collect(t.Context(), &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range got.ScopeMetrics {
+		if scope.Scope.Name != "cloud.google.com/go/alloydbconn" {
+			continue
+		}
+		for _, m := range scope.Metrics {
+			if m.Name != "alloydb.connector.dial.count" {
+				continue
+			}
+			sum, ok := m.Data.(metricdata.Sum[int64])
+			if !ok {
+				t.Fatalf("dial count data = %T, want metricdata.Sum[int64]", m.Data)
+			}
+			if len(sum.DataPoints) != 1 || sum.DataPoints[0].Value != 1 {
+				t.Fatalf("dial count points = %v, want one point with value 1", sum.DataPoints)
+			}
+			return
+		}
+	}
+	t.Fatal("global dial count metric was not recorded")
 }
 
 func TestDialerCanConnectToInstance(t *testing.T) {
