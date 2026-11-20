@@ -685,6 +685,91 @@ func TestDialerDNSNameChangeClosesConnections(t *testing.T) {
 	if got := atomic.LoadUint64(c.openConns); got != 0 {
 		t.Errorf("open connections to inst1 = %d, want 0", got)
 	}
+	if err := conn3.Close(); err != nil {
+		t.Fatalf("expected conn3.Close to succeed, got: %v", err)
+	}
+	d.connsMu.Lock()
+	tracked := len(d.conns)
+	d.connsMu.Unlock()
+	if tracked != 0 {
+		t.Errorf("tracked connections after closing all conns = %d, want 0", tracked)
+	}
+}
+
+// splitDNSResolver returns dialRecord for contexts tagged with dialCtxKey (used
+// by Dial) and watchRecord for all other lookups (such as DNSWatcher.check,
+// which derives its context from context.Background).
+type splitDNSResolver struct {
+	dialRecord  string
+	watchRecord string
+}
+
+type dialCtxKey struct{}
+
+func (s *splitDNSResolver) LookupTXT(ctx context.Context, _ string) ([]string, error) {
+	if ctx.Value(dialCtxKey{}) != nil {
+		return []string{s.dialRecord}, nil
+	}
+	return []string{s.watchRecord}, nil
+}
+
+func TestDialerConcurrentDNSFailoverDoesNotLeakTrackedConns(t *testing.T) {
+	// If a DNS TXT record switches to another instance while Dial is in
+	// progress, the watcher may close the new connection immediately upon
+	// registration. That concurrent close must still untrack the connection
+	// from d.conns rather than leaking it for the life of the Dialer.
+	ctx := context.Background()
+	d, _, inst1, inst2 := newSwitchoverTestDialer(t, time.Microsecond)
+	d.resolver = alloydb.NewDNSResolver(&splitDNSResolver{
+		dialRecord:  inst1.String(),
+		watchRecord: inst2.String(),
+	})
+	stop1 := mock.StartServerProxy(t, inst1)
+	defer stop1()
+
+	// Seed the watcher with a connection to inst2 so check() continuously
+	// polls the resolver while Dial registers new connections to inst1.
+	uri2, err := alloydb.ParseInstURI(inst2.String())
+	if err != nil {
+		t.Fatalf("ParseInstURI: %v", err)
+	}
+	w, err := d.watchDomain(testWriteEndpoint)
+	if err != nil {
+		t.Fatalf("watchDomain: %v", err)
+	}
+	w.Add(nopConn{}, uri2)
+
+	dialCtx := context.WithValue(ctx, dialCtxKey{}, true)
+	dialAndAwaitClose := func() {
+		for range 10 {
+			conn, err := d.Dial(dialCtx, testWriteEndpoint)
+			if err != nil {
+				t.Errorf("concurrent Dial failed: %v", err)
+				return
+			}
+			if !eventuallyClosed(conn) {
+				_ = conn.Close()
+				t.Error("expected watcher to close connection after DNS switchover")
+				return
+			}
+		}
+	}
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(dialAndAwaitClose)
+	}
+	wg.Wait()
+	if t.Failed() {
+		return
+	}
+
+	d.connsMu.Lock()
+	got := len(d.conns)
+	d.connsMu.Unlock()
+	if got != 0 {
+		t.Fatalf("tracked connections after failover closes = %d, want 0", got)
+	}
 }
 
 func TestDialerFailoverPeriodZeroDisablesWatching(t *testing.T) {
