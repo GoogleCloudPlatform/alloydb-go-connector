@@ -222,7 +222,8 @@ type dialerConfig struct {
 	// disableMetadataExchange is a temporary addition and will be removed in
 	// future versions.
 	disableMetadataExchange bool
-	// disableBuiltInTelemetry disables the internal metric exporter.
+	// disableBuiltInTelemetry disables the connector-owned Cloud Monitoring
+	// metric exporter.
 	disableBuiltInTelemetry bool
 
 	staticConnInfo io.Reader
@@ -496,12 +497,12 @@ func WithOptOutOfAdvancedConnectionCheck() Option {
 	}
 }
 
-// WithOptOutOfBuiltInTelemetry disables the internal metric export. By
-// default, the Dialer will report on its internal operations to the
-// alloydb.googleapis.com system metric prefix. These metrics help AlloyDB
-// improve performance and identify client connectivity problems. Presently,
-// these metrics aren't public, but will be made public in the future. To
-// disable this telemetry, provide this option when initializing a Dialer.
+// WithOptOutOfBuiltInTelemetry disables the connector-owned Cloud Monitoring
+// metric exporter. It does not disable metrics emitted through the
+// process-global OpenTelemetry MeterProvider or legacy OpenCensus metrics.
+// The Dialer does not configure or manage the lifecycle of the global provider.
+// To disable the built-in exporter, provide this option when initializing a
+// Dialer.
 func WithOptOutOfBuiltInTelemetry() Option {
 	return func(d *dialerConfig) {
 		d.disableBuiltInTelemetry = true
