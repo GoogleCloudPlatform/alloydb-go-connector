@@ -19,8 +19,15 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"cloud.google.com/go/auth"
@@ -138,7 +145,7 @@ func TestIAMAuthOptions(t *testing.T) {
 }
 
 // TestWithUniverseDomain verifies that WithUniverseDomain properly sets
-// the universeDomain field on dialerConfig and exports the client option.
+// the universeDomain field on dialerConfig.
 func TestWithUniverseDomain(t *testing.T) {
 	want := "my-universe.cloud"
 	cfg, err := newDialerConfig(WithUniverseDomain(want), mockCreds)
@@ -154,13 +161,32 @@ func TestWithUniverseDomain(t *testing.T) {
 }
 
 // TestUniverseDomainResolutionPrecedence verifies the fallback order:
-// 1. Explicit Option -> 2. Default "googleapis.com"
+// 1. Explicit Option -> 2. Environment variable -> 3. Default "googleapis.com"
 func TestUniverseDomainResolutionPrecedence(t *testing.T) {
 	tcs := []struct {
 		desc       string
+		envUD      string
 		opts       []Option
 		wantDomain string
 	}{
+		{
+			desc:       "resolves from environment variable",
+			envUD:      "env-universe.cloud",
+			opts:       []Option{mockCreds},
+			wantDomain: "env-universe.cloud",
+		},
+		{
+			desc:       "explicit option takes precedence over environment variable",
+			envUD:      "env-universe.cloud",
+			opts:       []Option{WithUniverseDomain("option-universe.cloud"), mockCreds},
+			wantDomain: "option-universe.cloud",
+		},
+		{
+			desc:       "setting WithAdminAPIEndpoint with environment variable",
+			envUD:      "env-universe.cloud",
+			opts:       []Option{mockCreds, WithAdminAPIEndpoint("alloydb.googleapis.com")},
+			wantDomain: "env-universe.cloud",
+		},
 		{
 			desc:       "default fallback when option not set",
 			opts:       []Option{mockCreds},
@@ -179,12 +205,93 @@ func TestUniverseDomainResolutionPrecedence(t *testing.T) {
 	}
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
+			t.Setenv("GOOGLE_CLOUD_UNIVERSE_DOMAIN", tc.envUD)
 			cfg, err := newDialerConfig(tc.opts...)
 			if err != nil {
 				t.Fatalf("newDialerConfig failed: %v", err)
 			}
 			if got := cfg.clientUniverseDomain(); got != tc.wantDomain {
 				t.Errorf("clientUniverseDomain() = %q, want %q", got, tc.wantDomain)
+			}
+		})
+	}
+}
+
+// serviceAccountJSON returns service account credentials JSON with a freshly
+// generated key. When ud is non-empty, the JSON includes a universe_domain
+// field.
+func serviceAccountJSON(t *testing.T, ud string) []byte {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate private key: %v", err)
+	}
+	keyBytes, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("failed to marshal private key: %v", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyBytes})
+	m := map[string]string{
+		"type":           "service_account",
+		"project_id":     "test-project",
+		"private_key_id": "some-key-id",
+		"private_key":    string(keyPEM),
+		"client_email":   "test@test-project.iam.gserviceaccount.com",
+	}
+	if ud != "" {
+		m["universe_domain"] = ud
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("failed to marshal credentials JSON: %v", err)
+	}
+	return b
+}
+
+// TestCredentialsUniverseDomainMismatch verifies that credentials keep the
+// universe_domain field of their JSON when WithUniverseDomain is not set. The
+// AlloyDB Admin API client then rejects them as belonging to another universe
+// before sending a request.
+func TestCredentialsUniverseDomainMismatch(t *testing.T) {
+	b := serviceAccountJSON(t, "my-universe.cloud")
+	path := filepath.Join(t.TempDir(), "creds.json")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatalf("failed to write credentials file: %v", err)
+	}
+	tcs := []struct {
+		desc string
+		opt  Option
+	}{
+		{desc: "WithCredentialsJSON", opt: WithCredentialsJSON(b)},
+		{desc: "WithCredentialsFile", opt: WithCredentialsFile(path)},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			var reqs atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, _ *http.Request) {
+					reqs.Add(1)
+					w.WriteHeader(http.StatusBadRequest)
+				},
+			))
+			defer srv.Close()
+
+			d, err := NewDialer(context.Background(), tc.opt,
+				WithAdminAPIEndpoint(srv.URL),
+				WithLazyRefresh(),
+				WithOptOutOfBuiltInTelemetry(),
+			)
+			if err != nil {
+				t.Fatalf("expected NewDialer to succeed, got: %v", err)
+			}
+			defer d.Close()
+
+			_, err = d.Dial(context.Background(), testInstanceURI)
+			if err == nil || !strings.Contains(err.Error(), "universe domain") {
+				t.Fatalf("expected universe domain mismatch error, got: %v", err)
+			}
+			if got := reqs.Load(); got != 0 {
+				t.Fatalf("AlloyDB Admin API requests = %d, want 0", got)
 			}
 		})
 	}

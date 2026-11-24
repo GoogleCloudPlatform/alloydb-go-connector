@@ -1249,6 +1249,79 @@ func TestDialerWithUniverseDomainEnvVar(t *testing.T) {
 	}
 }
 
+// TestDialerBuiltInTelemetryUniverseDomain verifies that the built-in metric
+// client is only created for the default universe when telemetry is enabled.
+func TestDialerBuiltInTelemetryUniverseDomain(t *testing.T) {
+	tcs := []struct {
+		desc        string
+		envUD       string
+		opts        []Option
+		wantEnabled bool
+	}{
+		{
+			desc:        "default universe",
+			wantEnabled: true,
+		},
+		{
+			desc:        "explicit default universe",
+			opts:        []Option{WithUniverseDomain("googleapis.com")},
+			wantEnabled: true,
+		},
+		{
+			desc: "opted out of telemetry",
+			opts: []Option{WithOptOutOfBuiltInTelemetry()},
+		},
+		{
+			desc: "TPC universe option",
+			opts: []Option{WithUniverseDomain("my-universe.cloud")},
+		},
+		{
+			desc:  "TPC universe env var",
+			envUD: "sovereign-cloud.de",
+		},
+		{
+			desc:  "TPC universe option takes precedence over env var",
+			envUD: "googleapis.com",
+			opts:  []Option{WithUniverseDomain("my-universe.cloud")},
+		},
+		{
+			desc:        "default universe option takes precedence over env var",
+			envUD:       "sovereign-cloud.de",
+			opts:        []Option{WithUniverseDomain("googleapis.com")},
+			wantEnabled: true,
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			t.Setenv("GOOGLE_CLOUD_UNIVERSE_DOMAIN", tc.envUD)
+			ctx := context.Background()
+			opts := append([]Option{WithTokenSource(stubTokenSource{})}, tc.opts...)
+			d, err := NewDialer(ctx, opts...)
+			if err != nil {
+				t.Fatalf("expected NewDialer to succeed, got: %v", err)
+			}
+			defer d.Close()
+
+			if gotEnabled := d.mClient != nil; gotEnabled != tc.wantEnabled {
+				t.Fatalf("metric client created = %v, want = %v", gotEnabled, tc.wantEnabled)
+			}
+			if d.disableBuiltInMetrics == tc.wantEnabled {
+				t.Fatalf("disableBuiltInMetrics = %v, want = %v",
+					d.disableBuiltInMetrics, !tc.wantEnabled)
+			}
+			inst, err := alloydb.ParseInstURI(testInstanceURI)
+			if err != nil {
+				t.Fatalf("failed to parse instance URI: %v", err)
+			}
+			mr := d.metricRecorder(ctx, inst)
+			_, isNull := mr.(telv2.NullMetricRecorder)
+			if isNull == tc.wantEnabled {
+				t.Fatalf("metric recorder = %T, want enabled = %v", mr, tc.wantEnabled)
+			}
+		})
+	}
+}
+
 type mockMetricRecorder struct {
 	mu          sync.Mutex
 	gotAttrs    telv2.Attributes
