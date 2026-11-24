@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.20.1](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.20.0...v1.20.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* correctly honor universe domain ([#856](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/856)) ([f7af596](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/f7af59650248a889db970a868db979c156ee2e56))
+* update dependencies to latest ([#857](https://github.com/GoogleCloudPlatform/alloydb-go-connector/issues/857)) ([d3aed1f](https://github.com/GoogleCloudPlatform/alloydb-go-connector/commit/d3aed1f65c0d59b94686e8febea243b78588da41))
+
 ## [1.20.0](https://github.com/GoogleCloudPlatform/alloydb-go-connector/compare/v1.19.3...v1.20.0) (2026-11-12)
 
 
