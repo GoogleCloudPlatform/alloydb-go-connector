@@ -44,6 +44,9 @@ const (
 
 	// Default GDU API Domain.
 	defaultUniverseDomain = "googleapis.com"
+	// universeDomainEnvVar is the environment variable that sets the universe
+	// domain when WithUniverseDomain is not used.
+	universeDomainEnvVar = "GOOGLE_CLOUD_UNIVERSE_DOMAIN"
 	// defaultFailoverPeriod is how often a Dialer checks whether a DNS name
 	// passed to Dial points to a different instance.
 	defaultFailoverPeriod = 30 * time.Second
@@ -81,6 +84,17 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		}
 	}
 
+	// When WithUniverseDomain is not set, fall back to the environment variable
+	// that Google Cloud client libraries use for the universe domain. This
+	// runs after the checks above so that WithAdminAPIEndpoint is only
+	// incompatible with an explicit WithUniverseDomain.
+	if d.universeDomain == "" {
+		d.universeDomain = os.Getenv(universeDomainEnvVar)
+	}
+
+	// When detecting credentials below, pass the configured universe domain,
+	// which is empty when none is configured. Passing the default universe
+	// domain would override the universe_domain field of credentials JSON.
 	switch {
 	case d.credentialsFile != "":
 		b, err := os.ReadFile(d.credentialsFile)
@@ -90,7 +104,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{CloudPlatformScope},
 			CredentialsJSON: b,
-			UniverseDomain:  d.clientUniverseDomain(),
+			UniverseDomain:  d.universeDomain,
 		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
@@ -100,7 +114,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		c, err = credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{AlloyDBLoginScope},
 			CredentialsJSON: b,
-			UniverseDomain:  d.clientUniverseDomain(),
+			UniverseDomain:  d.universeDomain,
 		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
@@ -110,7 +124,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{CloudPlatformScope},
 			CredentialsJSON: d.credentialsJSON,
-			UniverseDomain:  d.clientUniverseDomain(),
+			UniverseDomain:  d.universeDomain,
 		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
@@ -121,7 +135,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		c, err = credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{AlloyDBLoginScope},
 			CredentialsJSON: d.credentialsJSON,
-			UniverseDomain:  d.clientUniverseDomain(),
+			UniverseDomain:  d.universeDomain,
 		})
 		if err != nil {
 			return nil, errtype.NewConfigError(err.Error(), "n/a")
@@ -142,7 +156,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		// default to Application Default Credentials.
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:         []string{CloudPlatformScope},
-			UniverseDomain: d.clientUniverseDomain(),
+			UniverseDomain: d.universeDomain,
 		})
 		if err != nil {
 			return nil, err
@@ -150,7 +164,7 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(WithUniverseDomainCredentials(c, d.clientUniverseDomain())))
 		c, err = credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:         []string{AlloyDBLoginScope},
-			UniverseDomain: d.clientUniverseDomain(),
+			UniverseDomain: d.universeDomain,
 		})
 		if err != nil {
 			return nil, err
@@ -181,7 +195,8 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 // universe, with the following precedence:
 //
 // 1. A non-empty option.WithUniverseDomain or similar client option.
-// 2. The default value "googleapis.com".
+// 2. A non-empty GOOGLE_CLOUD_UNIVERSE_DOMAIN environment variable.
+// 3. The default value "googleapis.com".
 func (d *dialerConfig) clientUniverseDomain() string {
 	if d.universeDomain != "" {
 		return d.universeDomain
@@ -237,13 +252,17 @@ type dialerConfig struct {
 
 // WithUniverseDomain configures the underlying AlloyDB Admin API client and
 // credentials to use the provided universe domain. Enables Trusted Partner Cloud (TPC).
+// When this option is not set, the Dialer uses the
+// GOOGLE_CLOUD_UNIVERSE_DOMAIN environment variable, if set.
+//
+// When the universe domain is not googleapis.com, built-in telemetry is
+// disabled.
 func WithUniverseDomain(ud string) Option {
 	return func(d *dialerConfig) {
 		if ud == "" {
 			return
 		}
 		d.universeDomain = ud
-		d.alloydbClientOpts = append(d.alloydbClientOpts, option.WithUniverseDomain(ud))
 	}
 }
 
@@ -502,6 +521,9 @@ func WithOptOutOfAdvancedConnectionCheck() Option {
 // improve performance and identify client connectivity problems. Presently,
 // these metrics aren't public, but will be made public in the future. To
 // disable this telemetry, provide this option when initializing a Dialer.
+//
+// Built-in telemetry is always disabled when the Dialer targets a universe
+// domain other than googleapis.com (see WithUniverseDomain).
 func WithOptOutOfBuiltInTelemetry() Option {
 	return func(d *dialerConfig) {
 		d.disableBuiltInTelemetry = true

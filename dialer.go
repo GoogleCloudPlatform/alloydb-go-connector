@@ -218,10 +218,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 
 	cOpts := append(cfg.alloydbClientOpts, cfg.clientOpts...)
-	// If set, add WithUniverseDomain option.
-	if cfg.universeDomain == "" && cfg.clientUniverseDomain() != defaultUniverseDomain {
-		cOpts = append(cOpts, option.WithUniverseDomain(cfg.clientUniverseDomain()))
-	}
+	// Set the universe domain explicitly so that the AlloyDB Admin API client
+	// uses the same universe domain as the rest of the Dialer.
+	cOpts = append(cOpts, option.WithUniverseDomain(cfg.clientUniverseDomain()))
 
 	client, err := alloydbadmin.NewAlloyDBAdminRESTClient(ctx, cOpts...)
 	if err != nil {
@@ -242,11 +241,23 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	if err := tel.InitMetrics(); err != nil {
 		return nil, err
 	}
-	mClient, err := monitoring.NewMetricClient(ctx, cfg.clientOpts...)
-	if err != nil {
-		// Don't fail dialer initialization on metric client errors.
-		// Just disable metric collection below.
-		cfg.logger.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
+	// Built-in metrics are only supported in the default universe (GDU). Only
+	// create the metric client when the caller has not opted out and the
+	// dialer targets the default universe.
+	disableBuiltInMetrics := cfg.disableBuiltInTelemetry ||
+		cfg.clientUniverseDomain() != defaultUniverseDomain
+	var mClient *monitoring.MetricClient
+	if !disableBuiltInMetrics {
+		// Set the universe domain explicitly so that WithUniverseDomain takes
+		// precedence over the GOOGLE_CLOUD_UNIVERSE_DOMAIN environment
+		// variable.
+		mOpts := append(cfg.clientOpts, option.WithUniverseDomain(defaultUniverseDomain))
+		mClient, err = monitoring.NewMetricClient(ctx, mOpts...)
+		if err != nil {
+			// Don't fail dialer initialization on metric client errors.
+			// Just disable metric collection below.
+			cfg.logger.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
+		}
 	}
 	dialerID := uuid.New().String()
 	g, err := newKeyGenerator(cfg.rsaKey, cfg.lazyRefresh,
@@ -265,7 +276,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		cache:                   make(map[alloydb.InstanceURI]monitoredCache),
 		lazyRefresh:             cfg.lazyRefresh,
 		disableMetadataExchange: cfg.disableMetadataExchange,
-		disableBuiltInMetrics:   cfg.disableBuiltInTelemetry,
+		disableBuiltInMetrics:   disableBuiltInMetrics,
 		staticConnInfo:          cfg.staticConnInfo,
 		keyGenerator:            g,
 		refreshTimeout:          cfg.refreshTimeout,
