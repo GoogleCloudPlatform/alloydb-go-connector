@@ -17,6 +17,10 @@ package alloydb
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -146,5 +150,92 @@ func TestRefreshFailsFast(t *testing.T) {
 	_, err = r.connectionInfo(ctx, cn)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled error, got = %v", err)
+	}
+}
+
+func TestRefreshDomainScopedProject(t *testing.T) {
+	wantInstURI := "projects/google.com:my-project/locations/my-region/clusters/my-cluster/instances/my-instance"
+	cn, err := ParseInstURI(wantInstURI)
+	if err != nil {
+		t.Fatalf("ParseInstURI(%s) failed: %v", wantInstURI, err)
+	}
+	inst := mock.NewFakeInstance(
+		"google.com:my-project", "my-region", "my-cluster", "my-instance",
+	)
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	cl, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		context.Background(),
+		option.WithHTTPClient(mc),
+		option.WithEndpoint(url),
+	)
+	if err != nil {
+		t.Fatalf("admin API client error: %v", err)
+	}
+	r := newAdminAPIClient(cl, rsaKey, testDialerID, false)
+	if _, err := r.connectionInfo(context.Background(), cn); err != nil {
+		t.Fatalf("connectionInfo with domain-scoped project failed: %v", err)
+	}
+}
+
+func TestRefreshEscapesPathSegments(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		gotPaths []string
+		gotFoo   []string
+	)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		gotPaths = append(gotPaths, req.URL.Path)
+		gotFoo = append(gotFoo, req.URL.Query().Get("foo"))
+		mu.Unlock()
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	cl, err := alloydbadmin.NewAlloyDBAdminRESTClient(
+		context.Background(),
+		option.WithHTTPClient(srv.Client()),
+		option.WithEndpoint(srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("admin API client error: %v", err)
+	}
+
+	inst := InstanceURI{
+		project: "my-project/sub",
+		region:  "my-region?foo=bar",
+		cluster: "my-cluster#frag",
+		name:    "my-instance/extra",
+	}
+	_, _ = fetchInstanceInfo(context.Background(), cl, inst)
+	_, _ = fetchClientCertificate(context.Background(), cl, inst, rsaKey, false)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(gotPaths) != 2 {
+		t.Fatalf("expected 2 requests, got %d: %v", len(gotPaths), gotPaths)
+	}
+	// Each segment's '/' must be escaped so the total segment count stays fixed.
+	wantGetPrefix := "/v1alpha/projects/my-project%2Fsub/locations/my-region%3Ffoo=bar/clusters/my-cluster%23frag/instances/my-instance%2Fextra/connectionInfo"
+	if gotPaths[0] != wantGetPrefix {
+		t.Errorf("GetConnectionInfo path = %q, want %q", gotPaths[0], wantGetPrefix)
+	}
+	wantPostPrefix := "/v1alpha/projects/my-project%2Fsub/locations/my-region%3Ffoo=bar/clusters/my-cluster%23frag:generateClientCertificate"
+	if !strings.HasPrefix(gotPaths[1], "/v1alpha/projects/my-project%2Fsub/locations/") || gotPaths[1] != wantPostPrefix {
+		t.Errorf("GenerateClientCertificate path = %q, want %q", gotPaths[1], wantPostPrefix)
+	}
+	for i, v := range gotFoo {
+		if v != "" {
+			t.Errorf("request %d had unexpected query param foo=%q", i, v)
+		}
 	}
 }

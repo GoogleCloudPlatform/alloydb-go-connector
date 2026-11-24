@@ -73,6 +73,36 @@ func TestParseInstURI(t *testing.T) {
 				name:    "name",
 			},
 		},
+		{
+			desc: "with subdomain-scoped project and hyphens/digits",
+			in:   "projects/sub.example-domain.com:my-proj-123/locations/us-central1/clusters/my-cluster-1/instances/my-inst-2",
+			want: InstanceURI{
+				project: "sub.example-domain.com:my-proj-123",
+				region:  "us-central1",
+				cluster: "my-cluster-1",
+				name:    "my-inst-2",
+			},
+		},
+		{
+			desc: "with numeric project ID",
+			in:   "projects/123456789/locations/us-central1/clusters/clust/instances/name",
+			want: InstanceURI{
+				project: "123456789",
+				region:  "us-central1",
+				cluster: "clust",
+				name:    "name",
+			},
+		},
+		{
+			desc: "with uppercase and underscores",
+			in:   "projects/PROJECT/locations/REGION/clusters/CLUSTER_NAME/instances/INSTANCE_NAME",
+			want: InstanceURI{
+				project: "PROJECT",
+				region:  "REGION",
+				cluster: "CLUSTER_NAME",
+				name:    "INSTANCE_NAME",
+			},
+		},
 	}
 
 	for _, tc := range tcs {
@@ -82,7 +112,10 @@ func TestParseInstURI(t *testing.T) {
 				t.Fatalf("want no error, got = %v", err)
 			}
 			if got != tc.want {
-				t.Fatalf("want = %v, got = %v", got, tc.want)
+				t.Fatalf("want = %v, got = %v", tc.want, got)
+			}
+			if gotURI := got.URI(); gotURI != tc.in {
+				t.Fatalf("URI() want = %q, got = %q", tc.in, gotURI)
 			}
 		})
 	}
@@ -108,6 +141,118 @@ func TestParseConnNameErrors(t *testing.T) {
 		{
 			desc: "empty",
 			in:   "::::",
+		},
+		{
+			desc: "extra leading segment",
+			in:   "extra/projects/proj/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "trailing slash",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name/",
+		},
+		{
+			desc: "extra trailing segment",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name/extra",
+		},
+		{
+			desc: "trailing relative path segments",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name/../../other",
+		},
+		{
+			desc: "dot-dot in project",
+			in:   "projects/../locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "dot-dot in domain-scoped project",
+			in:   "projects/google..com:proj/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "dot-dot in location",
+			in:   "projects/proj/locations/../clusters/clust/instances/name",
+		},
+		{
+			desc: "dot-dot in cluster",
+			in:   "projects/proj/locations/reg/clusters/../instances/name",
+		},
+		{
+			desc: "dot-dot in instance",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/..",
+		},
+		{
+			desc: "slash in project",
+			in:   "projects/org/proj/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "slash in domain-scoped project",
+			in:   "projects/google.com:org/proj/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "query string on instance",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name?alt=json&foo=bar",
+		},
+		{
+			desc: "query string on project",
+			in:   "projects/proj?foo=bar/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "fragment on instance",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name#frag",
+		},
+		{
+			desc: "percent-encoded slash",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name%2fextra",
+		},
+		{
+			desc: "colon in instance",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name:custom",
+		},
+		{
+			desc: "empty project",
+			in:   "projects//locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "empty location",
+			in:   "projects/proj/locations//clusters/clust/instances/name",
+		},
+		{
+			desc: "empty cluster",
+			in:   "projects/proj/locations/reg/clusters//instances/name",
+		},
+		{
+			desc: "leading colon in project",
+			in:   "projects/:proj/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "trailing colon in project",
+			in:   "projects/proj:/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "multiple colons in project",
+			in:   "projects/a:b:c/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "leading dot in domain",
+			in:   "projects/.google.com:proj/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "trailing dot in domain",
+			in:   "projects/google.com.:proj/locations/reg/clusters/clust/instances/name",
+		},
+		{
+			desc: "dot in instance",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name.extra",
+		},
+		{
+			desc: "whitespace in URI",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name extra",
+		},
+		{
+			desc: "trailing newline",
+			in:   "projects/proj/locations/reg/clusters/clust/instances/name\n",
+		},
+		{
+			desc: "wrong resource segment",
+			in:   "projects/proj/regions/reg/clusters/clust/instances/name",
 		},
 	}
 

@@ -165,6 +165,19 @@ func TestDNSResolver(t *testing.T) {
 		}
 	})
 
+	t.Run("single TXT record with domain-scoped project", func(t *testing.T) {
+		domainURI := "projects/google.com:my-proj/locations/us-central1/clusters/my-cluster/instances/my-inst"
+		f := &fakeNetResolver{records: []string{domainURI}}
+		got, err := NewDNSResolver(f).Resolve(ctx, testEndpoint)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		wantDomain := DialTarget{URI: mustParse(t, domainURI), DomainName: testEndpoint}
+		if got != wantDomain {
+			t.Errorf("Resolve() = %+v, want %+v", got, wantDomain)
+		}
+	})
+
 	errTCs := []struct {
 		desc     string
 		name     string
@@ -174,6 +187,18 @@ func TestDNSResolver(t *testing.T) {
 		{
 			desc:     "invalid name",
 			name:     "not a domain",
+			resolver: &fakeNetResolver{},
+			wantCfg:  true,
+		},
+		{
+			desc:     "URI with relative path segments",
+			name:     testURI + "/../../other",
+			resolver: &fakeNetResolver{},
+			wantCfg:  true,
+		},
+		{
+			desc:     "URI with query string",
+			name:     testURI + "?alt=json&foo=bar",
 			resolver: &fakeNetResolver{},
 			wantCfg:  true,
 		},
@@ -199,6 +224,36 @@ func TestDNSResolver(t *testing.T) {
 			desc:     "record is not an instance URI",
 			name:     testEndpoint,
 			resolver: &fakeNetResolver{records: []string{"unrelated"}},
+			wantCfg:  true,
+		},
+		{
+			desc:     "record has leading prefix",
+			name:     testEndpoint,
+			resolver: &fakeNetResolver{records: []string{"prefix/" + testURI}},
+			wantCfg:  true,
+		},
+		{
+			desc:     "record has relative path segments",
+			name:     testEndpoint,
+			resolver: &fakeNetResolver{records: []string{testURI + "/../../other"}},
+			wantCfg:  true,
+		},
+		{
+			desc:     "record has dot-dot in location",
+			name:     testEndpoint,
+			resolver: &fakeNetResolver{records: []string{"projects/my-proj/locations/../clusters/my-cluster/instances/my-inst"}},
+			wantCfg:  true,
+		},
+		{
+			desc:     "record has query string",
+			name:     testEndpoint,
+			resolver: &fakeNetResolver{records: []string{testURI + "?alt=json&foo=bar"}},
+			wantCfg:  true,
+		},
+		{
+			desc:     "record has fragment",
+			name:     testEndpoint,
+			resolver: &fakeNetResolver{records: []string{testURI + "#frag"}},
 			wantCfg:  true,
 		},
 	}
