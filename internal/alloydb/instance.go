@@ -323,7 +323,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 				r.err,
 			)
 		} else {
-			r.result, r.err = i.r.connectionInfo(i.ctx, i.instanceURI)
+			r.result, r.err = i.r.connectionInfo(ctx, i.instanceURI)
 			i.logger.Debugf(
 				ctx,
 				"[%v] Connection info refresh operation complete (type = refresh ahead)",
