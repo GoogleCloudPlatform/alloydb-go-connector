@@ -23,6 +23,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -63,7 +64,10 @@ func fetchInstanceInfo(
 	req := &alloydbpb.GetConnectionInfoRequest{
 		Parent: fmt.Sprintf(
 			"projects/%s/locations/%s/clusters/%s/instances/%s",
-			inst.project, inst.region, inst.cluster, inst.name,
+			url.PathEscape(inst.project),
+			url.PathEscape(inst.region),
+			url.PathEscape(inst.cluster),
+			url.PathEscape(inst.name),
 		),
 	}
 	resp, err := cl.GetConnectionInfo(ctx, req)
@@ -140,7 +144,10 @@ func fetchClientCertificate(
 	}
 	req := &alloydbpb.GenerateClientCertificateRequest{
 		Parent: fmt.Sprintf(
-			"projects/%s/locations/%s/clusters/%s", inst.project, inst.region, inst.cluster,
+			"projects/%s/locations/%s/clusters/%s",
+			url.PathEscape(inst.project),
+			url.PathEscape(inst.region),
+			url.PathEscape(inst.cluster),
 		),
 		PublicKey:           buf.String(),
 		CertDuration:        durationpb.New(time.Second * 3600),

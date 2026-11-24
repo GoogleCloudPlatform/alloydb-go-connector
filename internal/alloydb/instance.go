@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sync"
 	"time"
@@ -52,7 +53,9 @@ var (
 	// 'projects/<PROJECT>/locations/<REGION>/clusters/<CLUSTER>/instances/<INSTANCE>'
 	// Additionally, we have to support legacy "domain-scoped" projects
 	// (e.g. "google.com:PROJECT")
-	instURIRegex = regexp.MustCompile("projects/([^:]+(:[^:]+)?)/locations/([^:]+)/clusters/([^:]+)/instances/([^:]+)")
+	instURIRegex = regexp.MustCompile(
+		`^projects/((?:[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*:)?[a-zA-Z0-9_-]+)/locations/([a-zA-Z0-9_-]+)/clusters/([a-zA-Z0-9_-]+)/instances/([a-zA-Z0-9_-]+)$`,
+	)
 )
 
 // InstanceURI represents an AlloyDB instance.
@@ -87,7 +90,10 @@ func (i InstanceURI) Name() string {
 func (i *InstanceURI) URI() string {
 	return fmt.Sprintf(
 		"projects/%s/locations/%s/clusters/%s/instances/%s",
-		i.project, i.region, i.cluster, i.name,
+		url.PathEscape(i.project),
+		url.PathEscape(i.region),
+		url.PathEscape(i.cluster),
+		url.PathEscape(i.name),
 	)
 }
 
@@ -110,9 +116,9 @@ func ParseInstURI(cn string) (InstanceURI, error) {
 
 	c := InstanceURI{
 		project: string(m[1]),
-		region:  string(m[3]),
-		cluster: string(m[4]),
-		name:    string(m[5]),
+		region:  string(m[2]),
+		cluster: string(m[3]),
+		name:    string(m[4]),
 	}
 	return c, nil
 }
