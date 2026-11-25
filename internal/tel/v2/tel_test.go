@@ -354,3 +354,60 @@ func TestMetricRecorder(t *testing.T) {
 	}
 
 }
+
+// TestMetricRecorderSharedClient verifies that shutting down one recorder does
+// not close the client shared with other recorders.
+func TestMetricRecorderSharedClient(t *testing.T) {
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mClient.Close()
+
+	ctx := context.Background()
+	cfg := telv2.Config{
+		Enabled:   true,
+		ClientID:  "some-uid",
+		ProjectID: "myproject",
+		Location:  "some-location",
+		Cluster:   "some-cluster",
+	}
+	cfg1, cfg2 := cfg, cfg
+	cfg1.Instance, cfg2.Instance = "instance-1", "instance-2"
+	mr1 := telv2.NewMetricRecorder(ctx, nullLogger{t}, mClient, cfg1)
+	mr2 := telv2.NewMetricRecorder(ctx, nullLogger{t}, mClient, cfg2)
+
+	if err := mr1.Shutdown(ctx); err != nil {
+		t.Fatalf("mr1.Shutdown() = %v", err)
+	}
+	mr2.RecordDialCount(ctx, telv2.Attributes{
+		UserAgent:  "alloydb-go-connector/1.11.0 alloy-db-auth-proxy/1.10.1+container",
+		IAMAuthN:   true,
+		CacheHit:   true,
+		DialStatus: telv2.DialSuccess,
+	})
+	// Shutting down mr2 flushes its metrics with the shared client.
+	if err := mr2.Shutdown(ctx); err != nil {
+		t.Fatalf("mr2.Shutdown() = %v", err)
+	}
+
+	mock.Verify(t, "projects/myproject",
+		"alloydb.googleapis.com/InstanceClient",
+		"alloydb.googleapis.com/client/connector/dial_count",
+		map[string]string{
+			"project_id":  "myproject",
+			"location":    "some-location",
+			"cluster_id":  "some-cluster",
+			"instance_id": "instance-2",
+			"client_uid":  "some-uid",
+		},
+		map[string]string{
+			"connector_type": "auth_proxy",
+			"auth_type":      "iam",
+			"is_cache_hit":   "true",
+			"status":         "success",
+		},
+	)
+}

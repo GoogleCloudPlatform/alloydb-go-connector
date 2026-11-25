@@ -128,8 +128,22 @@ type MetricRecorder interface {
 // should always be 60s. This value is exposed as a var to faciliate testing.
 var DefaultExportInterval = 60 * time.Second
 
+// sharedClientExporter keeps the Cloud Monitoring exporter from closing its
+// client on shutdown. The client is shared by every MetricRecorder of a
+// Dialer, so the Dialer closes it when it is closed.
+type sharedClientExporter struct {
+	sdkmetric.Exporter
+}
+
+// Shutdown does not shut down the wrapped exporter, which would close the
+// shared client.
+func (sharedClientExporter) Shutdown(ctx context.Context) error {
+	return ctx.Err()
+}
+
 // NewMetricRecorder creates a MetricRecorder. When the configuration is not
-// enabled, a null recorder is returned instead.
+// enabled, a null recorder is returned instead. The caller owns cl and must
+// close it after shutting down the MetricRecorder.
 func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitoring.MetricClient, cfg Config) MetricRecorder {
 	if !cfg.Enabled {
 		l.Debugf(ctx, "disabling built-in metrics")
@@ -152,11 +166,12 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		// Don't add any resource attributes to metrics as metric labels.
 		cmexporter.WithFilteredResourceAttributes(cmexporter.NoAttributes),
 	}
-	exp, err := cmexporter.New(eopts...)
+	cmExp, err := cmexporter.New(eopts...)
 	if err != nil {
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
 		return NullMetricRecorder{}
 	}
+	exp := sharedClientExporter{cmExp}
 
 	res := resource.NewWithAttributes(monitoredResource,
 		attribute.String(ResourceType, monitoredResource),
