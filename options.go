@@ -142,9 +142,9 @@ func newDialerConfig(opts ...Option) (*dialerConfig, error) {
 		}
 		d.iamAuthNTokenProvider = WithUniverseDomainCredentials(c, d.clientUniverseDomain()).TokenProvider
 	case d.tokenProvider != nil:
-		c := auth.NewCredentials(&auth.CredentialsOptions{
+		c := WithUniverseDomainCredentials(auth.NewCredentials(&auth.CredentialsOptions{
 			TokenProvider: d.tokenProvider,
-		})
+		}), d.clientUniverseDomain())
 		d.clientOpts = append(d.clientOpts, option.WithAuthCredentials(c))
 		d.iamAuthNTokenProvider = d.tokenProvider
 	case d.credentials != nil:

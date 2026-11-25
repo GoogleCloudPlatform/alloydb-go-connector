@@ -267,6 +267,7 @@ func TestCredentialsUniverseDomainMismatch(t *testing.T) {
 	}
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
+			t.Setenv("GOOGLE_CLOUD_UNIVERSE_DOMAIN", "")
 			var reqs atomic.Int64
 			srv := httptest.NewServer(http.HandlerFunc(
 				func(w http.ResponseWriter, _ *http.Request) {
@@ -292,6 +293,44 @@ func TestCredentialsUniverseDomainMismatch(t *testing.T) {
 			}
 			if got := reqs.Load(); got != 0 {
 				t.Fatalf("AlloyDB Admin API requests = %d, want 0", got)
+			}
+		})
+	}
+}
+
+// TestTokenSourceUniverseDomain verifies that credentials built from
+// WithTokenSource use the configured universe domain, so the AlloyDB Admin API
+// client sends requests instead of failing the universe domain check.
+func TestTokenSourceUniverseDomain(t *testing.T) {
+	for _, ud := range []string{"my-universe.cloud", ""} {
+		t.Run("universe domain="+ud, func(t *testing.T) {
+			t.Setenv("GOOGLE_CLOUD_UNIVERSE_DOMAIN", ud)
+			var reqs atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, _ *http.Request) {
+					reqs.Add(1)
+					w.WriteHeader(http.StatusBadRequest)
+				},
+			))
+			defer srv.Close()
+
+			d, err := NewDialer(context.Background(),
+				WithTokenSource(fakeTokenSource{}),
+				WithAdminAPIEndpoint(srv.URL),
+				WithLazyRefresh(),
+				WithOptOutOfBuiltInTelemetry(),
+			)
+			if err != nil {
+				t.Fatalf("expected NewDialer to succeed, got: %v", err)
+			}
+			defer d.Close()
+
+			_, err = d.Dial(context.Background(), testInstanceURI)
+			if err == nil || strings.Contains(err.Error(), "universe domain") {
+				t.Fatalf("expected no universe domain mismatch, got: %v", err)
+			}
+			if got := reqs.Load(); got == 0 {
+				t.Fatal("AlloyDB Admin API requests = 0, want at least 1")
 			}
 		})
 	}
