@@ -128,16 +128,25 @@ type MetricRecorder interface {
 // should always be 60s. This value is exposed as a var to faciliate testing.
 var DefaultExportInterval = 60 * time.Second
 
-// sharedClientExporter keeps the Cloud Monitoring exporter from closing its
-// client on shutdown. The client is shared by every MetricRecorder of a
-// Dialer, so the Dialer closes it when it is closed.
-type sharedClientExporter struct {
+// nonClosingExporter wraps the Cloud Monitoring exporter so that shutting it
+// down leaves its Cloud Monitoring client open.
+//
+// The Cloud Monitoring exporter closes its client in Shutdown. A
+// MetricRecorder's Shutdown shuts down its MeterProvider, which shuts down
+// the periodic reader, which shuts down the exporter. NewMetricRecorder also
+// shuts down the exporter when initialization fails. Every MetricRecorder of
+// a Dialer shares one client, so without this wrapper the first recorder to
+// shut down would close the client for all the others. Instead, the Dialer
+// closes the client in Dialer.Close after every recorder has flushed.
+type nonClosingExporter struct {
 	sdkmetric.Exporter
 }
 
-// Shutdown does not shut down the wrapped exporter, which would close the
-// shared client.
-func (sharedClientExporter) Shutdown(ctx context.Context) error {
+// Shutdown intentionally does not call Shutdown on the wrapped exporter,
+// because that would close the shared client. Nothing is lost by skipping
+// it: the periodic reader has already exported any pending metrics by the
+// time it shuts down the exporter.
+func (nonClosingExporter) Shutdown(ctx context.Context) error {
 	return ctx.Err()
 }
 
@@ -171,7 +180,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
 		return NullMetricRecorder{}
 	}
-	exp := sharedClientExporter{cmExp}
+	exp := nonClosingExporter{cmExp}
 
 	res := resource.NewWithAttributes(monitoredResource,
 		attribute.String(ResourceType, monitoredResource),
