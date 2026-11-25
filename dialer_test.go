@@ -1498,3 +1498,23 @@ func TestDialRecordsOpenConnectionBeforeReturning(t *testing.T) {
 		t.Errorf("open connections after closing all conns = %v, want 0", got)
 	}
 }
+
+// TestDialerCloseClosesMetricClient verifies that Close closes the metric
+// client shared by the Dialer's metric recorders.
+func TestDialerCloseClosesMetricClient(t *testing.T) {
+	t.Setenv("GOOGLE_CLOUD_UNIVERSE_DOMAIN", "")
+	d, err := NewDialer(context.Background(), WithTokenSource(stubTokenSource{}))
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, got: %v", err)
+	}
+	if d.mClient == nil {
+		t.Fatal("expected a metric client")
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("Close() = %v", err)
+	}
+	// Closing an already closed client returns an error.
+	if err := d.mClient.Close(); err == nil {
+		t.Fatal("expected the metric client to be closed")
+	}
+}

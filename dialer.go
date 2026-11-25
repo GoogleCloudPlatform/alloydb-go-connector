@@ -265,6 +265,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return rsa.GenerateKey(rand.Reader, 2048)
 		})
 	if err != nil {
+		if mClient != nil {
+			_ = mClient.Close()
+		}
 		return nil, err
 	}
 	resolver := alloydb.NewURIResolver()
@@ -892,6 +895,10 @@ func (d *Dialer) Close() error {
 		_ = mr.Shutdown(ctx)
 	}
 	d.metricsMu.Unlock()
+	// Close the metric client only after every recorder has flushed.
+	if d.mClient != nil {
+		_ = d.mClient.Close()
+	}
 	return nil
 
 }

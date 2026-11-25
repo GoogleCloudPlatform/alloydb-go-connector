@@ -128,8 +128,31 @@ type MetricRecorder interface {
 // should always be 60s. This value is exposed as a var to faciliate testing.
 var DefaultExportInterval = 60 * time.Second
 
+// nonClosingExporter wraps the Cloud Monitoring exporter so that shutting it
+// down leaves its Cloud Monitoring client open.
+//
+// The Cloud Monitoring exporter closes its client in Shutdown. A
+// MetricRecorder's Shutdown shuts down its MeterProvider, which shuts down
+// the periodic reader, which shuts down the exporter. NewMetricRecorder also
+// shuts down the exporter when initialization fails. Every MetricRecorder of
+// a Dialer shares one client, so without this wrapper the first recorder to
+// shut down would close the client for all the others. Instead, the Dialer
+// closes the client in Dialer.Close after every recorder has flushed.
+type nonClosingExporter struct {
+	sdkmetric.Exporter
+}
+
+// Shutdown intentionally does not call Shutdown on the wrapped exporter,
+// because that would close the shared client. Nothing is lost by skipping
+// it: the periodic reader has already exported any pending metrics by the
+// time it shuts down the exporter.
+func (nonClosingExporter) Shutdown(ctx context.Context) error {
+	return ctx.Err()
+}
+
 // NewMetricRecorder creates a MetricRecorder. When the configuration is not
-// enabled, a null recorder is returned instead.
+// enabled, a null recorder is returned instead. The caller owns cl and must
+// close it after shutting down the MetricRecorder.
 func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitoring.MetricClient, cfg Config) MetricRecorder {
 	if !cfg.Enabled {
 		l.Debugf(ctx, "disabling built-in metrics")
@@ -152,11 +175,12 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		// Don't add any resource attributes to metrics as metric labels.
 		cmexporter.WithFilteredResourceAttributes(cmexporter.NoAttributes),
 	}
-	exp, err := cmexporter.New(eopts...)
+	cmExp, err := cmexporter.New(eopts...)
 	if err != nil {
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
 		return NullMetricRecorder{}
 	}
+	exp := nonClosingExporter{cmExp}
 
 	res := resource.NewWithAttributes(monitoredResource,
 		attribute.String(ResourceType, monitoredResource),
